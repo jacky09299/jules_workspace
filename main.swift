@@ -578,7 +578,7 @@ class FlashcardViewController: UIViewController, UIDocumentPickerDelegate {
     private func loadNextCard() {
         guard !allCards.isEmpty else { updateUIForNoFileLoaded(); return }
         navigationItem.rightBarButtonItem?.isEnabled = true
-        if reviewPool.count + learningQueue.count < reviewPoolTargetSize / 2 && learningQueue.isEmpty { fillReviewPool() }
+        if reviewPool.count < reviewPoolTargetSize / 2 { fillReviewPool() }
         if let next = pickNextCard() {
             currentCard = next; isShowingAnswer = false
             cardLabel.isHidden = false; translationLabel.isHidden = true
