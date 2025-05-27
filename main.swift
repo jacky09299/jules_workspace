@@ -52,6 +52,13 @@ struct VocabularySetMetadata: Codable {
     let progressFileUUID: UUID // UUID for the progress data file
 }
 
+// MARK: - Card Progress Data Structure
+struct CardProgressData: Codable {
+    var difficultyTitle: String
+    var consecutiveHardCount: Int
+    var nextReviewDateInterval: Double? // Represents TimeIntervalSinceReferenceDate, optional
+}
+
 // MARK: – 3. 字卡內容解析函式
 func parseFlashcards(from content: String, filenameForLogging: String) -> [Flashcard] {
     print("📄 開始解析檔案: \(filenameForLogging)")
@@ -195,14 +202,13 @@ class ProgressManager {
         }
         let progressFileURL = docDir.appendingPathComponent("\(progressFileUUID.uuidString).json")
         
-        var progressToSave: [String: [String: Any]] = [:]
+        var progressToSave: [String: CardProgressData] = [:]
         cards.forEach { card in
-            var cardData: [String: Any] = [:]
-            cardData["difficultyTitle"] = card.difficulty.title
-            cardData["consecutiveHardCount"] = card.consecutiveHardCount
-            if let nextReviewDate = card.nextReviewDate {
-                cardData["nextReviewDateInterval"] = nextReviewDate.timeIntervalSinceReferenceDate
-            }
+            let cardData = CardProgressData(
+                difficultyTitle: card.difficulty.title,
+                consecutiveHardCount: card.consecutiveHardCount,
+                nextReviewDateInterval: card.nextReviewDate?.timeIntervalSinceReferenceDate
+            )
             progressToSave[card.id] = cardData
         }
 
@@ -212,32 +218,32 @@ class ProgressManager {
         do {
             let data = try encoder.encode(progressToSave)
             try data.write(to: progressFileURL, options: [.atomicWrite])
-            print("💾 字卡進度 \(progressFileUUID.uuidString) 已儲存至: \(progressFileURL.lastPathComponent)")
+            print("💾 CardProgressData \(progressFileUUID.uuidString) 已儲存至: \(progressFileURL.lastPathComponent)")
         } catch {
-            print("🚫 儲存字卡進度時發生錯誤 for \(progressFileUUID): \(error) 至 \(progressFileURL.lastPathComponent)")
+            print("🚫 儲存 CardProgressData 時發生錯誤 for \(progressFileUUID): \(error) 至 \(progressFileURL.lastPathComponent)")
         }
     }
 
-    func loadProgress(for progressFileUUID: UUID) -> [String: [String: Any]] {
+    func loadProgress(for progressFileUUID: UUID) -> [String: CardProgressData] {
         guard let docDir = getAppDocumentsDirectory() else {
-            print("🚫 無法取得文件目錄以載入進度 for \(progressFileUUID)。")
+            print("🚫 無法取得文件目錄以載入 CardProgressData for \(progressFileUUID)。")
             return [:]
         }
         let progressFileURL = docDir.appendingPathComponent("\(progressFileUUID.uuidString).json")
 
         guard FileManager.default.fileExists(atPath: progressFileURL.path) else {
-            print("ℹ️ 字卡進度檔案不存在: \(progressFileURL.lastPathComponent) for UUID: \(progressFileUUID.uuidString)")
+            print("ℹ️ CardProgressData 檔案不存在: \(progressFileURL.lastPathComponent) for UUID: \(progressFileUUID.uuidString)")
             return [:]
         }
 
         do {
             let data = try Data(contentsOf: progressFileURL)
             let decoder = JSONDecoder()
-            let progressData = try decoder.decode([String: [String: Any]].self, from: data)
-            print("✅ 字卡進度 \(progressFileUUID.uuidString) 已從 \(progressFileURL.lastPathComponent) 載入")
+            let progressData = try decoder.decode([String: CardProgressData].self, from: data)
+            print("✅ CardProgressData \(progressFileUUID.uuidString) 已從 \(progressFileURL.lastPathComponent) 載入")
             return progressData
         } catch {
-            print("🚫 載入或解碼字卡進度時發生錯誤 for \(progressFileUUID): \(error) 從 \(progressFileURL.lastPathComponent)")
+            print("🚫 載入或解碼 CardProgressData 時發生錯誤 for \(progressFileUUID): \(error) 從 \(progressFileURL.lastPathComponent)")
             return [:]
         }
     }
@@ -696,40 +702,68 @@ class FlashcardViewController: UIViewController, UIDocumentPickerDelegate {
                 cardLabel.text = "檔案 \(filename)\n是空的或格式不正確。"; cardLabel.font = .systemFont(ofSize: 18); return
             }
             
-            var loadedProgressToApply: [String: [String: Any]] = [:]
-            let oldUserDefaultsKey = url.lastPathComponent + "flashcardFileProgress_ipad_v4_"
+            var loadedProgressToApply: [String: CardProgressData] = [:] // Type changed
+            let oldUserDefaultsKey = url.lastPathComponent + "flashcardFileProgress_ipad_v4_" // Legacy key
 
-            if let legacyData = UserDefaults.standard.dictionary(forKey: oldUserDefaultsKey) as? [String: [String: Any]], !legacyData.isEmpty {
+            if let legacyUserDefaultData = UserDefaults.standard.dictionary(forKey: oldUserDefaultsKey) as? [String: [String: Any]], !legacyUserDefaultData.isEmpty {
                 print("⏳ 進行舊進度移轉 for \(filename)...")
-                loadedProgressToApply = legacyData
+                var migratedProgress: [String: CardProgressData] = [:]
+                for (cardId, oldCardProgressDict) in legacyUserDefaultData {
+                    let difficultyTitle = oldCardProgressDict["difficultyTitle"] as? String ?? Difficulty.medium.title
+                    let consecutiveHardCount = oldCardProgressDict["consecutiveHardCount"] as? Int ?? 0
+                    let nextReviewDateInterval = oldCardProgressDict["nextReviewDateInterval"] as? Double
+                    
+                    let newCardData = CardProgressData(
+                        difficultyTitle: difficultyTitle,
+                        consecutiveHardCount: consecutiveHardCount,
+                        nextReviewDateInterval: nextReviewDateInterval
+                    )
+                    migratedProgress[cardId] = newCardData
+                }
+                loadedProgressToApply = migratedProgress
                 
-                // Temporarily map legacy data to allCards structure for saving
-                let tempCardsForSavingMigration = parsedCards.map { pCard -> Flashcard in
+                // Apply migrated progress to parsedCards to create allCards for saving
+                allCards = parsedCards.map { pCard in
                     var card = pCard
-                    if let progressData = legacyData[card.id] {
-                        if let difficultyTitle = progressData["difficultyTitle"] as? String, let diff = Difficulty(title: difficultyTitle) { card.difficulty = diff }
-                        if let hardCount = progressData["consecutiveHardCount"] as? Int { card.consecutiveHardCount = hardCount }
-                        if let reviewInterval = progressData["nextReviewDateInterval"] as? Double { card.nextReviewDate = Date(timeIntervalSinceReferenceDate: reviewInterval) }
+                    if let progressData = loadedProgressToApply[card.id] {
+                        card.difficulty = Difficulty(title: progressData.difficultyTitle) ?? .medium
+                        card.consecutiveHardCount = progressData.consecutiveHardCount
+                        if let interval = progressData.nextReviewDateInterval {
+                            card.nextReviewDate = Date(timeIntervalSinceReferenceDate: interval)
+                        } else {
+                            card.nextReviewDate = nil
+                        }
                     }
                     return card
                 }
-                ProgressManager.shared.saveProgress(for: self.currentVocabularySet!.progressFileUUID, cards: tempCardsForSavingMigration)
+                // Save the migrated data in the new format
+                ProgressManager.shared.saveProgress(for: self.currentVocabularySet!.progressFileUUID, cards: allCards)
                 UserDefaults.standard.removeObject(forKey: oldUserDefaultsKey)
-                print("✅ 舊進度已移轉並從 UserDefaults 中移除。")
+                print("✅ 舊進度已移轉並從 UserDefaults 中移除，並以新格式儲存。")
             } else {
+                // Load progress using the new CardProgressData structure
                 loadedProgressToApply = ProgressManager.shared.loadProgress(for: self.currentVocabularySet!.progressFileUUID)
+                // Apply loaded progress to parsedCards
+                allCards = parsedCards.map { pCard in
+                    var card = pCard
+                    if let progressData = loadedProgressToApply[card.id] {
+                        card.difficulty = Difficulty(title: progressData.difficultyTitle) ?? .medium
+                        card.consecutiveHardCount = progressData.consecutiveHardCount
+                        if let interval = progressData.nextReviewDateInterval {
+                            card.nextReviewDate = Date(timeIntervalSinceReferenceDate: interval)
+                        } else {
+                            card.nextReviewDate = nil
+                        }
+                    }
+                    return card
+                }
+            }
+            // If allCards hasn't been populated yet (e.g. no legacy data and no existing new progress file),
+            // it means this is a fresh set or a set without any prior progress.
+            if allCards.isEmpty && !parsedCards.isEmpty {
+                 allCards = parsedCards // Initialize allCards with parsed cards if no progress was loaded/migrated
             }
 
-            allCards = parsedCards.map { pCard in
-                var card = pCard
-                if let progressData = loadedProgressToApply[card.id] {
-                    if let difficultyTitle = progressData["difficultyTitle"] as? String, let diff = Difficulty(title: difficultyTitle) { card.difficulty = diff }
-                    if let hardCount = progressData["consecutiveHardCount"] as? Int { card.consecutiveHardCount = hardCount }
-                    if let reviewInterval = progressData["nextReviewDateInterval"] as? Double { card.nextReviewDate = Date(timeIntervalSinceReferenceDate: reviewInterval) }
-                    else { card.nextReviewDate = nil }
-                }
-                return card
-            }
 
             print("✅ 載入 \(filename) (來自 \(self.currentVocabularySet?.lastKnownPath ?? "未知路徑")), 共 \(allCards.count) 張。運行時複習狀態已重置。")
             reviewPool.removeAll(); fillReviewPool()
