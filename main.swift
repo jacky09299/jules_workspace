@@ -39,6 +39,8 @@ struct Flashcard: Identifiable {
     var lastReviewedDate: Date? = nil
     var consecutiveCorrectStreak: Int = 0
     var timesInLearningQueue: Int = 0
+    var consecutiveHardCount: Int = 0 // New property
+    var nextReviewDate: Date? = nil   // New property
 }
 
 // MARK: – 3. 字卡內容解析函式
@@ -74,28 +76,29 @@ class ProgressManager {
     }
 
     func saveProgress(for filename: String, cards: [Flashcard]) {
-        var progressToSave: [String: String] = [:]
-        cards.forEach { progressToSave[$0.id] = $0.difficulty.title }
+        var progressToSave: [String: [String: Any]] = [:] // Changed type
+        cards.forEach { card in
+            var cardData: [String: Any] = [:]
+            cardData["difficultyTitle"] = card.difficulty.title
+            cardData["consecutiveHardCount"] = card.consecutiveHardCount
+            if let nextReviewDate = card.nextReviewDate {
+                cardData["nextReviewDateInterval"] = nextReviewDate.timeIntervalSinceReferenceDate
+            }
+            // No need for else, nil means key won't be present or will be Any?, handled by load
+            progressToSave[card.id] = cardData
+        }
         userDefaults.set(progressToSave, forKey: progressKey(for: filename))
-        print("💾 進度 (Difficulty) 已儲存: \(URL(fileURLWithPath: filename).lastPathComponent)")
+        print("💾 進度 (Difficulty, HardCount, NextReviewDate) 已儲存: \(URL(fileURLWithPath: filename).lastPathComponent)")
     }
 
-    func loadProgress(for filename: String) -> [String: Difficulty] {
+    func loadProgress(for filename: String) -> [String: [String: Any]] { // Changed return type
         let key = progressKey(for: filename)
-        guard let saved = userDefaults.dictionary(forKey: key) as? [String: String] else {
-            print("ℹ️ 找不到 \(URL(fileURLWithPath: filename).lastPathComponent) 的 Difficulty 進度 (Key: \(key))")
+        guard let savedProgress = userDefaults.dictionary(forKey: key) as? [String: [String: Any]] else {
+            print("ℹ️ 找不到 \(URL(fileURLWithPath: filename).lastPathComponent) 的詳細進度 (Key: \(key))")
             return [:]
         }
-        var progress: [String: Difficulty] = [:]
-        saved.forEach { (wordId, difficultyTitle) in
-            if let diff = Difficulty(title: difficultyTitle) {
-                progress[wordId] = diff
-            } else {
-                print("⚠️ 無法解析儲存的難度 '\(difficultyTitle)' for wordId '\(wordId)'")
-            }
-        }
-        print("✅ 已載入 \(URL(fileURLWithPath: filename).lastPathComponent) 的 Difficulty 進度")
-        return progress
+        print("✅ 已載入 \(URL(fileURLWithPath: filename).lastPathComponent) 的詳細進度")
+        return savedProgress
     }
 }
 
@@ -275,7 +278,7 @@ class FlashcardViewController: UIViewController, UIDocumentPickerDelegate {
         didSet { title = currentFileDisplayName != nil ? "字卡: \(currentFileDisplayName!)" : "字卡複習" }
     }
     private var allCards: [Flashcard] = []
-    private var learningQueue: [Flashcard] = []
+    // private var learningQueue: [Flashcard] = [] // Removed
     private var reviewPool: [Flashcard] = []
     private var currentCard: Flashcard?
     private var isShowingAnswer: Bool = false
@@ -438,7 +441,7 @@ class FlashcardViewController: UIViewController, UIDocumentPickerDelegate {
         translationLabel.isHidden = true; flipButton.isHidden = true
         difficultyStack.arrangedSubviews.forEach { $0.isHidden = true }
         cardCountLabel.text = "未載入檔案"
-        allCards.removeAll(); learningQueue.removeAll(); reviewPool.removeAll(); currentCard = nil
+        allCards.removeAll(); reviewPool.removeAll(); currentCard = nil // learningQueue.removeAll() removed
         navigationItem.rightBarButtonItem?.isEnabled = false
     }
 
@@ -463,43 +466,92 @@ class FlashcardViewController: UIViewController, UIDocumentPickerDelegate {
                 cardLabel.text = "檔案 \(filename)\n是空的或格式不正確。"; cardLabel.font = .systemFont(ofSize: 18); return
             }
             currentFilenameForProgress = filename; currentFileDisplayName = displayName
-            let difficulties = ProgressManager.shared.loadProgress(for: filename)
-            allCards = parsed.map { pCard in var card = pCard; if let diff = difficulties[card.id] { card.difficulty = diff }; return card }
+            let loadedProgressMaps = ProgressManager.shared.loadProgress(for: filename) // Renamed & new type
+            allCards = parsed.map { pCard in
+                var card = pCard // pCard is a fresh card from parsing
+                if let progressData = loadedProgressMaps[card.id] { // progressData is [String: Any]
+                    // Load Difficulty
+                    if let difficultyTitle = progressData["difficultyTitle"] as? String,
+                       let diff = Difficulty(title: difficultyTitle) {
+                        card.difficulty = diff
+                    }
+                    // Load ConsecutiveHardCount
+                    if let hardCount = progressData["consecutiveHardCount"] as? Int {
+                        card.consecutiveHardCount = hardCount
+                    }
+                    // Load NextReviewDate
+                    if let reviewInterval = progressData["nextReviewDateInterval"] as? Double {
+                        card.nextReviewDate = Date(timeIntervalSinceReferenceDate: reviewInterval)
+                    } else {
+                        // If not present or not a Double, ensure it's nil (could be already by default)
+                        card.nextReviewDate = nil
+                    }
+                }
+                return card
+            }
             print("✅ 載入 \(filename)，共 \(allCards.count) 張。運行時複習狀態已重置。")
-            learningQueue.removeAll(); reviewPool.removeAll(); fillReviewPool()
+            reviewPool.removeAll(); fillReviewPool() // learningQueue.removeAll() was already removed
             navigationItem.rightBarButtonItem?.isEnabled = !allCards.isEmpty; loadNextCard()
         } catch { print("🚫 讀取檔案錯誤: \(error)"); updateUIForNoFileLoaded() }
     }
     func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { print("ℹ️ 取消選擇") }
 
     private func fillReviewPool() {
-        let currentSize = reviewPool.count + learningQueue.count
+        let currentSize = reviewPool.count // learningQueue.count removed
         if currentSize >= reviewPoolTargetSize && !reviewPool.isEmpty { return }
         let needed = reviewPoolTargetSize - currentSize; if needed <= 0 && !reviewPool.isEmpty { return }
-        print("ℹ️ 填充複習池，需 \(max(0, needed))。 RP:\(reviewPool.count) LQ:\(learningQueue.count)")
-        let existingIDs = Set(reviewPool.map{$0.id} + learningQueue.map{$0.id})
-        let candidates = allCards.filter{!existingIDs.contains($0.id)}.sorted { c1,c2 in
+        print("ℹ️ 填充複習池，需 \(max(0, needed))。 RP:\(reviewPool.count)") // LQ print removed
+        let existingIDs = Set(reviewPool.map{$0.id}) // learningQueue.map removed
+        let now = Date() // Get current date once for consistent comparison
+
+        let candidates = allCards.filter { card in
+            !existingIDs.contains(card.id) &&
+            (card.nextReviewDate == nil || card.nextReviewDate! <= now)
+        }.sorted { c1, c2 in
+            // 1. Sort by difficulty (harder first)
             if c1.difficulty.weight != c2.difficulty.weight { return c1.difficulty.weight > c2.difficulty.weight }
+            
+            // 2. Avoid graduated easy cards (unless all/most are graduated)
             let c1Grad = (c1.difficulty == .easy && c1.consecutiveCorrectStreak >= graduatedThreshold)
             let c2Grad = (c2.difficulty == .easy && c2.consecutiveCorrectStreak >= graduatedThreshold)
-            if c1Grad != c2Grad { return !c1Grad }
+            // If one is graduated and the other not, prioritize non-graduated.
+            // If both are same graduation status, this doesn't apply, move to next criteria.
+            if c1Grad != c2Grad { return !c1Grad } 
+            
+            // 3. Then by review count (less reviewed first)
             if c1.reviewCount != c2.reviewCount { return c1.reviewCount < c2.reviewCount }
-            if let d1=c1.lastReviewedDate, let d2=c2.lastReviewedDate { return d1 < d2 }
-            return c1.lastReviewedDate == nil
+            
+            // 4. Then by last reviewed date (older first, or never reviewed first)
+            // This implicitly handles cards whose nextReviewDate might have been set long ago
+            // and are now due alongside cards that were never spaced.
+            if let d1 = c1.lastReviewedDate, let d2 = c2.lastReviewedDate {
+                if d1 != d2 { return d1 < d2 } // Sort by actual review date if different
+            } else if c1.lastReviewedDate == nil && c2.lastReviewedDate != nil {
+                return true // c1 (never reviewed) comes before c2 (reviewed)
+            } else if c1.lastReviewedDate != nil && c2.lastReviewedDate == nil {
+                return false // c1 (reviewed) comes after c2 (never reviewed)
+            }
+            // If lastReviewedDates are same (or both nil), could add further tie-breakers if needed,
+            // but current structure should be fine. For example, word order for stability.
+            return c1.word.localizedCompare(c2.word) == .orderedAscending
         }
         reviewPool.append(contentsOf: candidates.prefix(max(0,needed))); reviewPool.shuffle()
         print("ℹ️ 填充後 RP: \(reviewPool.count)")
     }
 
     private func pickNextCard() -> Flashcard? {
-        if !learningQueue.isEmpty { print("🎓 從 Learning Queue 取卡"); return learningQueue.removeFirst() }
+        // if !learningQueue.isEmpty { print("🎓 從 Learning Queue 取卡"); return learningQueue.removeFirst() } // Removed
         if reviewPool.isEmpty { fillReviewPool() }
         guard !reviewPool.isEmpty else {
             var didReset = false; print("ℹ️ Review Pool 為空，嘗試重置已畢業卡片...")
             for i in 0..<allCards.count {
                 if allCards[i].difficulty == .easy && allCards[i].consecutiveCorrectStreak >= graduatedThreshold {
-                    allCards[i].consecutiveCorrectStreak = 0; allCards[i].lastReviewedDate = nil; didReset = true
-                    print("🔄 重置卡片: \(allCards[i].word)")
+                    allCards[i].consecutiveCorrectStreak = 0
+                    allCards[i].lastReviewedDate = nil
+                    allCards[i].nextReviewDate = nil   // Added
+                    allCards[i].consecutiveHardCount = 0 // Added
+                    didReset = true
+                    print("🔄 重置卡片 (fully): \(allCards[i].word)")
                 }
             }
             if didReset {
@@ -534,7 +586,7 @@ class FlashcardViewController: UIViewController, UIDocumentPickerDelegate {
             flipButton.setTitle("顯示答案", for: .normal); flipButton.isHidden = false
             difficultyStack.arrangedSubviews.forEach { $0.isHidden = true }
             let graduatedCount = allCards.filter{ $0.difficulty == .easy && $0.consecutiveCorrectStreak >= graduatedThreshold }.count
-            cardCountLabel.text = "學習中:\(learningQueue.count) | 待複習:\(reviewPool.count) | 已掌握:\(graduatedCount)"
+            cardCountLabel.text = "待複習:\(reviewPool.count) | 已掌握:\(graduatedCount)" // learningQueue.count removed
         } else {
             cardLabel.text = "🎉 恭喜！\n所有卡片已達學習目標。"; cardLabel.font = .systemFont(ofSize: 18)
             translationLabel.isHidden = true; flipButton.isHidden = true
@@ -562,20 +614,33 @@ class FlashcardViewController: UIViewController, UIDocumentPickerDelegate {
               let newDiff = Difficulty.allCases.first(where: {$0.weight == sender.tag}) else { return }
         var card = allCards[cardIdx]; let oldDiff = card.difficulty
         card.difficulty = newDiff; card.reviewCount += 1; card.lastReviewedDate = Date()
-        let originalLQCount = learningQueue.count
-        learningQueue.removeAll(where: {$0.id == card.id})
-        if originalLQCount > learningQueue.count { print("ℹ️ \(card.word) 從 LQ 移除，因手動評分。") }
-        card.timesInLearningQueue = 0
+        // let originalLQCount = learningQueue.count // Removed
+        // learningQueue.removeAll(where: {$0.id == card.id}) // Removed
+        // if originalLQCount > learningQueue.count { print("ℹ️ \(card.word) 從 LQ 移除，因手動評分。") } // Removed
+        // card.timesInLearningQueue = 0 // Removed as its utility diminishes
+
         switch newDiff {
-        case .hard: card.consecutiveCorrectStreak = 0
-            for _ in 0..<learningRepetitions { var lc = card; learningQueue.append(lc) }
-            if learningRepetitions > 0 { learningQueue.shuffle() }
-            print("🔴 \(card.word) 標為困難，加入 LQ (\(learningRepetitions)次)。LQ size: \(learningQueue.count)")
-        case .medium: card.consecutiveCorrectStreak = (oldDiff == .easy || (oldDiff == .medium && newDiff == .medium)) ? card.consecutiveCorrectStreak + 1 : 1
+        case .hard:
+            card.consecutiveCorrectStreak = 0
+            card.consecutiveHardCount += 1
+            let intervalInDays = pow(2.0, Double(card.consecutiveHardCount)) // First interval: 2.0^1 = 2 days
+            card.nextReviewDate = Calendar.current.date(byAdding: .day, value: Int(intervalInDays), to: Date())
+            print("🔴 \(card.word) 標為困難. Consecutive hard: \(card.consecutiveHardCount). Next review in approx. \(Int(intervalInDays)) days.")
+        case .medium:
+            card.consecutiveHardCount = 0
+            card.nextReviewDate = nil
+            card.consecutiveCorrectStreak = (oldDiff == .easy || (oldDiff == .medium && newDiff == .medium)) ? card.consecutiveCorrectStreak + 1 : 1
             print("🟡 \(card.word) 標為中等，Streak:\(card.consecutiveCorrectStreak)")
-        case .easy: card.consecutiveCorrectStreak += 1
+        case .easy:
+            card.consecutiveHardCount = 0
+            card.nextReviewDate = nil
+            card.consecutiveCorrectStreak += 1
             print("🟢 \(card.word) 標為簡單，Streak:\(card.consecutiveCorrectStreak)")
-            if card.consecutiveCorrectStreak >= graduatedThreshold { print("🎉 \(card.word) 達到簡單畢業標準!") }
+            if card.consecutiveCorrectStreak >= graduatedThreshold {
+                print("🎉 \(card.word) 達到簡單畢業標準!")
+                // Optionally set a very distant nextReviewDate for graduated cards, e.g.:
+                // card.nextReviewDate = Calendar.current.date(byAdding: .year, value: 100, to: Date())
+            }
         }
         allCards[cardIdx] = card
         ProgressManager.shared.saveProgress(for: filename, cards: allCards)
