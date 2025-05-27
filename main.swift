@@ -502,8 +502,21 @@ class FlashcardViewController: UIViewController, UIDocumentPickerDelegate {
                     print("🔄 重置卡片: \(allCards[i].word)")
                 }
             }
-            if didReset { fillReviewPool(); if reviewPool.isEmpty { print("ℹ️ 重置後 Review Pool 仍為空"); return nil }
-            } else { print("ℹ️ Review Pool 為空且無卡片可重置"); return nil }
+            if didReset {
+                fillReviewPool()
+                if reviewPool.isEmpty {
+                    print("ℹ️ 重置後 Review Pool 仍為空")
+                    return nil
+                } else {
+                    // reviewPool is now populated. However, to prevent the guard from falling through,
+                    // this path must also exit the scope.
+                    print("ℹ️ Review Pool was refilled. Exiting guard scope as required for Swift 'guard' semantics. Card will be picked on a subsequent call.")
+                    return nil
+                }
+            } else {
+                print("ℹ️ Review Pool 為空且無卡片可重置")
+                return nil // Ensure this path also returns
+            }
         }
         let card = reviewPool.remove(at: Int.random(in: 0..<reviewPool.count))
         print("📚 從 Review Pool 取卡: \(card.word)")
