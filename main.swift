@@ -43,6 +43,15 @@ struct Flashcard: Identifiable {
     var nextReviewDate: Date? = nil   // New property
 }
 
+// MARK: – New VocabularySetMetadata Structure
+struct VocabularySetMetadata: Codable {
+    let id: UUID // Unique ID for this metadata entry
+    var bookmarkData: Data? // Security-scoped bookmark for the .txt file
+    var lastKnownDisplayName: String
+    var lastKnownPath: String // Store the path as a fallback/debug info
+    let progressFileUUID: UUID // UUID for the progress data file
+}
+
 // MARK: – 3. 字卡內容解析函式
 func parseFlashcards(from content: String, filenameForLogging: String) -> [Flashcard] {
     print("📄 開始解析檔案: \(filenameForLogging)")
@@ -68,15 +77,111 @@ func parseFlashcards(from content: String, filenameForLogging: String) -> [Flash
 // MARK: – Progress Manager
 class ProgressManager {
     static let shared = ProgressManager()
-    private let userDefaults = UserDefaults.standard
-    private let progressPrefix = "flashcardFileProgress_ipad_v4_"
+    var vocabularySets: [VocabularySetMetadata] = []
+    private let manifestFilename = "vocabulary_sets_manifest.json"
 
-    private func progressKey(for filename: String) -> String {
-        return URL(fileURLWithPath: filename).lastPathComponent + progressPrefix
+    private init() { // Made private to control initialization
+        if isCloudKitEnabled() {
+            print("☁️ iCloud is available.")
+        } else {
+            print("⚠️ iCloud is unavailable or not configured.")
+        }
+        loadManifest()
+    }
+    
+    func isCloudKitEnabled() -> Bool {
+        return FileManager.default.ubiquityIdentityToken != nil
+    }
+    
+    private func getAppDocumentsDirectory() -> URL? {
+        do {
+            return try FileManager.default.url(for: .documentDirectory,
+                                               in: .userDomainMask,
+                                               appropriateFor: nil,
+                                               create: true)
+        } catch {
+            print("🚫 無法取得 App 文件目錄: \(error)")
+            return nil
+        }
     }
 
-    func saveProgress(for filename: String, cards: [Flashcard]) {
-        var progressToSave: [String: [String: Any]] = [:] // Changed type
+    func loadManifest() {
+        guard let docDir = getAppDocumentsDirectory() else {
+            print("🚫 無法取得文件目錄以載入資訊清單。")
+            return
+        }
+        let manifestURL = docDir.appendingPathComponent(manifestFilename)
+
+        guard FileManager.default.fileExists(atPath: manifestURL.path) else {
+            print("ℹ️ 資訊清單檔案不存在於: \(manifestURL.path)。這對於首次執行是正常的。")
+            return
+        }
+
+        do {
+            let data = try Data(contentsOf: manifestURL)
+            let decoder = JSONDecoder()
+            self.vocabularySets = try decoder.decode([VocabularySetMetadata].self, from: data)
+            print("✅ 資訊清單已載入，共 \(vocabularySets.count) 個項目，從: \(manifestURL.path)")
+        } catch {
+            print("🚫 載入或解碼資訊清單時發生錯誤: \(error) 從路徑: \(manifestURL.path)")
+            // Consider deleting the corrupt manifest or attempting a backup restore if errors persist
+        }
+    }
+
+    func saveManifest() {
+        guard let docDir = getAppDocumentsDirectory() else {
+            print("🚫 無法取得文件目錄以儲存資訊清單。")
+            return
+        }
+        let manifestURL = docDir.appendingPathComponent(manifestFilename)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .prettyPrinted
+
+        do {
+            let data = try encoder.encode(self.vocabularySets)
+            try data.write(to: manifestURL, options: [.atomicWrite])
+            print("💾 資訊清單已儲存至: \(manifestURL.path)")
+        } catch {
+            print("🚫 儲存資訊清單時發生錯誤: \(error) 到路徑: \(manifestURL.path)")
+        }
+    }
+
+    func resolveBookmark(data: Data) -> URL? {
+        var isStale = false
+        do {
+            let url = try URL(resolvingBookmarkData: data,
+                              options: .withSecurityScope,
+                              relativeTo: nil,
+                              bookmarkDataIsStale: &isStale)
+
+            if isStale {
+                print("⚠️ 書籤已過期，需要重新建立。 URL: \(String(describing: url))")
+                // Attempt to create a new bookmark if possible, or notify user.
+                // For now, just returning nil as per original plan for stale.
+                return nil
+            }
+
+            if url.startAccessingSecurityScopedResource() {
+                // Caller is responsible for calling stopAccessingSecurityScopedResource()
+                return url
+            } else {
+                print("🚫 無法開始安全範圍資源存取。 URL: \(url)")
+                return nil
+            }
+        } catch {
+            print("🚫 解析書籤時發生錯誤: \(error)")
+            return nil
+        }
+    }
+
+    func saveProgress(for progressFileUUID: UUID, cards: [Flashcard]) {
+        guard let docDir = getAppDocumentsDirectory() else {
+            print("🚫 無法取得文件目錄以儲存進度 for \(progressFileUUID)。")
+            return
+        }
+        let progressFileURL = docDir.appendingPathComponent("\(progressFileUUID.uuidString).json")
+        
+        var progressToSave: [String: [String: Any]] = [:]
         cards.forEach { card in
             var cardData: [String: Any] = [:]
             cardData["difficultyTitle"] = card.difficulty.title
@@ -84,21 +189,43 @@ class ProgressManager {
             if let nextReviewDate = card.nextReviewDate {
                 cardData["nextReviewDateInterval"] = nextReviewDate.timeIntervalSinceReferenceDate
             }
-            // No need for else, nil means key won't be present or will be Any?, handled by load
             progressToSave[card.id] = cardData
         }
-        userDefaults.set(progressToSave, forKey: progressKey(for: filename))
-        print("💾 進度 (Difficulty, HardCount, NextReviewDate) 已儲存: \(URL(fileURLWithPath: filename).lastPathComponent)")
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .prettyPrinted
+
+        do {
+            let data = try encoder.encode(progressToSave)
+            try data.write(to: progressFileURL, options: [.atomicWrite])
+            print("💾 字卡進度 \(progressFileUUID.uuidString) 已儲存至: \(progressFileURL.lastPathComponent)")
+        } catch {
+            print("🚫 儲存字卡進度時發生錯誤 for \(progressFileUUID): \(error) 至 \(progressFileURL.lastPathComponent)")
+        }
     }
 
-    func loadProgress(for filename: String) -> [String: [String: Any]] { // Changed return type
-        let key = progressKey(for: filename)
-        guard let savedProgress = userDefaults.dictionary(forKey: key) as? [String: [String: Any]] else {
-            print("ℹ️ 找不到 \(URL(fileURLWithPath: filename).lastPathComponent) 的詳細進度 (Key: \(key))")
+    func loadProgress(for progressFileUUID: UUID) -> [String: [String: Any]] {
+        guard let docDir = getAppDocumentsDirectory() else {
+            print("🚫 無法取得文件目錄以載入進度 for \(progressFileUUID)。")
             return [:]
         }
-        print("✅ 已載入 \(URL(fileURLWithPath: filename).lastPathComponent) 的詳細進度")
-        return savedProgress
+        let progressFileURL = docDir.appendingPathComponent("\(progressFileUUID.uuidString).json")
+
+        guard FileManager.default.fileExists(atPath: progressFileURL.path) else {
+            print("ℹ️ 字卡進度檔案不存在: \(progressFileURL.lastPathComponent) for UUID: \(progressFileUUID.uuidString)")
+            return [:]
+        }
+
+        do {
+            let data = try Data(contentsOf: progressFileURL)
+            let decoder = JSONDecoder()
+            let progressData = try decoder.decode([String: [String: Any]].self, from: data)
+            print("✅ 字卡進度 \(progressFileUUID.uuidString) 已從 \(progressFileURL.lastPathComponent) 載入")
+            return progressData
+        } catch {
+            print("🚫 載入或解碼字卡進度時發生錯誤 for \(progressFileUUID): \(error) 從 \(progressFileURL.lastPathComponent)")
+            return [:]
+        }
     }
 }
 
@@ -273,9 +400,9 @@ class ReviewAnalysisViewController: UIViewController, UITableViewDataSource, UIT
 // MARK: – 4. Flashcard ViewController
 class FlashcardViewController: UIViewController, UIDocumentPickerDelegate {
 
-    private var currentFilenameForProgress: String?
-    private var currentFileDisplayName: String? {
-        didSet { title = currentFileDisplayName != nil ? "字卡: \(currentFileDisplayName!)" : "字卡複習" }
+    private var currentVocabularySet: VocabularySetMetadata?
+    private var currentFileDisplayName: String? { // This property might become redundant if currentVocabularySet is always the source of truth
+        didSet { title = currentVocabularySet != nil ? "字卡: \(currentVocabularySet!.lastKnownDisplayName)" : "字卡複習" }
     }
     private var allCards: [Flashcard] = []
     // private var learningQueue: [Flashcard] = [] // Removed
@@ -441,7 +568,9 @@ class FlashcardViewController: UIViewController, UIDocumentPickerDelegate {
         translationLabel.isHidden = true; flipButton.isHidden = true
         difficultyStack.arrangedSubviews.forEach { $0.isHidden = true }
         cardCountLabel.text = "未載入檔案"
-        allCards.removeAll(); reviewPool.removeAll(); currentCard = nil // learningQueue.removeAll() removed
+        allCards.removeAll(); reviewPool.removeAll(); currentCard = nil
+        currentVocabularySet = nil // Ensure currentVocabularySet is reset
+        currentFileDisplayName = nil // Also reset display name
         navigationItem.rightBarButtonItem?.isEnabled = false
     }
 
@@ -455,44 +584,147 @@ class FlashcardViewController: UIViewController, UIDocumentPickerDelegate {
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
         guard let url = urls.first else { return }
         let access = url.startAccessingSecurityScopedResource(); defer { if access { url.stopAccessingSecurityScopedResource() } }
+
         do {
+            // Save progress for the previous file if one was loaded
+            if let previousSet = currentVocabularySet, !allCards.isEmpty {
+                ProgressManager.shared.saveProgress(for: previousSet.progressFileUUID, cards: allCards)
+                print("💾 先前字卡集 \(previousSet.lastKnownDisplayName) 的進度已儲存。")
+            }
+
+            let filename = url.lastPathComponent
+            let displayName = url.deletingPathExtension().lastPathComponent
+            var VSM_for_picked_file: VocabularySetMetadata? = nil
+
+            // Find existing VocabularySetMetadata by resolving bookmarks
+            for i in 0..<ProgressManager.shared.vocabularySets.count { // Use index for potential modification
+                var set = ProgressManager.shared.vocabularySets[i]
+                if let bookmarkData = set.bookmarkData {
+                    if let resolvedURL = ProgressManager.shared.resolveBookmark(data: bookmarkData) {
+                        // Important: stopAccessingSecurityScopedResource for the resolvedURL from bookmark
+                        // This is crucial because resolveBookmark starts access.
+                        defer { resolvedURL.stopAccessingSecurityScopedResource() }
+                        
+                        if resolvedURL == url {
+                            VSM_for_picked_file = set
+                            print("ℹ️ 透過書籤找到現有字卡集: \(set.lastKnownDisplayName)")
+                            // Check if path or display name needs update (e.g., file moved)
+                            var manifestNeedsSave = false
+                            if set.lastKnownPath != url.path {
+                                print("⚠️ 路徑已變更: \(set.lastKnownPath) -> \(url.path)")
+                                set.lastKnownPath = url.path
+                                manifestNeedsSave = true
+                            }
+                            if set.lastKnownDisplayName != displayName {
+                                print("⚠️ 顯示名稱已變更: \(set.lastKnownDisplayName) -> \(displayName)")
+                                set.lastKnownDisplayName = displayName
+                                manifestNeedsSave = true
+                            }
+                            // Re-create bookmark data as it might have changed or the old one was stale
+                            do {
+                                let newBookmarkData = try url.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil)
+                                if set.bookmarkData != newBookmarkData { // Avoid unnecessary saves if data is identical
+                                    print("🔄 更新書籤資料 for \(displayName)")
+                                    set.bookmarkData = newBookmarkData
+                                    manifestNeedsSave = true
+                                }
+                            } catch {
+                                print("🚫 無法為 \(displayName) 建立新書籤: \(error)")
+                                // Potentially mark this set as needing attention or remove bookmark
+                            }
+
+                            if manifestNeedsSave {
+                                ProgressManager.shared.vocabularySets[i] = set // Update in array
+                                ProgressManager.shared.saveManifest()
+                            }
+                            break
+                        }
+                    } else {
+                        print("⚠️ 無法解析 \(set.lastKnownDisplayName) 的書籤。可能需要重新選擇檔案。")
+                        // Optionally, remove the stale bookmarkData here or mark the set
+                        // For now, we'll let it be, user might re-pick and update it.
+                    }
+                }
+            }
+
+            if VSM_for_picked_file == nil {
+                print("ℹ️ 未找到現有字卡集，將為 \(displayName) 建立新項目。")
+                var newBookmarkData: Data? = nil
+                do {
+                    newBookmarkData = try url.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil)
+                } catch {
+                    print("🚫 為 \(displayName) 建立書籤時發生錯誤: \(error)")
+                    // Proceed without bookmark, or show an error to the user
+                }
+                let newSet = VocabularySetMetadata(id: UUID(),
+                                                   bookmarkData: newBookmarkData,
+                                                   lastKnownDisplayName: displayName,
+                                                   lastKnownPath: url.path,
+                                                   progressFileUUID: UUID())
+                ProgressManager.shared.vocabularySets.append(newSet)
+                ProgressManager.shared.saveManifest()
+                VSM_for_picked_file = newSet
+            }
+
+            self.currentVocabularySet = VSM_for_picked_file
+            self.currentFileDisplayName = self.currentVocabularySet?.lastKnownDisplayName // Update display name
+
+            // Parse Flashcards
             let content = try String(contentsOf: url, encoding: .utf8)
-            let filename = url.lastPathComponent; let displayName = url.deletingPathExtension().lastPathComponent
-            if let oldFile = currentFilenameForProgress, !allCards.isEmpty { ProgressManager.shared.saveProgress(for: oldFile, cards: allCards) }
             cardLabel.text = ""; cardLabel.font = .systemFont(ofSize: 48, weight: .bold); translationLabel.isHidden = true
-            let parsed = parseFlashcards(from: content, filenameForLogging: filename)
-            if parsed.isEmpty {
-                updateUIForNoFileLoaded(); currentFilenameForProgress = filename; currentFileDisplayName = displayName
+            let parsedCards = parseFlashcards(from: content, filenameForLogging: filename)
+
+            if parsedCards.isEmpty {
+                updateUIForNoFileLoaded() // This will set currentVocabularySet to nil
+                // Explicitly set currentVocabularySet for this empty file for clarity, though updateUIForNoFileLoaded handles it.
+                // self.currentVocabularySet = VSM_for_picked_file
+                // self.currentFileDisplayName = self.currentVocabularySet?.lastKnownDisplayName
                 cardLabel.text = "檔案 \(filename)\n是空的或格式不正確。"; cardLabel.font = .systemFont(ofSize: 18); return
             }
-            currentFilenameForProgress = filename; currentFileDisplayName = displayName
-            let loadedProgressMaps = ProgressManager.shared.loadProgress(for: filename) // Renamed & new type
-            allCards = parsed.map { pCard in
-                var card = pCard // pCard is a fresh card from parsing
-                if let progressData = loadedProgressMaps[card.id] { // progressData is [String: Any]
-                    // Load Difficulty
-                    if let difficultyTitle = progressData["difficultyTitle"] as? String,
-                       let diff = Difficulty(title: difficultyTitle) {
-                        card.difficulty = diff
+            
+            var loadedProgressToApply: [String: [String: Any]] = [:]
+            let oldUserDefaultsKey = url.lastPathComponent + "flashcardFileProgress_ipad_v4_"
+
+            if let legacyData = UserDefaults.standard.dictionary(forKey: oldUserDefaultsKey) as? [String: [String: Any]], !legacyData.isEmpty {
+                print("⏳ 進行舊進度移轉 for \(filename)...")
+                loadedProgressToApply = legacyData
+                
+                // Temporarily map legacy data to allCards structure for saving
+                let tempCardsForSavingMigration = parsedCards.map { pCard -> Flashcard in
+                    var card = pCard
+                    if let progressData = legacyData[card.id] {
+                        if let difficultyTitle = progressData["difficultyTitle"] as? String, let diff = Difficulty(title: difficultyTitle) { card.difficulty = diff }
+                        if let hardCount = progressData["consecutiveHardCount"] as? Int { card.consecutiveHardCount = hardCount }
+                        if let reviewInterval = progressData["nextReviewDateInterval"] as? Double { card.nextReviewDate = Date(timeIntervalSinceReferenceDate: reviewInterval) }
                     }
-                    // Load ConsecutiveHardCount
-                    if let hardCount = progressData["consecutiveHardCount"] as? Int {
-                        card.consecutiveHardCount = hardCount
-                    }
-                    // Load NextReviewDate
-                    if let reviewInterval = progressData["nextReviewDateInterval"] as? Double {
-                        card.nextReviewDate = Date(timeIntervalSinceReferenceDate: reviewInterval)
-                    } else {
-                        // If not present or not a Double, ensure it's nil (could be already by default)
-                        card.nextReviewDate = nil
-                    }
+                    return card
+                }
+                ProgressManager.shared.saveProgress(for: self.currentVocabularySet!.progressFileUUID, cards: tempCardsForSavingMigration)
+                UserDefaults.standard.removeObject(forKey: oldUserDefaultsKey)
+                print("✅ 舊進度已移轉並從 UserDefaults 中移除。")
+            } else {
+                loadedProgressToApply = ProgressManager.shared.loadProgress(for: self.currentVocabularySet!.progressFileUUID)
+            }
+
+            allCards = parsedCards.map { pCard in
+                var card = pCard
+                if let progressData = loadedProgressToApply[card.id] {
+                    if let difficultyTitle = progressData["difficultyTitle"] as? String, let diff = Difficulty(title: difficultyTitle) { card.difficulty = diff }
+                    if let hardCount = progressData["consecutiveHardCount"] as? Int { card.consecutiveHardCount = hardCount }
+                    if let reviewInterval = progressData["nextReviewDateInterval"] as? Double { card.nextReviewDate = Date(timeIntervalSinceReferenceDate: reviewInterval) }
+                    else { card.nextReviewDate = nil }
                 }
                 return card
             }
-            print("✅ 載入 \(filename)，共 \(allCards.count) 張。運行時複習狀態已重置。")
-            reviewPool.removeAll(); fillReviewPool() // learningQueue.removeAll() was already removed
+
+            print("✅ 載入 \(filename) (來自 \(self.currentVocabularySet?.lastKnownPath ?? "未知路徑")), 共 \(allCards.count) 張。運行時複習狀態已重置。")
+            reviewPool.removeAll(); fillReviewPool()
             navigationItem.rightBarButtonItem?.isEnabled = !allCards.isEmpty; loadNextCard()
-        } catch { print("🚫 讀取檔案錯誤: \(error)"); updateUIForNoFileLoaded() }
+
+        } catch {
+            print("🚫 讀取檔案或處理字卡集時發生錯誤: \(error)")
+            updateUIForNoFileLoaded()
+        }
     }
     func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { print("ℹ️ 取消選擇") }
 
@@ -610,7 +842,7 @@ class FlashcardViewController: UIViewController, UIDocumentPickerDelegate {
 
     @objc private func difficultyTapped(_ sender: UIButton) {
         guard let cardId = currentCard?.id, let cardIdx = allCards.firstIndex(where: {$0.id == cardId}),
-              let filename = currentFilenameForProgress,
+              let vocSet = currentVocabularySet, // Use currentVocabularySet
               let newDiff = Difficulty.allCases.first(where: {$0.weight == sender.tag}) else { return }
         var card = allCards[cardIdx]; let oldDiff = card.difficulty
         card.difficulty = newDiff; card.reviewCount += 1; card.lastReviewedDate = Date()
@@ -643,7 +875,7 @@ class FlashcardViewController: UIViewController, UIDocumentPickerDelegate {
             }
         }
         allCards[cardIdx] = card
-        ProgressManager.shared.saveProgress(for: filename, cards: allCards)
+        ProgressManager.shared.saveProgress(for: vocSet.progressFileUUID, cards: allCards) // Use vocSet.progressFileUUID
         UIView.animate(withDuration:0.1, animations:{sender.transform=CGAffineTransform(scaleX:1.1,y:1.1);sender.alpha=0.7})
         { _ in UIView.animate(withDuration:0.2){sender.transform = .identity; sender.alpha=1.0}}
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.loadNextCard() }
