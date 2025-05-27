@@ -149,8 +149,9 @@ class ProgressManager {
     func resolveBookmark(data: Data) -> URL? {
         var isStale = false
         do {
+            // Options changed from .withSecurityScope to []
             let url = try URL(resolvingBookmarkData: data,
-                              options: .withSecurityScope,
+                              options: [], // <--- MODIFIED HERE
                               relativeTo: nil,
                               bookmarkDataIsStale: &isStale)
 
@@ -158,9 +159,22 @@ class ProgressManager {
                 print("⚠️ 書籤已過期，需要重新建立。 URL: \(String(describing: url))")
                 // Attempt to create a new bookmark if possible, or notify user.
                 // For now, just returning nil as per original plan for stale.
+                // If bookmark is stale, it's possible it can't be resolved without .withSecurityScope,
+                // but the primary goal here is to attempt resolution with [], then let the
+                // startAccessingSecurityScopedResource() call handle the security scope.
+                // If it's stale, it's likely the startAccessing... will fail if the resource moved
+                // or permissions changed significantly.
+                
+                // Re-create the bookmark data. This requires security scope.
+                // We need to re-obtain the original URL, which we don't have directly if stale.
+                // This part of the logic might need reconsideration if stale bookmarks become problematic.
+                // For now, if it's stale, we will return nil as before. The calling code in
+                // documentPicker will then attempt to re-establish a bookmark if the user re-picks the file.
                 return nil
             }
 
+            // The original logic for starting security scope access remains.
+            // FlashcardViewController expects this to be called here.
             if url.startAccessingSecurityScopedResource() {
                 // Caller is responsible for calling stopAccessingSecurityScopedResource()
                 return url
