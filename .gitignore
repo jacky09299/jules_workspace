@@ -1,0 +1,19 @@
+
+# 忽略 Python 編譯檔案
+*.pyc
+__pycache__/
+
+# 忽略 JSON 檔案
+*.json
+
+# 忽略虛擬環境
+venv/
+env/
+
+# 忽略作業系統檔案
+.DS_Store
+Thumbs.db
+
+# 忽略 IDE 檔案
+.vscode/
+.idea/
