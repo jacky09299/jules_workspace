@@ -5,6 +5,8 @@ import importlib.util
 import json
 from shared_state import SharedState # Assuming shared_state.py is in the same directory
 import logging # Added for logging level constants
+import threading
+import time
 
 # Refined Module base class
 class Module:
@@ -101,47 +103,175 @@ class ModularGUI:
 
         # Context Menu
         self.context_menu = tk.Menu(self.root, tearoff=0)
-        self.main_pane.bind("<Button-3>", self.show_context_menu) # Button-3 for right-click on Windows/Linux
-        # For macOS, Button-2 might be more standard for context menus if Button-3 is not configured.
-        # Or use '<Control-Button-1>' for macOS if desired.
+        self.main_pane.bind("<Button-3>", self.show_context_menu)
 
-        self.discover_modules()
-        self.load_layout_config() # Load layout, which might call setup_default_layout as fallback
+        # Module Polling for dynamic discovery at runtime
+        self.known_module_files = set()     # Set of filepaths for modules already processed by initial scan or poller.
+        self.polling_interval = 3           # Interval in seconds for checking the modules directory.
+        self.stop_polling_event = threading.Event() # Event to signal the polling thread to stop.
+
+        self.discover_modules() # Initial discovery of modules at startup.
+        self.load_layout_config() # Load layout or use default after initial discovery.
+
+        # Start the background thread for polling the modules directory.
+        # It's a daemon thread so it exits when the main program exits.
+        self.module_poller_thread = threading.Thread(target=self._module_polling_thread_target, daemon=True)
+        self.module_poller_thread.start()
+        # Logging of thread start is now inside _module_polling_thread_target.
 
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
+    def _discover_single_module_file(self, filename, filepath):
+        """
+        Attempts to discover a single module from a given file.
+
+        Loads the Python file specified by `filepath`, looks for a class that
+        inherits from `Module` (but is not `Module` itself), and if found,
+        adds it to `self.available_module_classes` keyed by `module_name`.
+
+        Args:
+            filename (str): The name of the Python file (e.g., "clock.py").
+            filepath (str): The full path to the Python file.
+
+        Returns:
+            bool: True if a new module class was successfully discovered and registered, False otherwise.
+        """
+        module_name = filename[:-3]
+
+        # Avoid re-registering if a class for this module_name is already known.
+        # This doesn't prevent reloading if file content changes (hot-reloading not implemented),
+        # but primarily handles the case where the poller might see a file multiple times
+        # or if initial scan and poller overlap.
+        if module_name in self.available_module_classes:
+             # self.shared_state.log(f"Module '{module_name}' class already available. Skipping re-discovery.", level=logging.DEBUG)
+             return True # Considered "handled" as it's already known.
+
+        try:
+            self.shared_state.log(f"Attempting to discover module from file: {filepath}", level=logging.DEBUG)
+            spec = importlib.util.spec_from_file_location(module_name, filepath)
+
+            if spec is None or spec.loader is None:
+                self.shared_state.log(f"Could not get valid spec or loader for module {module_name} from {filepath}", level=logging.WARNING)
+                return False
+
+            module_lib = importlib.util.module_from_spec(spec)
+            # Add to sys.modules before exec_module if modules might import themselves or each other by name.
+            # Note: For simplicity, if modules are in subdirectories, their names in sys.modules might need qualification.
+            # sys.modules[module_name] = module_lib
+
+            spec.loader.exec_module(module_lib) # Execute the module's code
+
+            module_class_found = None
+            # Iterate through the module's attributes to find a class derived from our base `Module`.
+            for item_name in dir(module_lib):
+                item = getattr(module_lib, item_name)
+                if isinstance(item, type) and issubclass(item, Module) and item is not Module:
+                    module_class_found = item
+                    break # Found the first suitable class
+
+            if module_class_found:
+                # Store the discovered class, making it available for instantiation.
+                self.available_module_classes[module_name] = module_class_found
+                self.shared_state.log(f"Discovered module class {module_class_found.__name__} in {filename} (module name: '{module_name}')")
+                return True
+            else:
+                self.shared_state.log(f"No suitable Module class found in {filename}", level=logging.WARNING)
+                return False
+        except ImportError as e:
+            self.shared_state.log(f"ImportError when discovering module from {filename}: {e}", level=logging.ERROR)
+            return False
+        except Exception as e: # Catch any other errors during module loading.
+            self.shared_state.log(f"Failed to discover module from {filename} due to an unexpected error: {e}", level=logging.ERROR)
+            return False
+
     def discover_modules(self):
-        self.shared_state.log("Discovering available modules...")
-        self.available_module_classes.clear()
+        """
+        Performs an initial scan of the modules directory (`self.modules_dir`)
+        at application startup to find and register available module classes.
+        """
+        self.shared_state.log("Initial module discovery...")
+        # Cleared here to ensure a fresh list at startup or if this method is called for a full refresh.
+        # self.available_module_classes.clear() # This is now cleared by __init__ before first call, or by poller if needed.
+        # self.known_module_files.clear() # Also cleared by __init__.
+
         if not os.path.exists(self.modules_dir):
             self.shared_state.log(f"Modules directory '{self.modules_dir}' not found.", level=logging.WARNING)
             return
 
+        # Iterate over files in the modules directory.
         for filename in os.listdir(self.modules_dir):
-            if filename.endswith(".py") and not filename.startswith("_"):
-                module_name = filename[:-3]
-                try:
-                    filepath = os.path.join(self.modules_dir, filename)
-                    spec = importlib.util.spec_from_file_location(module_name, filepath)
-                    module_lib = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(module_lib)
+            if filename.endswith(".py") and not filename.startswith("_"): # Standard module file criteria
+                filepath = os.path.join(self.modules_dir, filename)
+                # Attempt to discover and register the module.
+                if self._discover_single_module_file(filename, filepath):
+                    self.known_module_files.add(filepath) # Add to set of known files after successful initial discovery.
 
-                    module_class_name = None
-                    for item_name in dir(module_lib):
-                        item = getattr(module_lib, item_name)
-                        if isinstance(item, type) and issubclass(item, Module) and item is not Module:
-                            module_class_name = item_name
-                            break
+        self.shared_state.log(f"Initial module discovery complete. Available modules: {list(self.available_module_classes.keys())}")
 
-                    if module_class_name:
-                        ModuleClass = getattr(module_lib, module_class_name)
-                        self.available_module_classes[module_name] = ModuleClass
-                        self.shared_state.log(f"Discovered module class {ModuleClass.__name__} in {filename}")
-                    else:
-                        self.shared_state.log(f"No suitable Module class found in {filename}", level=logging.WARNING)
-                except Exception as e:
-                    self.shared_state.log(f"Failed to discover module from {filename}: {e}", level=logging.ERROR)
-        self.shared_state.log(f"Module discovery complete. Available: {list(self.available_module_classes.keys())}")
+    def _module_polling_thread_target(self):
+        """
+        Target function for the background thread that polls the modules directory
+        for new module files.
+        """
+        self.shared_state.log("Module polling thread started.", level=logging.INFO)
+        while not self.stop_polling_event.is_set():
+            try:
+                if not os.path.exists(self.modules_dir):
+                    # If modules directory disappears, log and wait.
+                    self.shared_state.log(f"Modules directory '{self.modules_dir}' not found during polling.", level=logging.WARNING)
+                    if self.stop_polling_event.is_set(): break
+                    time.sleep(self.polling_interval * 2) # Wait longer if dir is missing
+                    continue
+
+                current_files_in_dir = set()
+                # Scan the directory for current Python files.
+                for filename in os.listdir(self.modules_dir):
+                    if filename.endswith(".py") and not filename.startswith("_"):
+                        filepath = os.path.join(self.modules_dir, filename)
+                        current_files_in_dir.add(filepath)
+
+                # Identify new files by comparing with the set of known (already processed) files.
+                new_files = current_files_in_dir - self.known_module_files
+
+                if new_files:
+                    self.shared_state.log(f"Polling: Detected new potential module files: {new_files}", level=logging.INFO)
+                    for filepath in new_files:
+                        filename = os.path.basename(filepath)
+                        # Schedule the discovery of the new file to run in the main GUI thread
+                        # to ensure thread safety for Tkinter operations and shared data modification.
+                        self.root.after(0, lambda fp=filepath, fn=filename: self._process_newly_detected_file(fp, fn))
+
+                # Note: This logic currently only adds new files. It does not handle deleted files
+                # or changes to existing files (hot-reloading).
+                # To detect deletions, one might compare self.known_module_files with current_files_in_dir.
+
+            except Exception as e: # Catch broad exceptions to keep the poller alive.
+                self.shared_state.log(f"Error in module polling thread: {e}", level=logging.ERROR)
+
+            # Wait for the polling interval before the next scan, but break early if stop event is set.
+            if self.stop_polling_event.wait(timeout=self.polling_interval): # wait returns true if event is set
+                break
+
+        self.shared_state.log("Module polling thread stopped.", level=logging.INFO)
+
+    def _process_newly_detected_file(self, filepath, filename):
+        """
+        Callback executed in the main Tkinter thread (via root.after) to process
+        a newly detected module file from the polling thread.
+        """
+        self.shared_state.log(f"Main thread processing newly detected file: {filename}", level=logging.DEBUG)
+        if self._discover_single_module_file(filename, filepath):
+            # If successfully discovered and registered, add to known files.
+            self.known_module_files.add(filepath)
+            # New modules will be available in the context menu as it rebuilds each time.
+            # If immediate UI update or notification were needed, it would go here.
+            self.shared_state.log(f"Successfully processed and added new module '{filename}' to available classes.", level=logging.INFO)
+        else:
+            # _discover_single_module_file already logs detailed errors.
+            # If it fails, it's not added to known_module_files, so the poller might try again
+            # if the file isn't changed or removed. This behavior is acceptable for now.
+            self.shared_state.log(f"Failed to process newly detected module from file {filename}.", level=logging.WARNING)
+
 
     def instantiate_module(self, module_name, master_pane_for_wrapper):
         if module_name not in self.available_module_classes:
@@ -414,12 +544,19 @@ class ModularGUI:
 
     def on_closing(self):
         self.shared_state.log("Application closing...")
+        # Signal the polling thread to stop and wait for it to finish.
+        self.stop_polling_event.set()
+        if hasattr(self, 'module_poller_thread') and self.module_poller_thread.is_alive():
+             self.shared_state.log("Waiting for module polling thread to stop...", level=logging.DEBUG)
+             self.module_poller_thread.join(timeout=self.polling_interval + 0.5) # Wait a bit longer than interval
+             if self.module_poller_thread.is_alive():
+                 self.shared_state.log("Module polling thread did not stop in time.", level=logging.WARNING)
+
         self.save_layout_config() # Save the layout before closing
 
         # Call on_destroy for all loaded module instances
-        # Create a copy of items for safe iteration if on_destroy modifies self.loaded_modules
         for module_name, module_data in list(self.loaded_modules.items()):
-            if module_data and module_data.get('instance'): # Check module_data exists
+            if module_data and module_data.get('instance'):
                 try:
                     module_data['instance'].on_destroy()
                 except Exception as e:
