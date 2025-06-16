@@ -276,9 +276,12 @@ class ModularGUI:
             if len(current_pane_widgets) > 1:
                 for i in range(len(current_pane_widgets) - 1):
                     try:
-                        sash_positions.append(self.main_pane.sashpos(i))
+                        # For HORIZONTAL PanedWindow, sashes are vertical, position is x-coordinate
+                        coord = self.main_pane.sash_coord(i) # Returns (x, y) tuple for the sash
+                        sash_positions.append(coord[0]) # Store the x-coordinate
+                        self.shared_state.log(f"Saved sash {i} x-coordinate: {coord[0]}", level=logging.DEBUG)
                     except tk.TclError as e: # Might happen if panes are not fully realized
-                        self.shared_state.log(f"Error getting sash position for sash {i}: {e}", level=logging.WARNING)
+                        self.shared_state.log(f"Error getting sash coordinate for sash {i}: {e}", level=logging.WARNING)
 
             layout_data['paned_window_layout'] = {
                 'modules': panes_info,
@@ -627,42 +630,60 @@ class ModularGUI:
 
 
         if self.drop_target_pane and self.drop_target_pane != dragged_module_frame_wrapper:
-            current_panes_ordered = list(self.main_pane.panes()) # These are the frame_wrappers
-
             try:
-                dragged_idx = current_panes_ordered.index(dragged_module_frame_wrapper)
-                target_idx = current_panes_ordered.index(self.drop_target_pane)
-            except ValueError:
-                self.shared_state.log("Dragged or target pane not found in PanedWindow during end_drag.", level=logging.ERROR)
+                # Get actual WIDGET OBJECTS currently in the PanedWindow, in order
+                current_pane_widget_objects = [self.main_pane.nametowidget(p_id) for p_id in self.main_pane.panes()]
+            except tk.TclError as e:
+                self.shared_state.log(f"Error getting pane widgets during drag: {e}", level=logging.ERROR)
+                # Reset drag state (copied from existing cleanup logic)
                 self.dragged_module_name = None
+                self.drag_start_widget = None
                 self.drop_target_pane = None
+                self.original_dragged_module_relief = None
                 return
 
-            # Perform reorder
-            item_to_move = current_panes_ordered.pop(dragged_idx)
-            current_panes_ordered.insert(target_idx, item_to_move)
+            # Ensure the widgets we are about to use for indexing still exist
+            if not dragged_module_frame_wrapper.winfo_exists() or \
+               not self.drop_target_pane.winfo_exists():
+                self.shared_state.log("Dragged or target pane was destroyed before reorder could complete.", level=logging.WARNING)
+                self.dragged_module_name = None
+                self.drag_start_widget = None
+                self.drop_target_pane = None
+                self.original_dragged_module_relief = None
+                return
 
-            # Store current sash positions and weights if possible (PanedWindow is tricky)
-            # For simplicity, we might lose custom sash positions/weights here.
-            # A more robust solution would save and restore them.
-            pane_configs = []
-            for pane_fw in current_panes_ordered:
-                 # Try to get weight; default to 1 if not available or not supported for forget/add cycle
-                try:
-                    # PanedWindow doesn't directly expose weights of individual panes easily after adding.
-                    # Weight is no longer used with .add(), so just store the widget.
-                    pane_configs.append({'widget': pane_fw})
-                except tk.TclError: # If pane was somehow removed
-                    continue
+            try:
+                dragged_idx = current_pane_widget_objects.index(dragged_module_frame_wrapper)
+                target_idx = current_pane_widget_objects.index(self.drop_target_pane)
+            except ValueError:
+                self.shared_state.log("Dragged or target pane widget object not found in the list of current pane widgets.", level=logging.ERROR)
+                self.dragged_module_name = None
+                self.drag_start_widget = None
+                self.drop_target_pane = None
+                self.original_dragged_module_relief = None
+                return
 
+            # Perform reorder on the list of WIDGET OBJECTS
+            item_to_move = current_pane_widget_objects.pop(dragged_idx)
+            current_pane_widget_objects.insert(target_idx, item_to_move)
 
-            # Forget all panes
-            for pane_fw_id_str in self.main_pane.panes(): # .panes() returns string IDs
-                 self.main_pane.forget(pane_fw_id_str) # Use the ID string here
+            # Store the string IDs of all panes before forgetting, to ensure we forget correctly
+            # This is important because self.main_pane.panes() will change as we forget items.
+            pane_ids_to_forget = list(self.main_pane.panes())
 
-            # Re-add in new order
-            for config in pane_configs:
-                self.main_pane.add(config['widget']) # Removed weight parameter
+            # Forget all panes using their string IDs
+            for pane_fw_id_str in pane_ids_to_forget:
+                 try:
+                     self.main_pane.forget(pane_fw_id_str)
+                 except tk.TclError as e:
+                     self.shared_state.log(f"TclError forgetting pane {pane_fw_id_str}: {e}. May already be handled or gone.", level=logging.WARNING)
+
+            # Re-add WIDGETS in the new order
+            for widget_to_add in current_pane_widget_objects:
+                if widget_to_add.winfo_exists(): # Ensure widget wasn't destroyed during forget/re-add process
+                    self.main_pane.add(widget_to_add)
+                else:
+                    self.shared_state.log(f"Skipping re-add of destroyed widget: {widget_to_add}", level=logging.WARNING)
 
             self.shared_state.log(f"Module {self.dragged_module_name} reordered.", level=logging.INFO)
         else:
