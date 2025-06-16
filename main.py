@@ -52,7 +52,7 @@ class Module:
             self.shared_state.log(f"Cannot close module '{self.module_name}': gui_manager not available.", "ERROR")
 
     def _on_resize_start(self, event):
-        # --- Start of new logic for _on_resize_start ---
+        # --- Start of updated logic for _on_resize_start ---
         if self.gui_manager and            hasattr(self.gui_manager, 'window_size_fixed_after_init') and            self.gui_manager.window_size_fixed_after_init and            hasattr(self.gui_manager, 'root') and            hasattr(self.gui_manager.root, 'maxsize') and            hasattr(self.gui_manager.root, 'winfo_width') and            hasattr(self.gui_manager.root, 'winfo_height'):
 
             self.gui_manager.is_module_resizing = True
@@ -64,20 +64,24 @@ class Module:
             current_width = self.gui_manager.root.winfo_width()
             current_height = self.gui_manager.root.winfo_height()
 
+            # Store current geometry string
+            self.gui_manager.window_geometry_before_module_resize = f"{current_width}x{current_height}"
+
             # Set maxsize to current dimensions to prevent expansion
             self.gui_manager.root.maxsize(current_width, current_height)
+            # Optional: Consider also self.gui_manager.root.minsize(current_width, current_height)
+            # For now, sticking to the plan which focuses on maxsize.
 
             if hasattr(self.gui_manager, 'shared_state'):
                 self.gui_manager.shared_state.log(
-                    f"Module resize started: Main window maxsize temporarily set to {current_width}x{current_height}.", "DEBUG"
+                    f"Module resize started: Geometry '{self.gui_manager.window_geometry_before_module_resize}' stored. Maxsize temporarily set to {current_width}x{current_height}.", "DEBUG"
                 )
         elif self.gui_manager and hasattr(self.gui_manager, 'shared_state'):
-             # Log if conditions for temporary maxsize aren't fully met but module resize starts
              if not (hasattr(self.gui_manager, 'window_size_fixed_after_init') and self.gui_manager.window_size_fixed_after_init):
-                 self.gui_manager.shared_state.log("Module resize started: window_size_fixed_after_init is False, not setting temporary maxsize.", "DEBUG")
+                 self.gui_manager.shared_state.log("Module resize started: window_size_fixed_after_init is False, not modifying window constraints.", "DEBUG")
              else:
-                 self.gui_manager.shared_state.log("Module resize started: Could not set temporary maxsize (root or methods missing).", "WARNING")
-        # --- End of new logic for _on_resize_start ---
+                 self.gui_manager.shared_state.log("Module resize started: Could not set temporary window constraints (root or methods missing).", "WARNING")
+        # --- End of updated logic for _on_resize_start ---
 
         # Original logic follows (ensure it's still there and correctly indented)
         self.resize_start_x = event.x_root
@@ -121,12 +125,12 @@ class Module:
         if self.gui_manager:
             self.gui_manager.update_layout_scrollregion()
 
-        # --- Start of new logic for _on_resize_release ---
+        # --- Start of updated logic for _on_resize_release ---
         if self.gui_manager and            hasattr(self.gui_manager, 'is_module_resizing') and            self.gui_manager.is_module_resizing:
 
+            # Restore original maxsize first
             if hasattr(self.gui_manager, 'root_maxsize_backup') and                self.gui_manager.root_maxsize_backup is not None and                hasattr(self.gui_manager, 'root') and                hasattr(self.gui_manager.root, 'maxsize'):
 
-                # Restore original maxsize
                 self.gui_manager.root.maxsize(
                     self.gui_manager.root_maxsize_backup[0],
                     self.gui_manager.root_maxsize_backup[1]
@@ -136,15 +140,30 @@ class Module:
                         f"Module resize ended: Main window maxsize restored to {self.gui_manager.root_maxsize_backup}.", "DEBUG"
                     )
             elif self.gui_manager and hasattr(self.gui_manager, 'shared_state'):
-                # Log if backup was not available to restore
                 self.gui_manager.shared_state.log(
-                    "Module resize ended: No valid maxsize backup found to restore. Maxsize might not have been set or root/methods missing.", "WARNING"
+                    "Module resize ended: No valid maxsize backup found to restore.", "WARNING"
                 )
 
+            # Now, force the geometry to what it was before the drag
+            if hasattr(self.gui_manager, 'window_geometry_before_module_resize') and                self.gui_manager.window_geometry_before_module_resize is not None and                hasattr(self.gui_manager, 'root') and                hasattr(self.gui_manager.root, 'geometry'):
+
+                self.gui_manager.root.geometry(self.gui_manager.window_geometry_before_module_resize)
+                if hasattr(self.gui_manager, 'shared_state'):
+                    self.gui_manager.shared_state.log(
+                        f"Module resize ended: Main window geometry restored to {self.gui_manager.window_geometry_before_module_resize}.", "DEBUG"
+                    )
+            elif self.gui_manager and hasattr(self.gui_manager, 'shared_state'):
+                 self.gui_manager.shared_state.log(
+                    "Module resize ended: No stored geometry found to restore.", "WARNING"
+                )
+
+            # Reset flags and stored values
             self.gui_manager.is_module_resizing = False
-            if hasattr(self.gui_manager, 'root_maxsize_backup'): # Check before trying to set
-                self.gui_manager.root_maxsize_backup = None # Clear backup
-        # --- End of new logic for _on_resize_release ---
+            if hasattr(self.gui_manager, 'root_maxsize_backup'):
+                self.gui_manager.root_maxsize_backup = None
+            if hasattr(self.gui_manager, 'window_geometry_before_module_resize'):
+                self.gui_manager.window_geometry_before_module_resize = None
+        # --- End of updated logic for _on_resize_release ---
 
     def invoke_fullscreen_toggle(self):
         if self.gui_manager:
@@ -368,9 +387,10 @@ class ModularGUI:
         self.original_dragged_module_relief = None
 
         self.fullscreen_module_name = None
-        # self.root_resizable_backup = None # Removed this line as per instruction
+        # self.root_resizable_backup = None # This was removed, ensure it's not re-added
         self.is_module_resizing = False # This should be present
-        self.root_maxsize_backup = None # Added new attribute
+        self.root_maxsize_backup = None # This should be present
+        self.window_geometry_before_module_resize = None # Added new attribute
 
         self.canvas_container = ttk.Frame(self.root)
         self.canvas_container.pack(fill=tk.BOTH, expand=True)
