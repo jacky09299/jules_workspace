@@ -52,6 +52,17 @@ class Module:
             self.shared_state.log(f"Cannot close module '{self.module_name}': gui_manager not available.", "ERROR")
 
     def _on_resize_start(self, event):
+        if self.gui_manager and hasattr(self.gui_manager, 'window_size_fixed_after_init') and self.gui_manager.window_size_fixed_after_init:
+            self.gui_manager.is_module_resizing = True
+            # Store current resizable state BEFORE changing it
+            if hasattr(self.gui_manager, 'root') and hasattr(self.gui_manager.root, 'resizable'):
+                self.gui_manager.root_resizable_backup = self.gui_manager.root.resizable()
+                self.gui_manager.root.resizable(False, False)
+                if hasattr(self.gui_manager, 'shared_state'):
+                    self.gui_manager.shared_state.log("Module resize started: Main window set to non-resizable temporarily.", "DEBUG")
+            elif hasattr(self.gui_manager, 'shared_state'):
+                 self.gui_manager.shared_state.log("Module resize started: Could not make window non-resizable (root or resizable method missing).", "WARNING")
+
         self.resize_start_x = event.x_root
         self.resize_start_y = event.y_root
 
@@ -92,6 +103,27 @@ class Module:
     def _on_resize_release(self, event):
         if self.gui_manager:
             self.gui_manager.update_layout_scrollregion()
+
+        if self.gui_manager and hasattr(self.gui_manager, 'is_module_resizing') and self.gui_manager.is_module_resizing:
+            if hasattr(self.gui_manager, 'root_resizable_backup') and self.gui_manager.root_resizable_backup is not None:
+                if hasattr(self.gui_manager, 'root') and hasattr(self.gui_manager.root, 'resizable'):
+                    self.gui_manager.root.resizable(self.gui_manager.root_resizable_backup[0], self.gui_manager.root_resizable_backup[1])
+                    if hasattr(self.gui_manager, 'shared_state'):
+                        self.gui_manager.shared_state.log(f"Module resize ended: Main window resizable state restored to {self.gui_manager.root_resizable_backup}.", "DEBUG")
+                elif hasattr(self.gui_manager, 'shared_state'):
+                    self.gui_manager.shared_state.log("Module resize ended: Could not restore resizable state (root or resizable method missing).", "WARNING")
+            else:
+                # Fallback if backup wasn't stored or was None
+                if hasattr(self.gui_manager, 'root') and hasattr(self.gui_manager.root, 'resizable'):
+                    self.gui_manager.root.resizable(True, True)
+                    if hasattr(self.gui_manager, 'shared_state'):
+                        self.gui_manager.shared_state.log("Module resize ended: Main window resizable state restored to (True, True) as fallback.", "DEBUG")
+                elif hasattr(self.gui_manager, 'shared_state'):
+                    self.gui_manager.shared_state.log("Module resize ended: Could not restore resizable state to fallback (root or resizable method missing).", "WARNING")
+
+            self.gui_manager.is_module_resizing = False
+            if hasattr(self.gui_manager, 'root_resizable_backup'): # Check before trying to set
+                self.gui_manager.root_resizable_backup = None # Clear backup
 
     def invoke_fullscreen_toggle(self):
         if self.gui_manager:
@@ -315,6 +347,8 @@ class ModularGUI:
         self.original_dragged_module_relief = None
 
         self.fullscreen_module_name = None
+        self.root_resizable_backup = None # Added new attribute
+        self.is_module_resizing = False # Added new attribute
 
         self.canvas_container = ttk.Frame(self.root)
         self.canvas_container.pack(fill=tk.BOTH, expand=True)
