@@ -736,6 +736,13 @@ class ModularGUI:
 
 
 if __name__ == "__main__":
-    root = tk.Tk()
+    import sys
+    # Ensure that 'main' module in sys.modules points to this script's execution context (__main__)
+    # This helps plugins doing 'from main import Module' to get the correct Module class
+    # when main.py is run as the entry point.
+    if '__main__' in sys.modules: # Should always be true when run as script
+        sys.modules['main'] = sys.modules['__main__']
+
+    root = tk.Tk() # tk.Tk() should be after the sys.modules manipulation
     app = ModularGUI(root)
     root.mainloop()
