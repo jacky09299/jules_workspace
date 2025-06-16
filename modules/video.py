@@ -5,7 +5,7 @@ import logging # For logging level constants
 import os # For os.path.basename
 
 try:
-    from tkVideoPlayer import TkinterVideo
+    from tkvideoplayer import TkinterVideo
 except ImportError:
     TkinterVideo = None # Placeholder if library is not installed
 
