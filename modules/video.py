@@ -16,12 +16,12 @@ class VideoModule(Module):
         self.video_player = None
         self.video_loaded = False
         self.video_filepath = ""
-
+        
         # Add a note about dependencies
         if TkinterVideo is None:
             self.shared_state.log("tkVideoPlayer library not found. Video playback will not be available.", logging.ERROR)
             # Display this message in the UI as well (done in create_ui)
-
+        
         self.create_ui()
 
     def create_ui(self):
@@ -31,12 +31,12 @@ class VideoModule(Module):
         # Create a content frame within self.frame for padding and organization
         content_frame = ttk.Frame(self.frame)
         content_frame.pack(padx=5, pady=5, expand=True, fill=tk.BOTH)
-
+        
         # Video display area
         self.video_area = tk.Frame(content_frame, bg="black", height=200) # Min height
         self.video_area.pack(fill=tk.BOTH, expand=True, pady=(0,5))
         self.video_area.pack_propagate(False)
-
+        
         self.video_status_label = ttk.Label(self.video_area, text="No video loaded. Please install tkVideoPlayer.", foreground="white", background="black")
         if TkinterVideo is not None:
             self.video_status_label.config(text="No video loaded.")
@@ -54,7 +54,7 @@ class VideoModule(Module):
 
         self.stop_button = ttk.Button(controls_frame, text="Stop", command=self.stop_video_playback, state=tk.DISABLED)
         self.stop_button.pack(side=tk.LEFT)
-
+        
         self.shared_state.log(f"UI for {self.module_name} created.", level=logging.INFO)
         self.shared_state.set(f"{self.module_name}_ready", True)
 
@@ -70,7 +70,7 @@ class VideoModule(Module):
         filepath = filedialog.askopenfilename(
             title="Select Video File",
             filetypes=(("MP4 files", "*.mp4"),
-                       ("AVI files", "*.avi"),
+                       ("AVI files", "*.avi"), 
                        ("All files", "*.*"))
         )
         if not filepath:
@@ -83,19 +83,19 @@ class VideoModule(Module):
             if self.video_player: # If a player widget exists
                 self.video_player.destroy()
             self.video_player = None # Ensure it's reset
-
+            
             for widget in self.video_area.winfo_children(): # Clear out any status labels etc.
                 widget.destroy()
 
             self.video_player = TkinterVideo(master=self.video_area, scaled=True)
-
+            
             try:
                 self.video_player.load(self.video_filepath) # Attempt to load
             except AttributeError as ae:
                 ae_variable_for_fast_seek_check = ae # Store for outer scope check
                 if 'fast_seek' in str(ae).lower():
                     self.shared_state.log(
-                        f"AttributeError during video load (tkVideoPlayer/PyAV issue, possibly 'fast_seek'): {ae}. Playback might be unstable.",
+                        f"AttributeError during video load (tkVideoPlayer/PyAV issue, possibly 'fast_seek'): {ae}. Playback might be unstable.", 
                         logging.WARNING
                     )
                     # Update UI to inform user, but still try to proceed if load didn't fully crash player
@@ -104,14 +104,14 @@ class VideoModule(Module):
                     # Player might be in an indeterminate state, but we'll allow trying to use it
                 else:
                     raise # Re-raise other AttributeErrors not related to fast_seek
-
+            
             self.video_player.pack(expand=True, fill="both")
-
+            
             self.video_loaded = True # Assume loaded even with warning, user can try to play
-            self.is_playing = False
+            self.is_playing = False 
             self.play_pause_button.config(text="Play", state=tk.NORMAL)
             self.stop_button.config(state=tk.NORMAL)
-
+            
             # Avoid double logging success if warning was already issued due to fast_seek
             if not (ae_variable_for_fast_seek_check and 'fast_seek' in str(ae_variable_for_fast_seek_check).lower()):
                  self.shared_state.log(f"Video '{self.video_filepath}' loaded by {self.module_name}.", logging.INFO)
@@ -120,7 +120,7 @@ class VideoModule(Module):
         except Exception as e: # General catch-all for other errors during setup or re-raised AttributeErrors
             self.video_loaded = False
             self.shared_state.log(f"Error setting up video player for '{self.video_filepath}': {e}", logging.ERROR)
-
+            
             # Ensure video_area is clean if general error occurs
             if self.video_player and self.video_player.winfo_exists():
                 self.video_player.destroy()
@@ -155,11 +155,11 @@ class VideoModule(Module):
         except Exception as e:
             self.shared_state.log(f"Error during toggle_play_pause: {e}", logging.ERROR)
             # Optionally, try to reset state if an error occurs during play/pause
-            self.is_playing = False
+            self.is_playing = False 
             self.play_pause_button.config(text="Play")
 
 
-    def stop_video_playback(self):
+    def stop_video_playback(self): 
         if not self.video_player or not hasattr(self.video_player, 'stop'):
              self.play_pause_button.config(state=tk.DISABLED) # Ensure buttons disabled if no player
              self.stop_button.config(state=tk.DISABLED)
@@ -167,19 +167,19 @@ class VideoModule(Module):
         try:
             self.video_player.stop()
             self.is_playing = False
-            self.video_loaded = False
+            self.video_loaded = False 
             self.play_pause_button.config(text="Play", state=tk.DISABLED)
             self.stop_button.config(state=tk.DISABLED)
             self.shared_state.log(f"Video Stopped by {self.module_name}.", logging.DEBUG)
             self.shared_state.set("video_status", "Stopped")
-
+            
             if self.video_player: # Destroy and recreate status label
                 self.video_player.destroy()
                 self.video_player = None
-
+            
             # Re-create status label after destroying player
             self.video_status_label = ttk.Label(self.video_area, text="Video stopped. Load another video.", foreground="white", background="black")
-            if TkinterVideo is None:
+            if TkinterVideo is None: 
                  self.video_status_label.config(text="Error: tkVideoPlayer library not found.")
             self.video_status_label.pack(expand=True)
 
@@ -191,12 +191,12 @@ class VideoModule(Module):
         if self.video_player:
             try:
                 if self.is_playing: # Check if it might be playing
-                    self.video_player.stop()
-                self.video_player.destroy()
+                    self.video_player.stop() 
+                self.video_player.destroy() 
                 self.video_player = None
             except Exception as e:
                 self.shared_state.log(f"Error destroying video player in {self.module_name}: {e}", logging.ERROR)
-
+        
         super().on_destroy()
         self.shared_state.set(f"{self.module_name}_ready", False)
         self.shared_state.set("video_status", "None")
@@ -207,14 +207,14 @@ if __name__ == '__main__':
     try:
         from main import Module as MainModule
     except ImportError:
-        class MainModule:
+        class MainModule: 
             def __init__(self, master, shared_state, module_name="Test", gui_manager=None):
                 self.master = master
                 self.shared_state = shared_state
                 self.module_name = module_name
                 self.gui_manager = gui_manager
                 self.frame = ttk.Frame(master)
-                # self.frame.pack(fill=tk.BOTH, expand=True)
+                # self.frame.pack(fill=tk.BOTH, expand=True) 
                 self.shared_state.log(f"MockModule '{self.module_name}' initialized.")
             def get_frame(self): return self.frame
             def create_ui(self): ttk.Label(self.frame, text=f"Content for {self.module_name}").pack()
@@ -225,19 +225,19 @@ if __name__ == '__main__':
         def __init__(self): self.vars = {}
         def log(self, message, level=logging.INFO): print(f"LOG ({logging.getLevelName(level)}): {message}")
         def get(self, key, default=None): return self.vars.get(key, default)
-        def set(self, key, value):
+        def set(self, key, value): 
             self.vars[key] = value
             print(f"STATE SET: {key} = {value}")
 
     root = tk.Tk()
     root.title("Video Module Test")
-    root.geometry("400x350")
-
+    root.geometry("400x350") 
+    
     mock_shared_state = MockSharedState()
-
+    
     module_container_frame = ttk.Frame(root, padding=10)
     module_container_frame.pack(fill=tk.BOTH, expand=True)
-
+    
     video_module_instance = None
     if TkinterVideo is None:
         # If library not found, just show a label in the container.
@@ -248,6 +248,6 @@ if __name__ == '__main__':
         video_module_instance.get_frame().pack(fill=tk.BOTH, expand=True)
 
     root.mainloop()
-
-    if video_module_instance:
+    
+    if video_module_instance: 
         video_module_instance.on_destroy()

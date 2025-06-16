@@ -1,0 +1,6 @@
+{
+    "shared_variables": {
+        "video_ready": false,
+        "video_status": "None"
+    }
+}

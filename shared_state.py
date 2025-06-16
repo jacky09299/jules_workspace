@@ -91,7 +91,7 @@ if __name__ == '__main__':
     # Example Usage
     TEST_CONFIG_FILE = 'test_shared_variables_config.json' # Use a distinct test file name
     shared_state = SharedState(config_file=TEST_CONFIG_FILE)
-
+    
     # Set some variables
     shared_state.set("username", "Alice")
     shared_state.set("theme", "dark")
@@ -114,12 +114,12 @@ if __name__ == '__main__':
 
     # Save and load config (basic example for shared variables)
     shared_state.save_config()
-
+    
     # Create a new instance to test loading
     new_shared_state = SharedState(config_file=TEST_CONFIG_FILE)
     print(f"Loaded Username: {new_shared_state.get('username')}")
     print(f"Loaded Theme: {new_shared_state.get('theme')}")
-
+    
     # Clean up test file
     import os
     if os.path.exists(TEST_CONFIG_FILE):

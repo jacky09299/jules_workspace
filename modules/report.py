@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, filedialog
-from main import Module
+from main import Module 
 import logging
 import os # For os.path.basename
 
@@ -8,7 +8,7 @@ try:
     import pandas as pd
     # Also try to import an engine to ensure pandas can read xlsx/xls
     try:
-        import openpyxl
+        import openpyxl 
     except ImportError:
         # xlrd might be needed for .xls, openpyxl for .xlsx
         # Pandas will raise an error if the appropriate engine is missing for a given file type.
@@ -19,7 +19,7 @@ except ImportError:
 class ReportModule(Module):
     def __init__(self, master, shared_state, module_name="Report", gui_manager=None):
         super().__init__(master, shared_state, module_name, gui_manager)
-
+        
         self.dataframe = None # To store the loaded pandas DataFrame
         self.tree = None
         self.excel_filepath = ""
@@ -47,7 +47,7 @@ class ReportModule(Module):
         self.sheet_selector = ttk.Combobox(controls_frame, textvariable=self.sheet_var, state="readonly", width=15)
         self.sheet_selector.pack(side=tk.LEFT, padx=5)
         self.sheet_selector.bind("<<ComboboxSelected>>", self.on_sheet_selected)
-
+        
         # Frame for Treeview and Scrollbars
         tree_frame = ttk.Frame(self.frame)
         tree_frame.pack(expand=True, fill=tk.BOTH, padx=5, pady=(0,5))
@@ -55,7 +55,7 @@ class ReportModule(Module):
         tree_frame.grid_columnconfigure(0, weight=1)
 
         self.tree = ttk.Treeview(tree_frame, show="headings")
-
+        
         # Scrollbars
         vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
         hsb = ttk.Scrollbar(tree_frame, orient="horizontal", command=self.tree.xview)
@@ -79,9 +79,9 @@ class ReportModule(Module):
 
 
         # Status label (replaces old info_label)
-        self.status_info_label = ttk.Label(controls_frame, text="No Excel file loaded.")
+        self.status_info_label = ttk.Label(controls_frame, text="No Excel file loaded.") 
         self.status_info_label.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-
+        
         # Update shared state
         self.shared_state.set(f"{self.module_name}_initialized", True)
         self.shared_state.log(f"UI for {self.module_name} created.")
@@ -136,7 +136,7 @@ class ReportModule(Module):
     def load_sheet_data(self, sheet_name):
         if not self.excel_filepath or pd is None:
             return
-
+        
         try:
             self.dataframe = pd.read_excel(self.excel_filepath, sheet_name=sheet_name)
             self.populate_treeview()
@@ -160,20 +160,20 @@ class ReportModule(Module):
             return
 
         df = self.dataframe
-
+        
         # Define columns
         self.tree["columns"] = list(df.columns)
-        self.tree["show"] = "headings"
+        self.tree["show"] = "headings" 
 
         for col in df.columns:
             self.tree.heading(col, text=col)
-            self.tree.column(col, width=100, minwidth=50, anchor=tk.W)
+            self.tree.column(col, width=100, minwidth=50, anchor=tk.W) 
 
         rows = df.to_numpy().tolist()
         for i, row in enumerate(rows):
             str_row = [str(val) if pd.notna(val) else "" for val in row] # Handle NaN values
             self.tree.insert("", "end", iid=i, values=str_row)
-
+        
         self.shared_state.log(f"Treeview populated with {len(df)} rows from sheet '{self.current_sheet_name}'.", logging.DEBUG)
 
     def on_destroy(self):
@@ -187,11 +187,11 @@ if __name__ == '__main__':
     try:
         from main import Module as MainModule
     except ImportError:
-        class MainModule:
+        class MainModule: 
             def __init__(self, master, shared_state, module_name="Test", gui_manager=None):
                 self.master = master; self.shared_state = shared_state; self.module_name = module_name; self.gui_manager = gui_manager
                 self.frame = ttk.Frame(master)
-                # self.frame.pack(fill=tk.BOTH, expand=True)
+                # self.frame.pack(fill=tk.BOTH, expand=True) 
                 self.shared_state.log(f"MockModule '{self.module_name}' initialized.")
             def get_frame(self): return self.frame
             def create_ui(self): ttk.Label(self.frame, text=f"Content for {self.module_name}").pack()
@@ -210,12 +210,12 @@ if __name__ == '__main__':
     root = tk.Tk()
     root.title("Report Module Test")
     root.geometry("600x400")
-
+    
     mock_shared_state = MockSharedState()
-
+    
     module_container_frame = ttk.Frame(root, padding=10)
     module_container_frame.pack(fill=tk.BOTH, expand=True)
-
+    
     report_module_instance = None
     if pd is None:
         ttk.Label(module_container_frame, text="Pandas not installed. ReportModule cannot be fully tested.").pack(expand=True)
@@ -239,7 +239,7 @@ if __name__ == '__main__':
 
 
     root.mainloop()
-
+    
     if report_module_instance:
          report_module_instance.on_destroy()
         # if 'dummy_excel_file' in locals() and os.path.exists(dummy_excel_file):
