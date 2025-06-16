@@ -367,11 +367,11 @@ class ModularGUI:
         """
         self.root.update_idletasks() # Ensure dimensions are calculated
         self.window_size_fixed_after_init = True
-        self.root.resizable(False, False)
+        # self.root.resizable(False, False) # Removed this line
         current_w = self.root.winfo_width()
         current_h = self.root.winfo_height()
         self.shared_state.log(
-            f"Initial window state finalized. window_size_fixed_after_init=True. Window non-resizable. Current size: {current_w}x{current_h}",
+            f"Initial window state finalized. window_size_fixed_after_init=True. Window remains user-resizable. Min size fixed. Current size: {current_w}x{current_h}",
             "INFO"
         )
 
