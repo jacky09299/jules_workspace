@@ -15,7 +15,7 @@ class Module:
         self.gui_manager = gui_manager # Store the ModularGUI instance
 
         # self.frame is the main content area created by the module, placed inside self.master (frame_wrapper)
-        self.frame = ttk.Frame(self.master, borderwidth=1, relief=tk.SOLID) 
+        self.frame = ttk.Frame(self.master, borderwidth=1, relief=tk.SOLID)
         # self.frame needs to be packed into self.master by ModularGUI after module instantiation,
         # or the module can do it itself if master is always its direct parent for content.
         # For now, ModularGUI's setup_initial_layout handles packing self.frame into frame_wrapper.
@@ -23,7 +23,7 @@ class Module:
         # Drag handle and title bar area
         self.title_bar_frame = ttk.Frame(self.frame, height=25, style="DragHandle.TFrame")
         self.title_bar_frame.pack(fill=tk.X, side=tk.TOP, pady=(0,2))
-        
+
         self.drag_handle_label = ttk.Label(self.title_bar_frame, text="☰", cursor="fleur")
         self.drag_handle_label.pack(side=tk.LEFT, padx=5)
 
@@ -32,7 +32,7 @@ class Module:
 
         self.fullscreen_button = ttk.Button(self.title_bar_frame, text="FS", width=3, command=self.invoke_fullscreen_toggle)
         self.fullscreen_button.pack(side=tk.RIGHT, padx=(0, 5))
-        
+
         self.shared_state.log(f"Module '{self.module_name}' initialized with title bar and FS button.")
 
     def invoke_fullscreen_toggle(self):
@@ -66,7 +66,7 @@ class ModularGUI:
         self.root = root
         self.root.title("Modular GUI Framework")
         self.root.geometry("800x600")
-        
+
         # Style for drag handle (optional, can be customized)
         s = ttk.Style()
         s.configure("DragHandle.TFrame", background="lightgrey") # Example style
@@ -84,8 +84,8 @@ class ModularGUI:
 
         # Drag and drop state variables
         self.dragged_module_name = None
-        self.drag_start_widget = None 
-        self.drop_target_pane = None 
+        self.drag_start_widget = None
+        self.drop_target_pane = None
         self.original_dragged_module_relief = None
 
         # Fullscreen state
@@ -132,7 +132,7 @@ class ModularGUI:
                         if isinstance(item, type) and issubclass(item, Module) and item is not Module:
                             module_class_name = item_name
                             break
-                    
+
                     if module_class_name:
                         ModuleClass = getattr(module_lib, module_class_name)
                         self.available_module_classes[module_name] = ModuleClass
@@ -156,14 +156,14 @@ class ModularGUI:
         # as callers should handle that logic if they intend to reuse instances.
 
         ModuleClass = self.available_module_classes[module_name]
-        
+
         # frame_wrapper is the direct child of the master_pane_for_wrapper (e.g., self.main_pane)
         frame_wrapper = ttk.Frame(master_pane_for_wrapper, relief=tk.SUNKEN, borderwidth=1)
 
         try:
             # Module instance's master is frame_wrapper. Its own self.frame is created inside frame_wrapper.
             module_instance = ModuleClass(frame_wrapper, self.shared_state, module_name, self)
-            
+
             # The module's own content frame (module_instance.get_frame()) is packed into frame_wrapper.
             module_instance.get_frame().pack(fill=tk.BOTH, expand=True)
 
@@ -172,11 +172,11 @@ class ModularGUI:
                 'instance': module_instance,
                 'frame_wrapper': frame_wrapper
             }
-            
+
             # Bind drag events
             drag_handle_widget = module_instance.drag_handle_label
             drag_handle_widget.bind("<ButtonPress-1>", lambda event, mn=module_name: self.start_drag(event, mn))
-            
+
             master_pane_for_wrapper.add(frame_wrapper) # Removed weight parameter
             self.shared_state.log(f"Instantiated and added module '{module_name}' to pane.")
             return frame_wrapper
@@ -188,7 +188,7 @@ class ModularGUI:
 
     def setup_default_layout(self):
         self.shared_state.log("Setting up default layout...")
-        
+
         # Ensure any existing panes are cleared before setting up a new layout
         if hasattr(self.main_pane, 'panes'):
             for pane_id_str in list(self.main_pane.panes()):
@@ -220,11 +220,11 @@ class ModularGUI:
                             else: # Is child of main_pane but not added as a pane (shouldn't happen with current logic)
                                  self.main_pane.add(wrapper) # Removed weight
                                  created_wrappers.append(wrapper)
-                            continue 
+                            continue
                         except tk.TclError: # If already a child or other error
                              self.shared_state.log(f"Could not re-add wrapper for {module_name}, attempting new instantiation.", level=logging.WARNING)
                              # Fall through to instantiate if re-adding fails
-                    
+
                 # If not loaded, or re-adding failed, instantiate it
                 wrapper = self.instantiate_module(module_name, self.main_pane)
                 if wrapper:
@@ -242,7 +242,7 @@ class ModularGUI:
         self.shared_state.log(f"Saving layout configuration to {self.layout_config_file}")
         layout_data = {
             'fullscreen_module': self.fullscreen_module_name,
-            'paned_window_layout': None 
+            'paned_window_layout': None
         }
 
         if not self.fullscreen_module_name and hasattr(self.main_pane, 'panes') and self.main_pane.winfo_exists() and len(self.main_pane.panes()) > 0 :
@@ -252,7 +252,7 @@ class ModularGUI:
             for name, data in self.loaded_modules.items():
                 if data.get('frame_wrapper'):
                     wrapper_obj_to_module_name[id(data['frame_wrapper'])] = name
-            
+
             current_pane_widgets = []
             try:
                 # .panes() returns string paths. We need to convert them to actual widget objects.
@@ -270,7 +270,7 @@ class ModularGUI:
                     panes_info.append({'module_name': module_name})
                 else:
                     self.shared_state.log(f"Could not find module name for pane widget {wrapper_widget} during save.", level=logging.WARNING)
-            
+
             sash_positions = []
             # PanedWindow creates N-1 sashes for N panes.
             if len(current_pane_widgets) > 1:
@@ -279,14 +279,14 @@ class ModularGUI:
                         sash_positions.append(self.main_pane.sashpos(i))
                     except tk.TclError as e: # Might happen if panes are not fully realized
                         self.shared_state.log(f"Error getting sash position for sash {i}: {e}", level=logging.WARNING)
-            
+
             layout_data['paned_window_layout'] = {
                 'modules': panes_info,
                 'sash_positions': sash_positions
             }
         elif self.fullscreen_module_name:
             self.shared_state.log("Saving layout while in fullscreen mode. PanedWindow layout not explicitly saved.", level=logging.INFO)
-        
+
         try:
             with open(self.layout_config_file, 'w') as f:
                 json.dump(layout_data, f, indent=4)
@@ -319,8 +319,12 @@ class ModularGUI:
 
             with open(self.layout_config_file, 'r') as f:
                 layout_data = json.load(f)
-            
+
             self.shared_state.log("Layout configuration loaded successfully.")
+
+            paned_config = layout_data.get('paned_window_layout')
+            fullscreen_module_from_config = layout_data.get('fullscreen_module')
+            self.shared_state.log(f"Layout config data: Fullscreen='{fullscreen_module_from_config}', PanedModulesPresent={paned_config is not None}", logging.DEBUG)
 
             # Clear existing panes and module instances before applying new layout
             if hasattr(self.main_pane, 'panes'):
@@ -329,7 +333,7 @@ class ModularGUI:
                         self.main_pane.forget(pane_id_str)
                     except tk.TclError as e:
                         self.shared_state.log(f"Error forgetting pane {pane_id_str} during layout load: {e}", level=logging.WARNING)
-            
+
             # Destroy existing module instances and their wrappers to ensure a clean state
             for module_name, module_data in list(self.loaded_modules.items()):
                 if module_data:
@@ -343,22 +347,28 @@ class ModularGUI:
             self.loaded_modules.clear()
 
             paned_config = layout_data.get('paned_window_layout')
-            loaded_pane_widgets_for_sash = [] 
+            loaded_pane_widgets_for_sash = []
+            loaded_configured_paned_modules_list = [] # For logging successfully instantiated paned modules
 
             if paned_config and paned_config.get('modules'):
-                self.shared_state.log(f"Loading modules for PanedWindow: {paned_config['modules']}")
+                configured_module_names = [mi.get('module_name') for mi in paned_config.get('modules', []) if mi.get('module_name')]
+                self.shared_state.log(f"Config file requests paned modules: {configured_module_names}", logging.INFO)
+
                 for module_info in paned_config['modules']:
                     module_name = module_info.get('module_name')
                     if module_name and module_name in self.available_module_classes:
                         wrapper = self.instantiate_module(module_name, self.main_pane)
                         if wrapper:
                             loaded_pane_widgets_for_sash.append(wrapper)
+                            loaded_configured_paned_modules_list.append(module_name)
                     else:
                         self.shared_state.log(f"Module '{module_name}' from layout config not loadable/available.", level=logging.WARNING)
-                
+
+                self.shared_state.log(f"Successfully instantiated paned modules from config: {loaded_configured_paned_modules_list}", logging.INFO)
+
                 if loaded_pane_widgets_for_sash and paned_config.get('sash_positions'):
                     sash_positions = paned_config['sash_positions']
-                    self.root.update_idletasks() 
+                    self.root.update_idletasks()
                     if len(sash_positions) == len(loaded_pane_widgets_for_sash) - 1:
                         for i, pos in enumerate(sash_positions):
                             try:
@@ -370,7 +380,7 @@ class ModularGUI:
 
             fullscreen_module_to_load = layout_data.get('fullscreen_module')
             if fullscreen_module_to_load:
-                if fullscreen_module_to_load not in self.loaded_modules: 
+                if fullscreen_module_to_load not in self.loaded_modules:
                     if fullscreen_module_to_load in self.available_module_classes:
                         self.shared_state.log(f"Fullscreen module '{fullscreen_module_to_load}' not in paned layout, loading it.", level=logging.INFO)
                         # Instantiate the module; it will be added to main_pane by instantiate_module.
@@ -378,16 +388,16 @@ class ModularGUI:
                         self.instantiate_module(fullscreen_module_to_load, self.main_pane)
                     else:
                          self.shared_state.log(f"Fullscreen module '{fullscreen_module_to_load}' not available.", level=logging.ERROR)
-                         fullscreen_module_to_load = None 
-                
+                         fullscreen_module_to_load = None
+
                 if fullscreen_module_to_load and fullscreen_module_to_load in self.loaded_modules:
                     self.enter_fullscreen(fullscreen_module_to_load)
-            
+
             if not self.main_pane.panes() and not self.fullscreen_module_name:
                 self.shared_state.log("Layout loaded, but no modules are visible. Setting up default layout.", level=logging.INFO)
                 self.setup_default_layout() # Fallback if loading results in an empty visible state
 
-        except Exception as e: 
+        except Exception as e:
             self.shared_state.log(f"Error loading layout configuration: {e}. Using default layout.", level=logging.ERROR)
             # Ensure a clean slate for default layout if loading fails mid-way
             if hasattr(self.main_pane, 'panes'):
@@ -405,13 +415,13 @@ class ModularGUI:
 
         # Call on_destroy for all loaded module instances
         # Create a copy of items for safe iteration if on_destroy modifies self.loaded_modules
-        for module_name, module_data in list(self.loaded_modules.items()): 
+        for module_name, module_data in list(self.loaded_modules.items()):
             if module_data and module_data.get('instance'): # Check module_data exists
                 try:
                     module_data['instance'].on_destroy()
                 except Exception as e:
                     self.shared_state.log(f"Error during on_destroy for module {module_name}: {e}", level=logging.ERROR)
-        
+
         self.shared_state.save_config() # Saves shared_state variables
         self.root.destroy()
 
@@ -425,7 +435,7 @@ class ModularGUI:
         else:
             self.context_menu.add_command(label="Toggle Module Visibility:", state=tk.DISABLED)
             self.context_menu.add_separator()
-            
+
             # Get current panes to check visibility correctly
             current_pane_wrappers = []
             if hasattr(self.main_pane, 'panes') and self.main_pane.winfo_exists():
@@ -442,13 +452,13 @@ class ModularGUI:
                     mod_data = self.loaded_modules[module_name]
                     if mod_data.get('instance') and mod_data.get('frame_wrapper') in current_pane_wrappers:
                         is_visible = True
-                
+
                 prefix = "[x]" if is_visible else "[ ]"
                 self.context_menu.add_command(
                     label=f"{prefix} {module_name}",
                     command=lambda mn=module_name: self.toggle_module_visibility(mn)
                 )
-        
+
         try:
             self.context_menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -489,16 +499,16 @@ class ModularGUI:
                     self.main_pane.forget(frame_wrapper)
                 except tk.TclError as e:
                     self.shared_state.log(f"Error forgetting pane for {module_name}: {e}", level=logging.WARNING)
-                
+
                 # Important: Destroy the instance and its frame_wrapper to free resources
                 # and ensure it's cleanly reloaded if shown again.
                 if instance:
                     instance.on_destroy() # Call module-specific cleanup
-                
+
                 # Destroy the frame_wrapper which contains the module's frame and the module instance's widgets
                 # This should cascade and destroy children, including module_instance.frame
-                frame_wrapper.destroy() 
-            
+                frame_wrapper.destroy()
+
             del self.loaded_modules[module_name] # Remove from active tracking
             if not self.main_pane.panes(): # If no panes left, add a default message
                  default_label = ttk.Label(self.main_pane, text="No modules displayed. Right-click to add.")
@@ -524,7 +534,7 @@ class ModularGUI:
                 self.root.update_idletasks() # Ensure PanedWindow updates
             else:
                 self.shared_state.log(f"Module '{module_name}' cannot be shown, not found in available modules.", level=logging.WARNING)
-        
+
         # Ensure layout is saved on next close
         # self.save_layout_config() # Or let it save on closing only
 
@@ -564,7 +574,7 @@ class ModularGUI:
         # event.x_root, event.y_root are screen coordinates
         # We need to find which pane of self.main_pane this corresponds to.
         x_root, y_root = event.x_root, event.y_root
-        
+
         current_target_pane = None
         for pane_name, module_data in self.loaded_modules.items():
             pane_widget = module_data.get('frame_wrapper')
@@ -578,7 +588,7 @@ class ModularGUI:
                 if x_min <= x_root < x_max and y_min <= y_root < y_max:
                     current_target_pane = pane_widget
                     break
-        
+
         if current_target_pane and current_target_pane != self.loaded_modules[self.dragged_module_name].get('frame_wrapper'):
             self.drop_target_pane = current_target_pane
             try:
@@ -618,7 +628,7 @@ class ModularGUI:
 
         if self.drop_target_pane and self.drop_target_pane != dragged_module_frame_wrapper:
             current_panes_ordered = list(self.main_pane.panes()) # These are the frame_wrappers
-            
+
             try:
                 dragged_idx = current_panes_ordered.index(dragged_module_frame_wrapper)
                 target_idx = current_panes_ordered.index(self.drop_target_pane)
@@ -631,7 +641,7 @@ class ModularGUI:
             # Perform reorder
             item_to_move = current_panes_ordered.pop(dragged_idx)
             current_panes_ordered.insert(target_idx, item_to_move)
-            
+
             # Store current sash positions and weights if possible (PanedWindow is tricky)
             # For simplicity, we might lose custom sash positions/weights here.
             # A more robust solution would save and restore them.
@@ -641,7 +651,7 @@ class ModularGUI:
                 try:
                     # PanedWindow doesn't directly expose weights of individual panes easily after adding.
                     # Weight is no longer used with .add(), so just store the widget.
-                    pane_configs.append({'widget': pane_fw}) 
+                    pane_configs.append({'widget': pane_fw})
                 except tk.TclError: # If pane was somehow removed
                     continue
 
@@ -653,7 +663,7 @@ class ModularGUI:
             # Re-add in new order
             for config in pane_configs:
                 self.main_pane.add(config['widget']) # Removed weight parameter
-            
+
             self.shared_state.log(f"Module {self.dragged_module_name} reordered.", level=logging.INFO)
         else:
             self.shared_state.log(f"Drag ended without a valid drop for {self.dragged_module_name}.", level=logging.DEBUG)
@@ -694,7 +704,7 @@ class ModularGUI:
         # but main_pane.panes() gives string IDs.
         # We already have frame_wrapper references in self.loaded_modules.
         # Let's just hide the main_pane.
-        
+
         self.main_pane.pack_forget() # Hide main_pane and all its children
 
         # Pack the fullscreen module's wrapper directly into the root
