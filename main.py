@@ -302,44 +302,34 @@ class CustomLayoutManager(tk.Frame):
             logging.error(f"CustomLayoutManager: Module to move '{module_to_move_name}' not found.")
             return
 
-        moved_item = self.modules.pop(module_to_move_name)
+        moved_item_info = self.modules.pop(module_to_move_name)
 
-        if target_module_name is None or target_module_name not in self.modules:
-            self.modules[module_to_move_name] = moved_item
+        new_modules_dict = {}
+
+        # Case 1: No specific target, or target is the module being moved (which is already popped).
+        # This means the module should go to the end of the list.
+        if target_module_name is None or target_module_name == module_to_move_name or target_module_name not in self.modules:
+            # Add all remaining items from the original dictionary (already in order)
+            for name, info in self.modules.items():
+                new_modules_dict[name] = info
+            # Add the moved item to the very end
+            new_modules_dict[module_to_move_name] = moved_item_info
         else:
-            new_modules_order = {}
+            # Case 2: A valid target_module_name is provided. Insert before it.
+            inserted = False
             for name, info in self.modules.items():
                 if name == target_module_name:
-                    new_modules_order[module_to_move_name] = moved_item
-                new_modules_order[name] = info
-            if module_to_move_name not in self.modules:
-                temp_items = list(self.modules.items())
-                new_modules_order.clear()
-                inserted = False
-                for name, info in temp_items:
-                    if name == target_module_name:
-                        new_modules_order[module_to_move_name] = moved_item
-                        inserted = True
-                    new_modules_order[name] = info
-                if not inserted:
-                    if not new_modules_order and not temp_items:
-                         new_modules_order[module_to_move_name] = moved_item
-                all_items = list(self.modules.items())
-                self.modules.clear()
-                if target_module_name is None or target_module_name not in [item[0] for item in all_items]:
-                    for name, info in all_items:
-                        self.modules[name] = info
-                    self.modules[module_to_move_name] = moved_item
-                else:
-                    inserted_flag = False
-                    for name, info in all_items:
-                        if name == target_module_name:
-                            self.modules[module_to_move_name] = moved_item
-                            inserted_flag = True
-                        self.modules[name] = info
-                    if not inserted_flag:
-                         self.modules[module_to_move_name] = moved_item
+                    new_modules_dict[module_to_move_name] = moved_item_info # Insert moved item
+                    inserted = True
+                new_modules_dict[name] = info # Insert current item from loop
+            
+            # This case should ideally not be hit if target_module_name was valid and present.
+            # However, as a fallback, if it wasn't inserted (e.g., target was the last item and loop finished), add to end.
+            if not inserted:
+                 new_modules_dict[module_to_move_name] = moved_item_info
 
+        self.modules = new_modules_dict
+        logging.info(f"New module order: {list(self.modules.keys())}")
         self.reflow_layout()
 
     def get_layout_data(self) -> dict:
