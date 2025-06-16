@@ -33,15 +33,26 @@ class Module:
         self.title_label.pack(side=tk.LEFT, padx=5)
 
         self.fullscreen_button = ttk.Button(self.title_bar_frame, text="FS", width=3, command=self.invoke_fullscreen_toggle)
-        self.fullscreen_button.pack(side=tk.RIGHT, padx=(0, 5))
+        # Pack FS button first to be on the left of X (when both are side=tk.RIGHT)
+        self.fullscreen_button.pack(side=tk.RIGHT, padx=(0, 2))
 
-        self.shared_state.log(f"Module '{self.module_name}' initialized with title bar and FS button.")
+        self.close_button = ttk.Button(self.title_bar_frame, text="X", width=3, command=self.request_close)
+        self.close_button.pack(side=tk.RIGHT, padx=(0, 5)) # X will be to the right of FS
+
+        self.shared_state.log(f"Module '{self.module_name}' initialized with title bar, FS, and Close buttons.")
 
     def invoke_fullscreen_toggle(self):
         if self.gui_manager:
             self.gui_manager.toggle_fullscreen(self.module_name)
         else:
             self.shared_state.log(f"Cannot toggle fullscreen for {self.module_name}: gui_manager not available.", logging.ERROR)
+
+    def request_close(self):
+        """Requests the GUI manager to close this module."""
+        if self.gui_manager:
+            self.gui_manager.close_module_by_request(self.module_name)
+        else:
+            self.shared_state.log(f"Cannot request close for {self.module_name}: gui_manager not available.", logging.ERROR)
 
     def get_frame(self):
         '''Returns the main tk.Frame of the module that contains its UI elements.'''
@@ -688,6 +699,47 @@ class ModularGUI:
 
         # Ensure layout is saved on next close
         # self.save_layout_config() # Or let it save on closing only
+
+    def close_module_by_request(self, module_name):
+        #_Purpose: Closes (hides and destroys) a specific module by its name,
+        #_typically triggered by the module's own close button.
+
+        self.shared_state.log(f"Request to close module: '{module_name}'", level=logging.INFO)
+
+        if module_name in self.loaded_modules:
+            module_data = self.loaded_modules[module_name]
+            frame_wrapper = module_data.get('frame_wrapper')
+            instance = module_data.get('instance')
+
+            if frame_wrapper and frame_wrapper.winfo_exists():
+                try:
+                    self.main_pane.forget(frame_wrapper)
+                except tk.TclError as e:
+                    self.shared_state.log(f"TclError forgetting pane for {module_name} during close: {e}", level=logging.WARNING)
+
+                if instance:
+                    try:
+                        instance.on_destroy() # Call module-specific cleanup
+                    except Exception as e:
+                        self.shared_state.log(f"Error during {module_name}.on_destroy(): {e}", level=logging.ERROR)
+
+                frame_wrapper.destroy()
+
+            # Remove from tracking after all operations on it are done.
+            if module_name in self.loaded_modules: # Check again, in case on_destroy somehow manipulated it (unlikely but safe)
+                del self.loaded_modules[module_name]
+            self.shared_state.log(f"Module '{module_name}' closed and unloaded.", level=logging.INFO)
+
+            try:
+                # Check if main_pane itself still exists before trying to access its panes
+                if self.main_pane.winfo_exists() and not self.main_pane.panes():
+                     default_label = ttk.Label(self.main_pane, text="No modules displayed. Use 'Manage Modules' or right-click to add.")
+                     self.main_pane.add(default_label)
+                     self.shared_state.log("All modules closed, displaying default message in main_pane.", level=logging.DEBUG)
+            except tk.TclError as e: # This can happen if main_pane itself is being destroyed
+                self.shared_state.log(f"TclError checking/updating main_pane after closing module: {e}", level=logging.WARNING)
+        else:
+            self.shared_state.log(f"Attempted to close module '{module_name}', but it was not found in loaded_modules.", level=logging.WARNING)
 
     def open_module_management_menu_at_button(self):
         """Creates a dummy event to open the context menu near the 'Manage Modules' button."""
