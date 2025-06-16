@@ -5,7 +5,7 @@ import logging # For logging level constants
 import os # For os.path.basename
 
 try:
-    from tkvideoplayer import TkinterVideo
+    from tkVideoPlayer import TkinterVideo
 except ImportError:
     TkinterVideo = None # Placeholder if library is not installed
 
@@ -77,58 +77,31 @@ class VideoModule(Module):
             return
 
         self.video_filepath = filepath
-        ae_variable_for_fast_seek_check = None # Define outside to check in success log
         try:
             # Clear previous video player and status label if any
-            if self.video_player: # If a player widget exists
-                self.video_player.destroy()
+            for widget in self.video_area.winfo_children():
+                widget.destroy()
             self.video_player = None # Ensure it's reset
 
-            for widget in self.video_area.winfo_children(): # Clear out any status labels etc.
-                widget.destroy()
-
             self.video_player = TkinterVideo(master=self.video_area, scaled=True)
-
-            try:
-                self.video_player.load(self.video_filepath) # Attempt to load
-            except AttributeError as ae:
-                ae_variable_for_fast_seek_check = ae # Store for outer scope check
-                if 'fast_seek' in str(ae).lower():
-                    self.shared_state.log(
-                        f"AttributeError during video load (tkVideoPlayer/PyAV issue, possibly 'fast_seek'): {ae}. Playback might be unstable.",
-                        logging.WARNING
-                    )
-                    # Update UI to inform user, but still try to proceed if load didn't fully crash player
-                    self.video_status_label = ttk.Label(self.video_area, text=f"Warning: Video library issue ('fast_seek').\nPlayback may be affected.", foreground="orange", background="black", justify=tk.CENTER)
-                    self.video_status_label.pack(expand=True)
-                    # Player might be in an indeterminate state, but we'll allow trying to use it
-                else:
-                    raise # Re-raise other AttributeErrors not related to fast_seek
-
+            self.video_player.load(self.video_filepath)
             self.video_player.pack(expand=True, fill="both")
 
-            self.video_loaded = True # Assume loaded even with warning, user can try to play
+            self.video_loaded = True
             self.is_playing = False
             self.play_pause_button.config(text="Play", state=tk.NORMAL)
             self.stop_button.config(state=tk.NORMAL)
+            self.shared_state.log(f"Video '{self.video_filepath}' loaded successfully by {self.module_name}.", logging.INFO)
+            self.shared_state.set("video_status", "Loaded")
 
-            # Avoid double logging success if warning was already issued due to fast_seek
-            if not (ae_variable_for_fast_seek_check and 'fast_seek' in str(ae_variable_for_fast_seek_check).lower()):
-                 self.shared_state.log(f"Video '{self.video_filepath}' loaded by {self.module_name}.", logging.INFO)
-            self.shared_state.set("video_status", "Loaded") # Indicate Loaded, even if with warning
-
-        except Exception as e: # General catch-all for other errors during setup or re-raised AttributeErrors
+        except Exception as e:
             self.video_loaded = False
-            self.shared_state.log(f"Error setting up video player for '{self.video_filepath}': {e}", logging.ERROR)
+            self.shared_state.log(f"Error loading video '{self.video_filepath}': {e}", logging.ERROR)
+            # Clear video area again before showing error
+            for widget in self.video_area.winfo_children(): widget.destroy()
+            self.video_player = None
 
-            # Ensure video_area is clean if general error occurs
-            if self.video_player and self.video_player.winfo_exists():
-                self.video_player.destroy()
-            self.video_player = None # Crucial to reset
-            for widget in self.video_area.winfo_children(): # Clear area again
-                widget.destroy()
-
-            error_text = f"Error loading video:\n{os.path.basename(self.video_filepath)}\nDetails: {str(e)[:100]}..."
+            error_text = f"Error loading video:\n{os.path.basename(self.video_filepath)}\nCheck console for details."
             self.video_status_label = ttk.Label(self.video_area, text=error_text, foreground="red", background="black", justify=tk.CENTER)
             self.video_status_label.pack(expand=True)
             self.play_pause_button.config(state=tk.DISABLED)
