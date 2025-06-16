@@ -177,7 +177,7 @@ class ModularGUI:
             drag_handle_widget = module_instance.drag_handle_label
             drag_handle_widget.bind("<ButtonPress-1>", lambda event, mn=module_name: self.start_drag(event, mn))
 
-            master_pane_for_wrapper.add(frame_wrapper, weight=1)
+            master_pane_for_wrapper.add(frame_wrapper) # Removed weight parameter
             self.shared_state.log(f"Instantiated and added module '{module_name}' to pane.")
             return frame_wrapper
         except Exception as e:
@@ -212,13 +212,13 @@ class ModularGUI:
                         try:
                             # If it's not already a child of main_pane (e.g. after fullscreen or layout clear)
                             if str(wrapper.master) != str(self.main_pane): # Compare string paths of masters
-                                 self.main_pane.add(wrapper, weight=1) # Re-add if not currently in main_pane
+                                 self.main_pane.add(wrapper) # Re-add if not currently in main_pane (Removed weight)
                                  created_wrappers.append(wrapper)
                                  self.shared_state.log(f"Re-added existing module '{module_name}' to default layout.")
                             elif wrapper in self.main_pane.panes(): # Already there
                                  created_wrappers.append(wrapper)
                             else: # Is child of main_pane but not added as a pane (shouldn't happen with current logic)
-                                 self.main_pane.add(wrapper, weight=1)
+                                 self.main_pane.add(wrapper) # Removed weight
                                  created_wrappers.append(wrapper)
                             continue
                         except tk.TclError: # If already a child or other error
@@ -235,7 +235,7 @@ class ModularGUI:
         if not created_wrappers: # Check if any modules were actually added to the pane
             # Add a default label if no modules are loaded to prevent empty PanedWindow issues
             default_label = ttk.Label(self.main_pane, text="No modules available for default layout.")
-            self.main_pane.add(default_label) # Add default label to the main_pane
+            self.main_pane.add(default_label) # Add default label to the main_pane (no weight here either)
             self.shared_state.log("No modules loaded for default layout. Displaying default message.")
 
     def save_layout_config(self):
@@ -640,8 +640,8 @@ class ModularGUI:
                  # Try to get weight; default to 1 if not available or not supported for forget/add cycle
                 try:
                     # PanedWindow doesn't directly expose weights of individual panes easily after adding.
-                    # We'll assume weight 1 for all for now on re-add.
-                    pane_configs.append({'widget': pane_fw, 'weight': 1})
+                    # Weight is no longer used with .add(), so just store the widget.
+                    pane_configs.append({'widget': pane_fw})
                 except tk.TclError: # If pane was somehow removed
                     continue
 
@@ -652,7 +652,7 @@ class ModularGUI:
 
             # Re-add in new order
             for config in pane_configs:
-                self.main_pane.add(config['widget'], weight=config['weight'])
+                self.main_pane.add(config['widget']) # Removed weight parameter
 
             self.shared_state.log(f"Module {self.dragged_module_name} reordered.", level=logging.INFO)
         else:
