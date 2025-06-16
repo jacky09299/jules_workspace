@@ -360,6 +360,21 @@ class ModularGUI:
 
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
+    def _finalize_initial_window_state(self):
+        """
+        Called after the initial layout is complete.
+        Sets the window_size_fixed_after_init flag and makes the window non-resizable.
+        """
+        self.root.update_idletasks() # Ensure dimensions are calculated
+        self.window_size_fixed_after_init = True
+        self.root.resizable(False, False)
+        current_w = self.root.winfo_width()
+        current_h = self.root.winfo_height()
+        self.shared_state.log(
+            f"Initial window state finalized. window_size_fixed_after_init=True. Window non-resizable. Current size: {current_w}x{current_h}",
+            "INFO"
+        )
+
     def _on_mousewheel(self, event):
         if hasattr(event, 'num') and event.num == 4:
             self.canvas.yview_scroll(-1, "units")
@@ -570,8 +585,7 @@ class ModularGUI:
             self.shared_state.log("No modules loaded for default layout. Displaying default message in main_layout_manager.")
         self.update_min_window_size()
         self.update_layout_scrollregion()
-        self.window_size_fixed_after_init = True
-        self.shared_state.log(f"ModularGUI.setup_default_layout: self.window_size_fixed_after_init set to {self.window_size_fixed_after_init}", "INFO")
+        self._finalize_initial_window_state()
 
     def save_layout_config(self):
         self.shared_state.log(f"Saving layout configuration to {self.layout_config_file}")
@@ -690,8 +704,7 @@ class ModularGUI:
             else:
                 self.update_min_window_size()
                 self.update_layout_scrollregion()
-            self.window_size_fixed_after_init = True
-            self.shared_state.log(f"ModularGUI.load_layout_config: self.window_size_fixed_after_init set to {self.window_size_fixed_after_init}", "INFO")
+                self._finalize_initial_window_state()
         except Exception as e:
             self.shared_state.log(f"Error loading layout configuration: {e}. Using default layout.", level=logging.ERROR)
             current_loaded_module_names = list(self.loaded_modules.keys())
