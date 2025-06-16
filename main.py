@@ -211,7 +211,7 @@ class CustomLayoutManager(tk.Frame):
         if module_name in self.modules:
             self.modules[module_name]['width'] = max(10, width)
             self.modules[module_name]['height'] = max(10, height)
-            self.reflow_layout()
+            self.reflow_layout() # Calls with simulate=False, module_configs_override=None
         else:
             logging.warning(f"CustomLayoutManager: Attempted to resize non-existent module: {module_name}")
 
@@ -221,57 +221,82 @@ class CustomLayoutManager(tk.Frame):
                r1_y < r2_y + r2_h and \
                r1_y + r1_h > r2_y
 
-    def reflow_layout(self):
-        placed_modules_rects = []
+    def reflow_layout(self, simulate=False, module_configs_override=None):
+        placed_modules_rects = [] # Stores {'name': name, 'x': x, 'y': y, 'w': w, 'h': h} for overlap checks
+        
+        # Determine module data source
+        if module_configs_override is not None:
+            # module_configs_override is a list of dicts: [{'name': name, 'width': w, 'height': h, 'frame': (optional)}, ...]
+            module_iterator = module_configs_override
+        else:
+            # Convert self.modules.values() to a list to ensure module_iterator is always a list of dicts
+            module_iterator = list(self.modules.values())
+
         container_width = self.current_canvas_width
         if container_width <= 1:
              container_width = self.canvas_parent.winfo_width()
-        if container_width <= 1:
+        if container_width <= 1: # Fallback if canvas not yet sized
              container_width = 800
 
-        max_x_coord = 0
-        max_y_coord = 0
+        max_x_coord = 0 # Tracks the rightmost extent of placed modules
+        max_y_coord = 0 # Tracks the bottommost extent of placed modules
 
-        scan_height_limit = 10000
+        scan_height_limit = 10000 # Max height to scan for a position
+        min_module_dim = 10 # Minimum dimension for a module
 
-        min_module_dim = 10
-
-        for module_name, module_info in self.modules.items():
+        # Iterate through the modules to place them
+        for module_info in module_iterator:
+            module_name = module_info['name'] # Get name from the dict
             current_w = max(min_module_dim, module_info['width'])
             current_h = max(min_module_dim, module_info['height'])
 
             found_position_for_module = False
             final_x, final_y = 0, 0
 
-            for test_y_candidate in range(0, scan_height_limit, 1):
-                for test_x_candidate in range(0, container_width - current_w + 1, 1):
+            # Algorithm to find the next available (x,y) position
+            for test_y_candidate in range(0, scan_height_limit, 1): # Scan downwards
+                for test_x_candidate in range(0, container_width - current_w + 1, 1): # Scan rightwards
                     can_place_here = True
                     for placed_rect in placed_modules_rects:
                         if self._is_overlapping(test_x_candidate, test_y_candidate, current_w, current_h,
                                                 placed_rect['x'], placed_rect['y'], placed_rect['w'], placed_rect['h']):
                             can_place_here = False
-                            break
+                            break 
                     if can_place_here:
                         final_x = test_x_candidate
                         final_y = test_y_candidate
                         found_position_for_module = True
-                        break
+                        break 
                 if found_position_for_module:
-                    break
-
+                    break 
+            
             if found_position_for_module:
-                module_info['frame'].place(x=final_x, y=final_y, width=current_w, height=current_h)
-                placed_modules_rects.append({'name': module_name, 'x': final_x, 'y': final_y, 'w': current_w, 'h': current_h})
+                # Store calculated positions in the module_info dictionary
                 module_info['x'] = final_x
                 module_info['y'] = final_y
+                
+                # Actual Tkinter frame placement only if not simulating
+                if not simulate:
+                    if 'frame' in module_info and module_info['frame']:
+                        module_info['frame'].place(x=final_x, y=final_y, width=current_w, height=current_h)
+                    elif not module_configs_override: # Only log warning if using self.modules and frame is missing
+                         logging.warning(f"CustomLayoutManager: Frame not found for module {module_name} during actual placement.")
+                
+                placed_modules_rects.append({'name': module_name, 'x': final_x, 'y': final_y, 'w': current_w, 'h': current_h})
                 max_x_coord = max(max_x_coord, final_x + current_w)
                 max_y_coord = max(max_y_coord, final_y + current_h)
-            else:
+            else: # Fallback placement if no position found (should ideally not happen with large scan_height_limit)
                 fallback_y = max_y_coord + 5 if placed_modules_rects else 0
-                module_info['frame'].place(x=0, y=fallback_y, width=current_w, height=current_h)
-                placed_modules_rects.append({'name': module_name, 'x': 0, 'y': fallback_y, 'w': current_w, 'h': current_h})
                 module_info['x'] = 0
                 module_info['y'] = fallback_y
+
+                if not simulate:
+                    if 'frame' in module_info and module_info['frame']:
+                        module_info['frame'].place(x=0, y=fallback_y, width=current_w, height=current_h)
+                    elif not module_configs_override:
+                        logging.warning(f"CustomLayoutManager: Frame not found for module {module_name} during fallback placement.")
+
+                placed_modules_rects.append({'name': module_name, 'x': 0, 'y': fallback_y, 'w': current_w, 'h': current_h})
                 max_x_coord = max(max_x_coord, current_w)
                 max_y_coord = max(max_y_coord, fallback_y + current_h)
                 logging.warning(f"CustomLayoutManager: Could not find compact spot for {module_name}. Using fallback placement at (0, {fallback_y}).")
@@ -373,8 +398,12 @@ class ModularGUI:
 
         self.dragged_module_name = None
         self.drag_start_widget = None
-        self.drop_target_module_frame_wrapper = None
+        self.drop_target_module_frame_wrapper = None 
         self.original_dragged_module_relief = None
+        
+        self.ghost_module_frame = None
+        self.ghost_canvas_window_id = None
+        self.last_preview_target_module_name = None
 
         self.fullscreen_module_name = None
         # self.root_resizable_backup = None # This was removed, ensure it's not re-added
@@ -885,105 +914,269 @@ class ModularGUI:
     def start_drag(self, event, module_name):
         self.shared_state.log(f"Start dragging module: {module_name}", level=logging.DEBUG)
         self.dragged_module_name = module_name
-        self.drag_start_widget = event.widget
+        self.drag_start_widget = event.widget # This is the drag handle (ttk.Label)
 
-        dragged_frame_wrapper = self.loaded_modules[self.dragged_module_name].get('frame_wrapper')
-        if dragged_frame_wrapper:
-            self.original_dragged_module_relief = dragged_frame_wrapper.cget("relief")
-            dragged_frame_wrapper.config(relief=tk.SOLID, borderwidth=2)
+        # Get original module details
+        if self.dragged_module_name not in self.main_layout_manager.modules or \
+           self.dragged_module_name not in self.loaded_modules:
+            self.shared_state.log(f"Dragged module {self.dragged_module_name} not found in layout manager or loaded modules.", "ERROR")
+            self.dragged_module_name = None # Prevent further drag operations
+            return
+
+        dragged_module_layout_info = self.main_layout_manager.modules[self.dragged_module_name]
+        original_frame_wrapper = self.loaded_modules[self.dragged_module_name]['frame_wrapper']
+
+        original_width = dragged_module_layout_info['width']
+        original_height = dragged_module_layout_info['height']
+        original_x = dragged_module_layout_info['x']
+        original_y = dragged_module_layout_info['y']
+        
+        # Store original relief of the actual module's frame_wrapper for restoration
+        # The frame_wrapper itself will be hidden, not its internal 'frame' which holds content.
+        if original_frame_wrapper:
+            self.original_dragged_module_relief = original_frame_wrapper.cget("relief")
+            # No need to change relief of original_frame_wrapper as it will be hidden.
+            # The visual feedback for dragging is now the ghost.
+        
+        # Create ghost module frame
+        self.ghost_module_frame = ttk.Frame(self.canvas, width=original_width, height=original_height)
+        self.ghost_module_frame.configure(relief=tk.RIDGE, borderwidth=2)
+        ttk.Label(self.ghost_module_frame, text=f"Preview: {self.dragged_module_name}").pack(expand=True, fill=tk.BOTH)
+
+        # Place ghost on canvas at original module's position
+        self.ghost_canvas_window_id = self.canvas.create_window(
+            original_x, original_y, 
+            window=self.ghost_module_frame, 
+            anchor=tk.NW, 
+            width=original_width, 
+            height=original_height
+        )
+        self.shared_state.log(f"Ghost created at {original_x},{original_y} with ID {self.ghost_canvas_window_id}", "DEBUG")
+
+
+        # Hide original module's frame_wrapper
+        # The frame_wrapper is the one managed by CustomLayoutManager
+        if original_frame_wrapper:
+            original_frame_wrapper.place_forget()
+            self.shared_state.log(f"Original module {self.dragged_module_name} hidden.", "DEBUG")
+
+
+        # Initialize/reset last_preview_target_module_name
+        self.last_preview_target_module_name = None 
 
         self.root.config(cursor="fleur")
         self.root.bind("<B1-Motion>", self.on_drag)
         self.root.bind("<ButtonRelease-1>", self.end_drag)
         
     def on_drag(self, event):
-        if not self.dragged_module_name:
+        # 1. Basic Checks
+        if not self.dragged_module_name or not self.ghost_canvas_window_id or \
+           self.dragged_module_name not in self.main_layout_manager.modules: # Ensure original module info is still there
+            # self.shared_state.log("on_drag: Missing dragged_module_name or ghost_canvas_window_id or original module info.", "DEBUG")
             return
 
-        if self.drop_target_module_frame_wrapper and self.drop_target_module_frame_wrapper.winfo_exists():
-            if self.drop_target_module_frame_wrapper != self.loaded_modules[self.dragged_module_name].get('frame_wrapper'):
-                 try:
-                    self.drop_target_module_frame_wrapper.config(borderwidth=1)
-                 except tk.TclError: pass
+        # 2. Mouse Position
+        try:
+            mouse_x_on_canvas = event.x_root - self.canvas.winfo_rootx()
+            mouse_y_on_canvas = event.y_root - self.canvas.winfo_rooty()
+        except tk.TclError: 
+            # self.shared_state.log("on_drag: Error getting canvas coordinates.", "WARNING")
+            return
 
-        x_root, y_root = event.x_root, event.y_root
-        current_target_frame_wrapper = None
-
-        for module_name_iter, module_data_iter in self.loaded_modules.items():
-            if module_name_iter == self.dragged_module_name:
+        # 3. Determine Target for Preview (self.last_preview_target_module_name)
+        other_modules_info = []
+        for name, module_props in self.main_layout_manager.modules.items():
+            if name == self.dragged_module_name: # Exclude the module being dragged
                 continue
+            # Ensure module_props and its frame are valid, and it has geometry.
+            # The 'frame' itself isn't used in this part of logic, but its existence implies module is 'active'.
+            if module_props and module_props.get('frame') and module_props['frame'].winfo_exists() and \
+               all(k in module_props for k in ['x', 'y', 'width', 'height']):
+                other_modules_info.append({
+                    'name': name,
+                    'x': module_props['x'],
+                    'y': module_props['y'],
+                    'width': module_props['width'],
+                    'height': module_props['height'],
+                })
+        
+        self.last_preview_target_module_name = None # Reset before calculation
 
-            frame_wrapper_iter = module_data_iter.get('frame_wrapper')
-            if frame_wrapper_iter and frame_wrapper_iter.winfo_exists():
-                x_min = frame_wrapper_iter.winfo_rootx()
-                x_max = x_min + frame_wrapper_iter.winfo_width()
-                y_min = frame_wrapper_iter.winfo_rooty()
-                y_max = y_min + frame_wrapper_iter.winfo_height()
+        if other_modules_info: 
+            # Calculate Best Horizontal Target
+            modules_sorted_y = sorted(other_modules_info, key=lambda m: (m['y'], m['x']))
+            best_h_target = {'dist': float('inf'), 'target_name': None}
 
-                if x_min <= x_root < x_max and y_min <= y_root < y_max:
-                    current_target_frame_wrapper = frame_wrapper_iter
-                    break
+            if modules_sorted_y: # Check before first module
+                mod_y_first = modules_sorted_y[0]
+                if mouse_x_on_canvas >= mod_y_first['x'] and mouse_x_on_canvas <= mod_y_first['x'] + mod_y_first['width']:
+                    dist = abs(mouse_y_on_canvas - mod_y_first['y'])
+                    if dist < best_h_target['dist']:
+                        best_h_target['dist'] = dist
+                        best_h_target['target_name'] = mod_y_first['name']
+            
+            for i, mod_y in enumerate(modules_sorted_y): # Check after each module
+                gap_line_y = mod_y['y'] + mod_y['height']
+                if mouse_x_on_canvas >= mod_y['x'] and mouse_x_on_canvas <= mod_y['x'] + mod_y['width']:
+                    dist = abs(mouse_y_on_canvas - gap_line_y)
+                    if dist < best_h_target['dist']:
+                        best_h_target['dist'] = dist
+                        best_h_target['target_name'] = modules_sorted_y[i+1]['name'] if (i + 1) < len(modules_sorted_y) else None
 
-        if current_target_frame_wrapper:
-            self.drop_target_module_frame_wrapper = current_target_frame_wrapper
-            try:
-                self.drop_target_module_frame_wrapper.config(borderwidth=3)
-            except tk.TclError: pass
-        else:
-            self.drop_target_module_frame_wrapper = None
+            # Calculate Best Vertical Target
+            modules_sorted_x = sorted(other_modules_info, key=lambda m: (m['x'], m['y']))
+            best_v_target = {'dist': float('inf'), 'target_name': None}
+
+            if modules_sorted_x: # Check before first module (left)
+                mod_x_first = modules_sorted_x[0]
+                if mouse_y_on_canvas >= mod_x_first['y'] and mouse_y_on_canvas <= mod_x_first['y'] + mod_x_first['height']:
+                    dist = abs(mouse_x_on_canvas - mod_x_first['x'])
+                    if dist < best_v_target['dist']:
+                        best_v_target['dist'] = dist
+                        best_v_target['target_name'] = mod_x_first['name']
+
+            for i, mod_x in enumerate(modules_sorted_x): # Check after each module (right)
+                gap_line_x = mod_x['x'] + mod_x['width']
+                if mouse_y_on_canvas >= mod_x['y'] and mouse_y_on_canvas <= mod_x['y'] + mod_x['height']:
+                    dist = abs(mouse_x_on_canvas - gap_line_x)
+                    if dist < best_v_target['dist']:
+                        best_v_target['dist'] = dist
+                        best_v_target['target_name'] = modules_sorted_x[i+1]['name'] if (i + 1) < len(modules_sorted_x) else None
+            
+            # Select Final Target
+            # Default to None if no valid target distances were found (e.g., mouse is far from any module edges)
+            final_target_name = None # Default to None
+            # Check if any valid target was found. If both are inf, no target is viable.
+            h_target_is_valid = best_h_target['dist'] != float('inf')
+            v_target_is_valid = best_v_target['dist'] != float('inf')
+
+            if h_target_is_valid and v_target_is_valid:
+                if best_h_target['dist'] <= best_v_target['dist']: 
+                    final_target_name = best_h_target['target_name']
+                else:
+                    final_target_name = best_v_target['target_name']
+            elif h_target_is_valid:
+                final_target_name = best_h_target['target_name']
+            elif v_target_is_valid:
+                final_target_name = best_v_target['target_name']
+            
+            self.last_preview_target_module_name = final_target_name
+        # If other_modules_info is empty, self.last_preview_target_module_name remains None (implying drop at end)
+
+
+        # 4. Prepare Temporary Module Configurations (temp_module_configs)
+        temp_module_configs = []
+        if self.dragged_module_name not in self.main_layout_manager.modules:
+             return 
+        
+        dragged_module_original_info = self.main_layout_manager.modules[self.dragged_module_name]
+        dragged_config = {
+            'name': self.dragged_module_name,
+            'width': dragged_module_original_info['width'],
+            'height': dragged_module_original_info['height'],
+            'frame': None 
+        }
+        
+        inserted_dragged_module = False
+        current_module_order = list(self.main_layout_manager.modules.keys())
+
+        for name in current_module_order:
+            if name == self.dragged_module_name:
+                continue 
+
+            module_props_iter = self.main_layout_manager.modules[name]
+            current_module_config = {
+                'name': name,
+                'width': module_props_iter['width'],
+                'height': module_props_iter['height'],
+                'frame': module_props_iter['frame'] 
+            }
+            
+            if name == self.last_preview_target_module_name and not inserted_dragged_module:
+                temp_module_configs.append(dragged_config.copy()) 
+                inserted_dragged_module = True
+            
+            temp_module_configs.append(current_module_config)
+
+        if not inserted_dragged_module:
+            temp_module_configs.append(dragged_config.copy())
+            
+        # 5. Simulate Layout
+        self.main_layout_manager.reflow_layout(simulate=True, module_configs_override=temp_module_configs)
+
+        # 6. Update Ghost Module Position
+        new_x, new_y = 0, 0 
+        found_ghost_in_sim = False
+        for config in temp_module_configs:
+            if config['name'] == self.dragged_module_name:
+                new_x = config.get('x', 0)
+                new_y = config.get('y', 0)
+                found_ghost_in_sim = True
+                break
+        
+        if found_ghost_in_sim and self.ghost_canvas_window_id:
+            self.canvas.coords(self.ghost_canvas_window_id, new_x, new_y)
+            # self.shared_state.log(f"Moved ghost for {self.dragged_module_name} to {new_x},{new_y}", "DEBUG")
+        # elif self.ghost_canvas_window_id: 
+            # self.shared_state.log(f"Could not find {self.dragged_module_name} in simulated layout. Ghost not moved.", "WARNING")
+
 
     def end_drag(self, event):
-        if not self.dragged_module_name:
+        if not self.dragged_module_name: # Should not happen if drag started properly
             self.root.config(cursor="")
             self.root.unbind("<B1-Motion>")
             self.root.unbind("<ButtonRelease-1>")
             return
 
-        self.shared_state.log(f"End dragging module: {self.dragged_module_name}. Target wrapper: {self.drop_target_module_frame_wrapper}", level=logging.DEBUG)
+        # 1. Ghost Cleanup
+        if self.ghost_canvas_window_id:
+            self.canvas.delete(self.ghost_canvas_window_id)
+            self.ghost_canvas_window_id = None
+        if self.ghost_module_frame: 
+            # self.ghost_module_frame.destroy() # Typically not needed as canvas.delete should handle child widgets of the window item.
+            self.ghost_module_frame = None
+
+        self.shared_state.log(f"End dragging module: {self.dragged_module_name}. Target before: {self.last_preview_target_module_name}", level=logging.DEBUG)
+        
+        # Restore original dragged module's relief.
+        # The original module's frame_wrapper was place_forget()-ed, not destroyed.
+        # Its relief setting would persist. It will be re-shown by reflow_layout.
+        dragged_module_data = self.loaded_modules.get(self.dragged_module_name)
+        if dragged_module_data:
+            original_frame_wrapper = dragged_module_data.get('frame_wrapper')
+            # Check if original_dragged_module_relief attribute exists and has a value
+            if original_frame_wrapper and hasattr(self, 'original_dragged_module_relief') and self.original_dragged_module_relief:
+                # No need to check winfo_exists() here, as it's about to be placed by reflow_layout.
+                # If it was somehow destroyed, this might error, but logic assumes it's just hidden.
+                try:
+                    original_frame_wrapper.config(relief=self.original_dragged_module_relief, borderwidth=1) # Assuming borderwidth 1 was default
+                except tk.TclError as e:
+                    self.shared_state.log(f"Error resetting relief for {self.dragged_module_name}: {e}", "WARNING")
+        
+        # 2. Final Module Placement
+        if self.dragged_module_name: # Ensure it's still set
+            self.main_layout_manager.move_module_before(
+                self.dragged_module_name, 
+                self.last_preview_target_module_name
+            )
+            # move_module_before internally calls reflow_layout.
+            # After reflow_layout, we need to update scroll region and potentially min window size.
+            self.update_layout_scrollregion()
+            self.update_min_window_size()
+
+        # Reset cursor and unbind events
         self.root.config(cursor="")
         self.root.unbind("<B1-Motion>")
         self.root.unbind("<ButtonRelease-1>")
 
-        dragged_frame_wrapper = self.loaded_modules[self.dragged_module_name].get('frame_wrapper')
-
-        if dragged_frame_wrapper and dragged_frame_wrapper.winfo_exists() and self.original_dragged_module_relief:
-            try:
-                dragged_frame_wrapper.config(relief=self.original_dragged_module_relief, borderwidth=1)
-            except tk.TclError: pass
-
-        if self.drop_target_module_frame_wrapper and self.drop_target_module_frame_wrapper.winfo_exists():
-            try:
-                self.drop_target_module_frame_wrapper.config(borderwidth=1)
-            except tk.TclError: pass
-
-        if self.drop_target_module_frame_wrapper and \
-           self.drop_target_module_frame_wrapper != dragged_frame_wrapper and \
-           self.dragged_module_name:
-
-            target_module_name = None
-            for name, data in self.loaded_modules.items():
-                if data.get('frame_wrapper') == self.drop_target_module_frame_wrapper:
-                    target_module_name = name
-                    break
-
-            if target_module_name and target_module_name != self.dragged_module_name:
-                self.shared_state.log(f"Attempting to move '{self.dragged_module_name}' before '{target_module_name}'")
-                self.main_layout_manager.move_module_before(self.dragged_module_name, target_module_name)
-            elif not target_module_name:
-                 self.main_layout_manager.move_module_before(self.dragged_module_name, None)
-                 self.shared_state.log(f"Moved '{self.dragged_module_name}' to the end (no specific target module identified for wrapper).", level=logging.WARNING)
-
-        elif self.dragged_module_name and not self.drop_target_module_frame_wrapper :
-            self.shared_state.log(f"'{self.dragged_module_name}' dropped on empty space, moving to end.")
-            self.main_layout_manager.move_module_before(self.dragged_module_name, None)
-
-        else:
-            self.shared_state.log(f"Drag ended for {self.dragged_module_name} without a valid different drop target.", "DEBUG")
-
+        # 3. Reset attributes
         self.dragged_module_name = None
         self.drag_start_widget = None
-        self.drop_target_module_frame_wrapper = None
-        self.original_dragged_module_relief = None
+        if hasattr(self, 'original_dragged_module_relief'): 
+            self.original_dragged_module_relief = None
+        self.last_preview_target_module_name = None
+        # self.drop_target_module_frame_wrapper = None # Should already be None / not used
+
 
     def toggle_fullscreen(self, module_name):
         if self.fullscreen_module_name:
