@@ -92,21 +92,32 @@ class ModularGUI:
 
         # Fullscreen state
         self.fullscreen_module_name = None
-        # self.store_main_pane_children = [] # Unused attribute, removed.
+
+        # Top bar for global controls
+        self.top_bar_frame = ttk.Frame(self.root)
+        self.top_bar_frame.pack(side=tk.TOP, fill=tk.X, pady=(0, 2)) # Padding below top_bar
+
+        self.manage_modules_button = ttk.Button(
+            self.top_bar_frame,
+            text="Manage Modules",
+            command=self.open_module_management_menu_at_button
+        )
+        self.manage_modules_button.pack(side=tk.LEFT, padx=5, pady=2)
 
         # Main layout container - using PanedWindow for resizable sections
+        # This must be packed *after* top_bar_frame
         self.main_pane = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, sashrelief=tk.RAISED, background="lightgrey")
         self.main_pane.pack(fill=tk.BOTH, expand=True)
 
         self.available_module_classes = {} # Populated by discover_modules
         self.layout_config_file = 'layout_config.json' # Config file path
 
-        # Context Menu
+        # Context Menu (for right-click on main_pane and for Manage Modules button)
         self.context_menu = tk.Menu(self.root, tearoff=0)
         self.main_pane.bind("<Button-3>", self.show_context_menu)
 
         # Module Polling for dynamic discovery at runtime
-        self.known_module_files = set()     # Set of filepaths for modules already processed by initial scan or poller.
+        self.known_module_files = set()     # Set of filepaths for modules already processed.
         self.polling_interval = 3           # Interval in seconds for checking the modules directory.
         self.stop_polling_event = threading.Event() # Event to signal the polling thread to stop.
 
@@ -677,6 +688,26 @@ class ModularGUI:
 
         # Ensure layout is saved on next close
         # self.save_layout_config() # Or let it save on closing only
+
+    def open_module_management_menu_at_button(self):
+        """Creates a dummy event to open the context menu near the 'Manage Modules' button."""
+
+        # Helper class for the dummy event
+        class DummyEvent:
+            def __init__(self, x_root, y_root):
+                self.x_root = x_root
+                self.y_root = y_root
+
+        # Calculate position for the menu
+        # Get button's position relative to the root window
+        btn_x = self.manage_modules_button.winfo_rootx()
+        btn_y = self.manage_modules_button.winfo_rooty()
+        btn_height = self.manage_modules_button.winfo_height()
+
+        # Position the menu just below the button
+        dummy_event = DummyEvent(btn_x, btn_y + btn_height + 2) # Added 2px offset
+
+        self.show_context_menu(dummy_event)
 
 
     # --- Drag and Drop Methods ---
