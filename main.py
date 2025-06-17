@@ -4,6 +4,7 @@ import os
 import importlib.util
 from shared_state import SharedState
 import logging
+import json
 
 class Module:
     def __init__(self, master, shared_state, module_name="UnknownModule", gui_manager=None):
@@ -136,6 +137,12 @@ class Module:
             self.gui_manager.update_layout_manager_canvas_item_config()
 
     def _on_resize_release(self, event):
+        if self.gui_manager:
+            self.gui_manager.update_layout_scrollregion()
+            # 新增：縮放結束時強制存檔
+            if hasattr(self.gui_manager, "save_layout_config"):
+                self.gui_manager.save_layout_config()
+    # ...原本的 window maxsize/geometry 邏輯...
         if self.gui_manager:
             self.gui_manager.update_layout_scrollregion()
 
@@ -378,6 +385,8 @@ class CustomLayoutManager(tk.Frame):
         return self.modules.get(module_name)
 
 class ModularGUI:
+    CONFIG_FILE = "layout_config.json"
+
     def __init__(self, root):
         self.root = root
         self.root.title("Modular GUI Framework")
@@ -648,6 +657,7 @@ class ModularGUI:
             self.update_min_window_size() # Still needed after reflow
             self.update_layout_scrollregion() # Still needed after reflow
             self.shared_state.log(f"Module '{module_name}' instantiated from menu and layout reflowed.")
+            self.save_layout_config()  # <--- 新增：每次新增模組後儲存
         else:
             self.shared_state.log(f"Module '{module_name}' cannot be added, not found in available modules.", "WARNING")
 
@@ -724,30 +734,124 @@ class ModularGUI:
     def setup_default_layout(self):
         self.shared_state.log("Setting up default layout...")
 
-        modules_to_display = ['clock', 'report', 'video']
-        any_module_instantiated_in_default = False
-        for module_name in modules_to_display:
-            if module_name in self.available_module_classes:
-                # instantiate_module now defers reflow by default
-                wrapper = self.instantiate_module(module_name, self.main_layout_manager)
-                if wrapper:
-                    any_module_instantiated_in_default = True
-            else:
-                self.shared_state.log(f"Module '{module_name}' for default layout not available.", level=logging.WARNING)
+        # 預設不載入任何模組
+        # modules_to_display = ['clock', 'report', 'video']
+        # any_module_instantiated_in_default = False
+        # for module_name in modules_to_display:
+        #     if module_name in self.available_module_classes:
+        #         wrapper = self.instantiate_module(module_name, self.main_layout_manager)
+        #         if wrapper:
+        #             any_module_instantiated_in_default = True
+        #     else:
+        #         self.shared_state.log(f"Module '{module_name}' for default layout not available.", level=logging.WARNING)
 
-        if any_module_instantiated_in_default:
-            self.main_layout_manager.reflow_layout() # Single reflow after all default modules are added
-        elif not self.main_layout_manager.modules: # Check if layout manager has any modules at all
-             # Only add label if no modules exist AT ALL (e.g. truly empty state)
-            default_label = ttk.Label(self.main_layout_manager, text="No modules available for default layout.")
-            default_label.pack(padx=10, pady=10) # This pack is outside the reflow system. Consider if this label is still needed or how it's managed.
-            self.shared_state.log("No modules loaded for default layout. Displaying default message in main_layout_manager.")
-
-        # These should be called regardless of whether new modules were added,
-        # as reflow (even if empty or for pre-existing modules) might have changed dimensions.
+        # if any_module_instantiated_in_default:
+        #     self.main_layout_manager.reflow_layout()
+        # elif not self.main_layout_manager.modules:
         self.update_min_window_size()
         self.update_layout_scrollregion()
         self._finalize_initial_window_state()
+        self.load_layout_config()
+
+    def save_layout_config(self):
+        """Save current layout and module states to a JSON file."""
+        if not self.loaded_modules:
+            print("[SAVE] No modules loaded, skip saving layout config.")
+            return
+        config = {
+            "modules": [],
+            "maximized_module_name": self.maximized_module_name,
+            "module_order": []
+        }
+        # 依照 main_layout_manager.modules 的順序記錄 instance_id
+        config["module_order"] = list(self.main_layout_manager.modules.keys())
+        for iid in config["module_order"]:
+            mod_data = self.loaded_modules.get(iid)
+            info = self.main_layout_manager.get_module_info(iid)
+            if mod_data:
+                config["modules"].append({
+                    "module_name": mod_data["module_name"],
+                    "instance_id": iid,
+                    "width": info["width"] if info else 200,
+                    "height": info["height"] if info else 150,
+                })
+        config_path = os.path.join(os.getcwd(), self.CONFIG_FILE)
+        print(f"[SAVE] Writing layout config to: {config_path}")
+        try:
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=2)
+            print(f"[SAVE] Layout config written.")
+        except Exception as e:
+            print(f"[SAVE][ERROR] Failed to write layout config: {e}")
+
+    def load_layout_config(self):
+        """Load layout and module states from a JSON file."""
+        config_path = os.path.join(os.getcwd(), self.CONFIG_FILE)
+        print(f"[LOAD] Try loading layout config from: {config_path}")
+        if not os.path.exists(config_path):
+            print("[LOAD] No layout config file found, using default layout.")
+            return False
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+            for iid in list(self.loaded_modules.keys()):
+                self.hide_module(iid)
+            # --- 修正 instance_id 計數器，確保下次產生的 instance_id 不會重複 ---
+            max_counters = {}
+            for mod in config.get("modules", []):
+                module_name = mod["module_name"]
+                iid = mod["instance_id"]
+                if "#" in iid:
+                    base, num = iid.rsplit("#", 1)
+                    try:
+                        num = int(num)
+                        if base not in max_counters or num > max_counters[base]:
+                            max_counters[base] = num
+                    except Exception:
+                        pass
+            for base, max_num in max_counters.items():
+                self.module_instance_counters[base] = max_num + 1
+            # --- end 修正 ---
+
+            # 依照 module_order 順序還原
+            module_order = config.get("module_order")
+            if module_order:
+                iid_to_mod = {mod["instance_id"]: mod for mod in config.get("modules", [])}
+                ordered_mods = [iid_to_mod[iid] for iid in module_order if iid in iid_to_mod]
+            else:
+                ordered_mods = config.get("modules", [])
+
+            for mod in ordered_mods:
+                module_name = mod["module_name"]
+                iid = mod["instance_id"]
+                width = mod.get("width", 200)
+                height = mod.get("height", 150)
+                if module_name in self.available_module_classes:
+                    old_counter = self.module_instance_counters.get(module_name, 1)
+                    try:
+                        if "#" in iid:
+                            base, num = iid.rsplit("#", 1)
+                            num = int(num)
+                            self.module_instance_counters[module_name] = num
+                    except Exception:
+                        pass
+                    frame_wrapper = self.instantiate_module(module_name, self.main_layout_manager)
+                    self.module_instance_counters[module_name] = max(old_counter, max_counters.get(module_name, 0) + 1)
+                    if frame_wrapper:
+                        self.loaded_modules[iid] = self.loaded_modules.pop(list(self.loaded_modules.keys())[-1])
+                        self.loaded_modules[iid]["instance_id"] = iid
+                        self.main_layout_manager.resize_module(iid, width, height, defer_reflow=True)
+            self.main_layout_manager.reflow_layout()
+            self.update_min_window_size()
+            self.update_layout_scrollregion()
+            maximized = config.get("maximized_module_name")
+            if maximized and maximized in self.loaded_modules:
+                self.maximize_module(maximized)
+            print("[LOAD] Layout config loaded and restored.")
+            return True
+        except Exception as e:
+            print(f"[LOAD][ERROR] Failed to load layout config: {e}")
+            return False
 
     def on_closing(self):
         self.shared_state.log("Application closing...")
@@ -808,7 +912,13 @@ class ModularGUI:
     def hide_module(self, instance_id: str):
         # Prevent hiding if maximized
         if self.maximized_module_name == instance_id:
+            # 先還原所有模組，再移除指定模組
             self.restore_modules()
+            # 直接呼叫一次自己來確保移除
+            # 注意：避免無限遞迴
+            if self.maximized_module_name is None and instance_id in self.loaded_modules:
+                self.hide_module(instance_id)
+            return
         else:
             self.shared_state.log(f"Hiding module: {instance_id} via close button/hide action.")
             if instance_id in self.loaded_modules:
@@ -833,6 +943,7 @@ class ModularGUI:
 
                 self.update_min_window_size()
                 self.update_layout_scrollregion()
+                self.save_layout_config()  # <--- 新增：每次刪除模組後儲存
             else:
                 self.shared_state.log(f"Module '{instance_id}' not found or not loaded, cannot hide.", "WARNING")
 
@@ -1037,23 +1148,9 @@ class ModularGUI:
                 self.dragged_module_name, 
                 self.last_preview_target_module_name
             )
-            # move_module_before internally calls reflow_layout.
-            # After reflow_layout, we need to update scroll region and potentially min window size.
             self.update_layout_scrollregion()
             self.update_min_window_size()
-
-        # Reset cursor and unbind events
-        self.root.config(cursor="")
-        self.root.unbind("<B1-Motion>")
-        self.root.unbind("<ButtonRelease-1>")
-
-        # 3. Reset attributes
-        self.dragged_module_name = None
-        self.drag_start_widget = None
-        if hasattr(self, 'original_dragged_module_relief'): 
-            self.original_dragged_module_relief = None
-        self.last_preview_target_module_name = None
-        # self.drop_target_module_frame_wrapper = None # Should already be None / not used
+            self.save_layout_config()  # <--- 新增：拖曳排序後儲存
 
     def maximize_module(self, instance_id):
         if self.maximized_module_name == instance_id:
@@ -1084,6 +1181,7 @@ class ModularGUI:
                     instance.is_maximized = False
 
         self.canvas.config(scrollregion=(0, 0, canvas_width, canvas_height))
+        self.save_layout_config()  # <--- 新增：放大後儲存
 
     def restore_modules(self):
         if not self.maximized_module_name:
@@ -1111,6 +1209,7 @@ class ModularGUI:
         self.update_layout_scrollregion()
         self.maximized_module_name = None
         self._pre_maximize_layout = None
+        self.save_layout_config()  # <--- 新增：還原後儲存
 if __name__ == "__main__":
     import sys
     if '__main__' in sys.modules:
