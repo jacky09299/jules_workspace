@@ -504,8 +504,7 @@ class FitterModule(Module):
 
         self.clear_plots()
         self.output_text.delete(1.0, tk.END)
-        # self.status_var.set("正在分析...") # Replaced by self.update_status
-        self.update_status("正在分析...")
+        self.shared_state.log("Fitter: 正在分析...", level="INFO")
         if hasattr(self, 'run_button'): # Check if run_button exists
             self.run_button.config(state="disabled")
 
@@ -519,7 +518,7 @@ class FitterModule(Module):
             except ValueError:
                 messagebox.showerror("錯誤", "左側頻率必須是一個有效的數字", parent=self.frame)
                 if hasattr(self, 'run_button'): self.run_button.config(state="normal")
-                self.update_status("錯誤: 左側頻率無效")
+                self.shared_state.log("Fitter: 錯誤: 左側頻率無效", level="ERROR")
                 return
 
         right_freq_val = None
@@ -529,7 +528,7 @@ class FitterModule(Module):
             except ValueError:
                 messagebox.showerror("錯誤", "右側頻率必須是一個有效的數字", parent=self.frame)
                 if hasattr(self, 'run_button'): self.run_button.config(state="normal")
-                self.update_status("錯誤: 右側頻率無效")
+                self.shared_state.log("Fitter: 錯誤: 右側頻率無效", level="ERROR")
                 return
 
         self.shared_state.log(f"Running analysis for {file_path_str}. Output: {output_dir_val}, Check only: {check_only_val}, L-Freq: {left_freq_val}, R-Freq: {right_freq_val}")
@@ -554,8 +553,7 @@ class FitterModule(Module):
             self.frame.after(0, self.create_and_display_full_spectrum)
 
             if check_only:
-                # self.root.after(0, lambda: self.status_var.set("分析完成 (僅檢查模式)"))
-                self.frame.after(0, lambda: self.update_status("分析完成 (僅檢查模式)"))
+                self.frame.after(0, lambda: self.shared_state.log("Fitter: 分析完成 (僅檢查模式)", level="DEBUG"))
                 if hasattr(self, 'run_button'): self.frame.after(0, lambda: self.run_button.config(state="normal"))
                 if hasattr(self, 'notebook') and hasattr(self, 'full_spectrum_frame'): self.frame.after(0, lambda: self.notebook.select(self.full_spectrum_frame))
                 self.shared_state.log("Analysis complete (check only mode).")
@@ -572,8 +570,7 @@ class FitterModule(Module):
             self.log_message(lmfit.fit_report(self.analyzer.circle_result) + "\n")
             self.frame.after(0, self.create_and_display_circle_fit)
 
-            # self.root.after(0, lambda: self.status_var.set("分析完成"))
-            self.frame.after(0, lambda: self.update_status("分析完成"))
+            self.frame.after(0, lambda: self.shared_state.log("Fitter: 分析完成", level="INFO"))
             if hasattr(self, 'notebook') and hasattr(self, 'full_spectrum_frame'): self.frame.after(0, lambda: self.notebook.select(self.full_spectrum_frame))
             self.shared_state.log("Analysis complete.")
 
@@ -581,8 +578,7 @@ class FitterModule(Module):
             import traceback
             error_message = f"執行時發生錯誤: {str(e)}\n詳細錯誤: {traceback.format_exc()}\n"
             self.log_message(error_message)
-            # self.root.after(0, lambda: self.status_var.set("發生錯誤"))
-            self.frame.after(0, lambda: self.update_status("發生錯誤"))
+            self.frame.after(0, lambda: self.shared_state.log("Fitter: 發生錯誤", level="ERROR"))
             self.shared_state.log(f"Error during analysis: {error_message}", level="error")
         finally:
             if hasattr(self, 'run_button'): self.frame.after(0, lambda: self.run_button.config(state="normal"))
@@ -596,9 +592,8 @@ class FitterModule(Module):
             except Exception as e:
                 error_msg = f"創建全頻譜圖時發生錯誤: {e}\n"
                 self.log_message(error_msg)
-                # self.status_var.set("創建全頻譜圖錯誤") # Replaced
-                self.update_status("創建全頻譜圖錯誤")
-                self.shared_state.log(error_msg, level="error")
+                self.shared_state.log("Fitter: 創建全頻譜圖錯誤", level="ERROR")
+                self.shared_state.log(error_msg, level="error") # This logs the detailed error too
 
 
     def create_and_display_magnitude_fit(self):
@@ -610,9 +605,8 @@ class FitterModule(Module):
             except Exception as e:
                 error_msg = f"創建振幅擬合圖時發生錯誤: {e}\n"
                 self.log_message(error_msg)
-                # self.status_var.set("創建振幅擬合圖錯誤") # Replaced
-                self.update_status("創建振幅擬合圖錯誤")
-                self.shared_state.log(error_msg, level="error")
+                self.shared_state.log("Fitter: 創建振幅擬合圖錯誤", level="ERROR")
+                self.shared_state.log(error_msg, level="error") # This logs the detailed error too
 
     def create_and_display_circle_fit(self):
         """在主線程中創建並顯示相位擬合圖"""
@@ -623,9 +617,8 @@ class FitterModule(Module):
             except Exception as e:
                 error_msg = f"創建相位擬合圖時發生錯誤: {e}\n"
                 self.log_message(error_msg)
-                # self.status_var.set("創建相位擬合圖錯誤") # Replaced
-                self.update_status("創建相位擬合圖錯誤")
-                self.shared_state.log(error_msg, level="error")
+                self.shared_state.log("Fitter: 創建相位擬合圖錯誤", level="ERROR")
+                self.shared_state.log(error_msg, level="error") # This logs the detailed error too
 
     def display_plot(self, figure, frame, title):
         """在指定的框架中顯示圖形"""
