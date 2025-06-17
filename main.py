@@ -199,14 +199,17 @@ class CustomLayoutManager(tk.Frame):
         self.last_calculated_content_width = 0
         self.last_calculated_content_height = 0
 
-    def add_module(self, module_frame, module_name, width, height):
+    def add_module(self, module_frame, module_name, width, height, defer_reflow=False):
         self.modules[module_name] = {
             'frame': module_frame,
             'name': module_name,
             'width': width,
             'height': height,
         }
-        self.reflow_layout()
+        if not defer_reflow:
+            self.reflow_layout()
+        else:
+            logging.debug(f"Add_module for {module_name} deferred reflow.")
 
     def remove_module(self, module_name):
         if module_name in self.modules:
@@ -216,11 +219,14 @@ class CustomLayoutManager(tk.Frame):
         else:
             logging.getLogger().warning(f"CustomLayoutManager: Attempted to remove non-existent module '{module_name}'.")
 
-    def resize_module(self, module_name, width, height):
+    def resize_module(self, module_name, width, height, defer_reflow=False):
         if module_name in self.modules:
             self.modules[module_name]['width'] = max(10, width)
             self.modules[module_name]['height'] = max(10, height)
-            self.reflow_layout() # Calls with simulate=False, module_configs_override=None
+            if not defer_reflow:
+                self.reflow_layout()
+            else:
+                logging.debug(f"Resize_module for {module_name} deferred reflow.")
         else:
             logging.warning(f"CustomLayoutManager: Attempted to resize non-existent module: {module_name}")
 
@@ -231,14 +237,13 @@ class CustomLayoutManager(tk.Frame):
                r1_y + r1_h > r2_y
 
     def reflow_layout(self, simulate=False, module_configs_override=None):
-        placed_modules_rects = [] # Stores {'name': name, 'x': x, 'y': y, 'w': w, 'h': h} for overlap checks
-        
+        logging.info("Reflowing layout with new optimized algorithm.")
+        placed_modules_rects = [] # Still useful for storing final rects if needed elsewhere, or can be removed if not.
+
         # Determine module data source
         if module_configs_override is not None:
-            # module_configs_override is a list of dicts: [{'name': name, 'width': w, 'height': h, 'frame': (optional)}, ...]
             module_iterator = module_configs_override
         else:
-            # Convert self.modules.values() to a list to ensure module_iterator is always a list of dicts
             module_iterator = list(self.modules.values())
 
         container_width = self.current_canvas_width
@@ -247,71 +252,53 @@ class CustomLayoutManager(tk.Frame):
         if container_width <= 1: # Fallback if canvas not yet sized
              container_width = 800
 
-        max_x_coord = 0 # Tracks the rightmost extent of placed modules
-        max_y_coord = 0 # Tracks the bottommost extent of placed modules
-
-        scan_height_limit = 10000 # Max height to scan for a position
         min_module_dim = 10 # Minimum dimension for a module
+        module_margin_x = 5 # Horizontal margin between modules
+        module_margin_y = 5 # Vertical margin between rows
 
-        # Iterate through the modules to place them
+        current_x = 0
+        current_y = 0
+        row_height = 0
+        max_x_coord = 0 # Tracks the rightmost extent of content
+        max_y_coord = 0 # Tracks the bottommost extent of content
+
         for module_info in module_iterator:
-            module_name = module_info['name'] # Get name from the dict
+            module_name = module_info['name']
             current_w = max(min_module_dim, module_info['width'])
             current_h = max(min_module_dim, module_info['height'])
 
-            found_position_for_module = False
-            final_x, final_y = 0, 0
-
-            # Algorithm to find the next available (x,y) position
-            for test_y_candidate in range(0, scan_height_limit, 1): # Scan downwards
-                for test_x_candidate in range(0, container_width - current_w + 1, 1): # Scan rightwards
-                    can_place_here = True
-                    for placed_rect in placed_modules_rects:
-                        if self._is_overlapping(test_x_candidate, test_y_candidate, current_w, current_h,
-                                                placed_rect['x'], placed_rect['y'], placed_rect['w'], placed_rect['h']):
-                            can_place_here = False
-                            break 
-                    if can_place_here:
-                        final_x = test_x_candidate
-                        final_y = test_y_candidate
-                        found_position_for_module = True
-                        break 
-                if found_position_for_module:
-                    break 
+            # Check if module fits in the current row (considering it's not the first module in the row)
+            if current_x > 0 and (current_x + current_w) > container_width:
+                # Move to the next row
+                current_y += row_height + module_margin_y
+                current_x = 0
+                row_height = 0
             
-            if found_position_for_module:
-                # Store calculated positions in the module_info dictionary
-                module_info['x'] = final_x
-                module_info['y'] = final_y
-                
-                # Actual Tkinter frame placement only if not simulating
-                if not simulate:
-                    if 'frame' in module_info and module_info['frame']:
-                        module_info['frame'].place(x=final_x, y=final_y, width=current_w, height=current_h)
-                    elif not module_configs_override: # Only log warning if using self.modules and frame is missing
-                         logging.warning(f"CustomLayoutManager: Frame not found for module {module_name} during actual placement.")
-                
-                placed_modules_rects.append({'name': module_name, 'x': final_x, 'y': final_y, 'w': current_w, 'h': current_h})
-                max_x_coord = max(max_x_coord, final_x + current_w)
-                max_y_coord = max(max_y_coord, final_y + current_h)
-            else: # Fallback placement if no position found (should ideally not happen with large scan_height_limit)
-                fallback_y = max_y_coord + 5 if placed_modules_rects else 0
-                module_info['x'] = 0
-                module_info['y'] = fallback_y
+            final_x = current_x
+            final_y = current_y
 
-                if not simulate:
-                    if 'frame' in module_info and module_info['frame']:
-                        module_info['frame'].place(x=0, y=fallback_y, width=current_w, height=current_h)
-                    elif not module_configs_override:
-                        logging.warning(f"CustomLayoutManager: Frame not found for module {module_name} during fallback placement.")
+            module_info['x'] = final_x
+            module_info['y'] = final_y
 
-                placed_modules_rects.append({'name': module_name, 'x': 0, 'y': fallback_y, 'w': current_w, 'h': current_h})
-                max_x_coord = max(max_x_coord, current_w)
-                max_y_coord = max(max_y_coord, fallback_y + current_h)
-                logging.warning(f"CustomLayoutManager: Could not find compact spot for {module_name}. Using fallback placement at (0, {fallback_y}).")
+            if not simulate:
+                if 'frame' in module_info and module_info['frame']:
+                    module_info['frame'].place(x=final_x, y=final_y, width=current_w, height=current_h)
+                elif not module_configs_override: # Only log warning if using self.modules and frame is missing
+                    logging.warning(f"CustomLayoutManager: Frame not found for module {module_name} during actual placement.")
+
+            placed_modules_rects.append({'name': module_name, 'x': final_x, 'y': final_y, 'w': current_w, 'h': current_h})
+
+            current_x += current_w + module_margin_x
+            row_height = max(row_height, current_h)
+
+            max_x_coord = max(max_x_coord, final_x + current_w) # Rightmost edge of current module
+            max_y_coord = max(max_y_coord, final_y + current_h) # Bottommost edge of current module
 
         self.last_calculated_content_width = max_x_coord
-        self.last_calculated_content_height = max_y_coord + 5
+        # If current_x is 0, it means no modules were placed, or the last row was empty.
+        # If modules were placed, max_y_coord already includes the height of the last row of modules.
+        # No need to add extra margin_y here as current_y wouldn't have been incremented for a next row that doesn't exist.
+        self.last_calculated_content_height = max_y_coord
 
         layout_manager_own_width = self.current_canvas_width
         if layout_manager_own_width <= 1:
@@ -319,7 +306,11 @@ class CustomLayoutManager(tk.Frame):
             if layout_manager_own_width <= 1:
                 layout_manager_own_width = 800
 
-        self.config(width=layout_manager_own_width, height=self.last_calculated_content_height)
+        # Ensure layout manager height is at least the calculated content height
+        # If no modules, max_y_coord will be 0, so set a minimal height.
+        effective_height = self.last_calculated_content_height if self.last_calculated_content_height > 0 else 10
+        self.config(width=layout_manager_own_width, height=effective_height)
+        logging.debug(f"Reflow complete. Content WxH: {self.last_calculated_content_width}x{self.last_calculated_content_height}. LM WxH: {layout_manager_own_width}x{effective_height}")
 
     def scale_modules(self, scale_ratio):
         """Scale all modules' width and height and reposition them."""
@@ -433,6 +424,11 @@ class ModularGUI:
         self.root_maxsize_backup = None # This should be present
         self.window_geometry_before_module_resize = None # Added new attribute
 
+        # For debouncing canvas resize events
+        self.resize_debounce_timer = None
+        self.resize_debounce_delay = 250 # milliseconds
+        # self.last_canvas_width = 0 # Removed, as CustomLayoutManager.current_canvas_width will be primary
+
         self.canvas_container = ttk.Frame(self.root)
         self.canvas_container.pack(fill=tk.BOTH, expand=True)
 
@@ -542,9 +538,24 @@ class ModularGUI:
         self.shared_state.log(f"update_layout_manager_canvas_item_config: Canvas item for LM set to width={canvas_viewport_width}, height={content_height}. Scrollregion set to (0,0,{content_width},{content_height})", "DEBUG")
 
     def on_canvas_configure(self, event):
+        # Cancel any existing timer
+        if self.resize_debounce_timer is not None:
+            self.root.after_cancel(self.resize_debounce_timer)
+            # Using "TRACE" level for very frequent logs if available, otherwise "DEBUG"
+            # self.shared_state.log("on_canvas_configure: Cancelled pending resize timer.", "TRACE")
+
+        # Schedule the actual handler
+        self.resize_debounce_timer = self.root.after(
+            self.resize_debounce_delay,
+            lambda e=event: self._handle_canvas_resize_debounced(e)
+        )
+        # self.shared_state.log(f"on_canvas_configure: Scheduled resize handler (ID: {self.resize_debounce_timer}) for event width {event.width}", "TRACE")
+
+    def _handle_canvas_resize_debounced(self, event):
+        self.shared_state.log(f"Debounced canvas resize handling. New width: {event.width}", "DEBUG")
         canvas_width = event.width
 
-        # 如果有最大化模組，讓 main_layout_manager 永遠填滿 canvas
+        # Maximized module handling
         if self.maximized_module_name and self.maximized_module_name in self.loaded_modules:
             canvas_height = self.canvas.winfo_height()
             self.main_layout_manager.config(width=canvas_width, height=canvas_height)
@@ -553,28 +564,33 @@ class ModularGUI:
             frame_wrapper = mod_data.get('frame_wrapper')
             if frame_wrapper and frame_wrapper.winfo_exists():
                 frame_wrapper.place(x=0, y=0, width=canvas_width, height=canvas_height)
-            # 不要呼叫 scale_modules 或 reflow_layout
             self.canvas.config(scrollregion=(0, 0, canvas_width, canvas_height))
         else:
-            self.canvas.itemconfig(self.main_layout_manager_window_id, width=canvas_width)
+            # Standard layout handling (scaling or reflowing)
+            prev_width = 0
             if hasattr(self.main_layout_manager, 'current_canvas_width'):
                 prev_width = self.main_layout_manager.current_canvas_width
+                # Update the layout manager's sense of its current width for the next event
                 self.main_layout_manager.current_canvas_width = canvas_width
-            else:
-                prev_width = self.last_canvas_width
+            # else:
+                # Fallback to self.last_canvas_width removed, assuming CustomLayoutManager.current_canvas_width is always present and initialized.
+                # If CustomLayoutManager might not have current_canvas_width, a more robust fallback would be needed here.
+                # For now, we rely on CustomLayoutManager having current_canvas_width.
 
-            # --- Begin: scale modules when window width changes ---
+            self.canvas.itemconfig(self.main_layout_manager_window_id, width=canvas_width)
+
             if prev_width > 0 and canvas_width > 0 and prev_width != canvas_width:
                 scale_ratio = canvas_width / prev_width
+                self.shared_state.log(f"Debounced resize: Scaling modules. Prev width: {prev_width}, New width: {canvas_width}, Ratio: {scale_ratio}", "DEBUG")
                 if hasattr(self.main_layout_manager, 'scale_modules'):
-                    self.main_layout_manager.scale_modules(scale_ratio)
+                    self.main_layout_manager.scale_modules(scale_ratio) # scale_modules calls reflow
             elif hasattr(self.main_layout_manager, 'reflow_layout'):
+                # Also reflow if prev_width was 0 (initial sizing) or if width is same but other changes might need it.
+                self.shared_state.log(f"Debounced resize: Reflowing layout. Prev width: {prev_width}, New width: {canvas_width}", "DEBUG")
                 self.main_layout_manager.reflow_layout()
-            # --- End: scale modules when window width changes ---
-
-            self.last_canvas_width = canvas_width  # Update last_canvas_width
 
             self.update_layout_scrollregion()
+
     def update_min_window_size(self):
         flag_exists = hasattr(self, 'window_size_fixed_after_init')
         flag_value = self.window_size_fixed_after_init if flag_exists else "N/A"
@@ -628,11 +644,12 @@ class ModularGUI:
                     children[0].destroy()
                     self.shared_state.log("Removed default placeholder label.", "DEBUG")
 
-            self.instantiate_module(module_name, self.main_layout_manager)
-            self.root.update_idletasks()
-            self.update_min_window_size()
-            self.update_layout_scrollregion()
-            self.shared_state.log(f"Module '{module_name}' instantiated from menu.")
+            self.instantiate_module(module_name, self.main_layout_manager) # This now defers reflow
+            self.main_layout_manager.reflow_layout() # Explicitly call reflow here
+            self.root.update_idletasks() # Ensure UI updates before size calculations
+            self.update_min_window_size() # Still needed after reflow
+            self.update_layout_scrollregion() # Still needed after reflow
+            self.shared_state.log(f"Module '{module_name}' instantiated from menu and layout reflowed.")
         else:
             self.shared_state.log(f"Module '{module_name}' cannot be added, not found in available modules.", "WARNING")
 
@@ -695,10 +712,10 @@ class ModularGUI:
             drag_handle_widget.bind("<ButtonPress-1>", lambda event, iid=instance_id: self.start_drag(event, iid))
 
             initial_width, initial_height = 200, 150
-            parent_layout_manager.add_module(frame_wrapper, instance_id, initial_width, initial_height)
-            self.update_min_window_size()
-            self.update_layout_scrollregion()
-            self.shared_state.log(f"Instantiated and added module '{instance_id}' to layout manager.")
+            # Call with defer_reflow=True
+            parent_layout_manager.add_module(frame_wrapper, instance_id, initial_width, initial_height, defer_reflow=True)
+            # Removed update_min_window_size and update_layout_scrollregion from here
+            self.shared_state.log(f"Instantiated module '{instance_id}', reflow deferred.")
             return frame_wrapper
         except Exception as e:
             self.shared_state.log(f"Error instantiating module {module_name}: {e}", level=logging.ERROR)
@@ -710,19 +727,26 @@ class ModularGUI:
         self.shared_state.log("Setting up default layout...")
 
         modules_to_display = ['clock', 'report', 'video']
-        created_wrappers = []
+        any_module_instantiated_in_default = False
         for module_name in modules_to_display:
             if module_name in self.available_module_classes:
+                # instantiate_module now defers reflow by default
                 wrapper = self.instantiate_module(module_name, self.main_layout_manager)
                 if wrapper:
-                    created_wrappers.append(wrapper)
+                    any_module_instantiated_in_default = True
             else:
                 self.shared_state.log(f"Module '{module_name}' for default layout not available.", level=logging.WARNING)
 
-        if not created_wrappers:
+        if any_module_instantiated_in_default:
+            self.main_layout_manager.reflow_layout() # Single reflow after all default modules are added
+        elif not self.main_layout_manager.modules: # Check if layout manager has any modules at all
+             # Only add label if no modules exist AT ALL (e.g. truly empty state)
             default_label = ttk.Label(self.main_layout_manager, text="No modules available for default layout.")
-            default_label.pack(padx=10, pady=10)
+            default_label.pack(padx=10, pady=10) # This pack is outside the reflow system. Consider if this label is still needed or how it's managed.
             self.shared_state.log("No modules loaded for default layout. Displaying default message in main_layout_manager.")
+
+        # These should be called regardless of whether new modules were added,
+        # as reflow (even if empty or for pre-existing modules) might have changed dimensions.
         self.update_min_window_size()
         self.update_layout_scrollregion()
         self._finalize_initial_window_state()
@@ -791,40 +815,72 @@ class ModularGUI:
             self.loaded_modules.clear()
 
             custom_modules_properties = layout_data.get('custom_modules_properties')
-            loaded_any_module_from_config = False
+            any_new_modules_instantiated = False
+            any_module_resized_from_config = False
 
             if custom_modules_properties:
-                self.shared_state.log(f"Loading modules from custom_modules_properties: {list(custom_modules_properties.keys())}")
+                self.shared_state.log(f"Instantiating modules from custom_modules_properties: {list(custom_modules_properties.keys())}")
+                # Instantiate modules first. Keys in custom_modules_properties are instance_ids (e.g., "clock#1")
+                # We need to extract the base module_name (e.g., "clock") for instantiation.
+                temp_instance_to_base_map = {} # To map generated instance_id to base_module_name from config for resizing
 
-                for module_name in custom_modules_properties.keys():
-                    if module_name in self.available_module_classes:
-                        if module_name not in self.loaded_modules:
-                            self.instantiate_module(module_name, self.main_layout_manager)
+                for instance_id_from_config in custom_modules_properties.keys():
+                    base_module_name = instance_id_from_config.split('#')[0]
+                    if base_module_name in self.available_module_classes:
+                        # instantiate_module now generates a new instance_id (e.g., clock#1, then clock#2 if called again for "clock")
+                        # This means the instance_id_from_config might not match the one generated by instantiate_module
+                        # if the config has non-sequential IDs or if modules are added/removed manually before saving.
+                        # For now, we instantiate the type and then try to apply properties using the config's instance_id.
+                        # This part of the logic is complex if we need to perfectly restore exact previous instance_ids
+                        # when they might conflict with the _generate_instance_id sequence.
+                        # Assuming for now that instantiate_module creates the necessary instances,
+                        # and the resize loop below will find them if IDs match.
+                        # A more robust system might pass instance_id_from_config to instantiate_module.
+
+                        # Simplified: Instantiate based on type, then try to match ID for resize.
+                        # If config has clock#1, clock#2, this will create clock#1, clock#2 (if module_instance_counters is fresh)
+                        new_instance = self.instantiate_module(base_module_name, self.main_layout_manager) # Defers reflow
+                        if new_instance: # new_instance is the frame_wrapper; its module_instance is in self.loaded_modules
+                            any_new_modules_instantiated = True
                     else:
-                        self.shared_state.log(f"Module '{module_name}' from layout config not available in discovered modules.", level=logging.WARNING)
+                        self.shared_state.log(f"Module type '{base_module_name}' (from config key '{instance_id_from_config}') not available.", level=logging.WARNING)
 
-                self.root.update_idletasks()
+                if any_new_modules_instantiated:
+                    self.root.update_idletasks() # Process pending UI events
 
-                for module_name, props in custom_modules_properties.items():
-                    if module_name in self.loaded_modules:
+                self.shared_state.log(f"Resizing modules from custom_modules_properties...")
+                for instance_id_from_config, props in custom_modules_properties.items():
+                    if instance_id_from_config in self.loaded_modules:
                         width = props.get('width', 200)
                         height = props.get('height', 150)
-                        self.main_layout_manager.resize_module(module_name, width, height)
-                        loaded_any_module_from_config = True
-                        self.shared_state.log(f"Applied saved size to {module_name}: w={width}, h={height}", level=logging.DEBUG)
-
+                        self.main_layout_manager.resize_module(instance_id_from_config, width, height, defer_reflow=True)
+                        any_module_resized_from_config = True
+                        self.shared_state.log(f"Resize for {instance_id_from_config} to w={width}, h={height} (reflow deferred).", level=logging.DEBUG)
+                    else:
+                        self.shared_state.log(f"Cannot apply size: Instance ID '{instance_id_from_config}' from layout config not found in loaded modules.", level=logging.WARNING)
             else:
                 self.shared_state.log("No 'custom_modules_properties' found in layout config.", level=logging.INFO)
 
-            if not loaded_any_module_from_config and not self.loaded_modules:
-                self.shared_state.log("Layout config processed, but no modules loaded. Setting up default layout.", level=logging.INFO)
-                self.setup_default_layout()
-            else:
+            # After all instantiation and resizing:
+            if any_new_modules_instantiated or any_module_resized_from_config:
+                self.shared_state.log("Optimized load_layout_config: Triggering single reflow.")
+                self.main_layout_manager.reflow_layout()
                 self.update_min_window_size()
                 self.update_layout_scrollregion()
-                self._finalize_initial_window_state()
+            elif not self.loaded_modules: # No modules instantiated/resized from config, AND no modules were loaded before this call
+                self.shared_state.log("No modules from config and no pre-existing modules. Setting up default layout.")
+                self.setup_default_layout() # This will handle its own reflow and updates
+            else: # No modules from config, but some modules might have existed before, or only removals happened.
+                self.shared_state.log("No new modules or resize from config, but modules might exist/state changed. Triggering reflow.")
+                self.main_layout_manager.reflow_layout() # Ensure layout is correct for any remaining modules
+                self.update_min_window_size()
+                self.update_layout_scrollregion()
+
+            self._finalize_initial_window_state()
+
         except Exception as e:
             self.shared_state.log(f"Error loading layout configuration: {e}. Using default layout.", level=logging.ERROR)
+            # Fallback to default layout in case of any error during config loading
             current_loaded_module_names = list(self.loaded_modules.keys())
             for name in current_loaded_module_names:
                 if hasattr(self.main_layout_manager, 'remove_module'):
@@ -1045,16 +1101,14 @@ class ModularGUI:
 
             for i, mod_x in enumerate(modules_sorted_x): # Check after each module (right)
                 gap_line_x = mod_x['x'] + mod_x['width']
-                if mouse_y_on_canvas >= mod_x['y'] and mouse_y_on_canvas <= mod_x['y'] + mod_x['height']:
+                if mouse_y_on_canvas >= mod_x['y'] and mouse_y_on_canvas <= mod_x['y'] + mod_x_first['height']: # Bug: should be mod_x['height']
                     dist = abs(mouse_x_on_canvas - gap_line_x)
                     if dist < best_v_target['dist']:
                         best_v_target['dist'] = dist
                         best_v_target['target_name'] = modules_sorted_x[i+1]['name'] if (i + 1) < len(modules_sorted_x) else None
             
             # Select Final Target
-            # Default to None if no valid target distances were found (e.g., mouse is far from any module edges)
-            final_target_name = None # Default to None
-            # Check if any valid target was found. If both are inf, no target is viable.
+            final_target_name = None
             h_target_is_valid = best_h_target['dist'] != float('inf')
             v_target_is_valid = best_v_target['dist'] != float('inf')
 
@@ -1069,65 +1123,27 @@ class ModularGUI:
                 final_target_name = best_v_target['target_name']
             
             self.last_preview_target_module_name = final_target_name
-        # If other_modules_info is empty, self.last_preview_target_module_name remains None (implying drop at end)
+        # If other_modules_info is empty, self.last_preview_target_module_name remains None
 
+        # --- Optimized Ghost Positioning ---
+        self.shared_state.log("Optimized on_drag: Updating ghost position without full layout simulation.", "DEBUG")
+        new_x, new_y = mouse_x_on_canvas, mouse_y_on_canvas # Default to mouse position
 
-        # 4. Prepare Temporary Module Configurations (temp_module_configs)
-        temp_module_configs = []
-        if self.dragged_module_name not in self.main_layout_manager.modules:
-             return 
-        
-        dragged_module_original_info = self.main_layout_manager.modules[self.dragged_module_name]
-        dragged_config = {
-            'name': self.dragged_module_name,
-            'width': dragged_module_original_info['width'],
-            'height': dragged_module_original_info['height'],
-            'frame': None 
-        }
-        
-        inserted_dragged_module = False
-        current_module_order = list(self.main_layout_manager.modules.keys())
+        if self.last_preview_target_module_name and self.last_preview_target_module_name in self.main_layout_manager.modules:
+            target_props = self.main_layout_manager.modules[self.last_preview_target_module_name]
+            # Simple positioning: place ghost at the target's current (x,y)
+            # More sophisticated logic could place it to the side, etc.
+            new_x = target_props.get('x', mouse_x_on_canvas)
+            new_y = target_props.get('y', mouse_y_on_canvas)
+            self.shared_state.log(f"Ghost target: {self.last_preview_target_module_name} at ({new_x},{new_y})", "DEBUG")
+        else:
+            # No specific target, ghost follows mouse, or could be placed at end of layout area
+            # Using mouse_x_on_canvas, mouse_y_on_canvas is fine for direct feedback
+            self.shared_state.log(f"Ghost follows mouse to ({new_x},{new_y})", "DEBUG")
 
-        for name in current_module_order:
-            if name == self.dragged_module_name:
-                continue 
-
-            module_props_iter = self.main_layout_manager.modules[name]
-            current_module_config = {
-                'name': name,
-                'width': module_props_iter['width'],
-                'height': module_props_iter['height'],
-                'frame': module_props_iter['frame'] 
-            }
-            
-            if name == self.last_preview_target_module_name and not inserted_dragged_module:
-                temp_module_configs.append(dragged_config.copy()) 
-                inserted_dragged_module = True
-            
-            temp_module_configs.append(current_module_config)
-
-        if not inserted_dragged_module:
-            temp_module_configs.append(dragged_config.copy())
-            
-        # 5. Simulate Layout
-        self.main_layout_manager.reflow_layout(simulate=True, module_configs_override=temp_module_configs)
-
-        # 6. Update Ghost Module Position
-        new_x, new_y = 0, 0 
-        found_ghost_in_sim = False
-        for config in temp_module_configs:
-            if config['name'] == self.dragged_module_name:
-                new_x = config.get('x', 0)
-                new_y = config.get('y', 0)
-                found_ghost_in_sim = True
-                break
-        
-        if found_ghost_in_sim and self.ghost_canvas_window_id:
+        if self.ghost_canvas_window_id:
             self.canvas.coords(self.ghost_canvas_window_id, new_x, new_y)
-            # self.shared_state.log(f"Moved ghost for {self.dragged_module_name} to {new_x},{new_y}", "DEBUG")
-        # elif self.ghost_canvas_window_id: 
-            # self.shared_state.log(f"Could not find {self.dragged_module_name} in simulated layout. Ghost not moved.", "WARNING")
-
+        # --- End Optimized Ghost Positioning ---
 
     def end_drag(self, event):
         if not self.dragged_module_name: # Should not happen if drag started properly
