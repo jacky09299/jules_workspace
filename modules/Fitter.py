@@ -10,6 +10,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import lmfit
+from main import Module
 
 class ResonatorAnalyzer:
     """
@@ -360,26 +361,40 @@ class ResonatorAnalyzer:
 
         return f"Magnitude Fit Results:\n\n{magnitude_report}\n\nCircle Fit Results:\n\n{circle_report}"
 
-class ResonatorAnalyzerGUI:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("共振器分析工具")
-        self.root.geometry("900x700")
-        self.root.resizable(True, True)
+class FitterModule(Module):
+    def __init__(self, master, shared_state, module_name="Fitter", gui_manager=None):
+        super().__init__(master, shared_state, module_name, gui_manager)
 
-        # 設置樣式
-        self.style = ttk.Style()
-        self.style.configure("TButton", font=("Arial", 10))
-        self.style.configure("TLabel", font=("Arial", 10))
-        self.style.configure("TCheckbutton", font=("Arial", 10))
-        self.style.configure("TEntry", font=("Arial", 10))
+        # Initialize variables that were in ResonatorAnalyzerGUI.__init__
+        self.file_path = tk.StringVar()
+        self.left_freq = tk.StringVar()
+        self.right_freq = tk.StringVar()
+        self.output_dir = tk.StringVar(value="Q_plot") # Default value
+        self.check_only = tk.BooleanVar(value=False)
+        self.current_dir = os.getcwd() # Or handle default path better
+        self.plot_canvases = {}
+        self.figures = [] # Keep track of figures
+        self.analyzer = None
+        # self.status_var = tk.StringVar(value="Initializing...") # Module class has self.update_status
+
+        self.shared_state.log(f"FitterModule '{self.module_name}' initialized.")
+        self.create_ui()
+
+    def create_ui(self):
+        # Clear placeholder if any - Module base class creates self.frame
+        for widget in self.frame.winfo_children():
+            widget.destroy()
+
+        # Styles - consider if this is needed or handled by main.py
+        # self.style = ttk.Style() # If enabling, ensure it doesn't clash with main.py
+        # self.style.configure("TButton", font=("Arial", 10))
+        # ... other style configurations
 
         # 文件框架
-        file_frame = ttk.LabelFrame(root, text="檔案選擇", padding=(10, 5))
+        file_frame = ttk.LabelFrame(self.frame, text="檔案選擇", padding=(10, 5))
         file_frame.pack(fill="x", padx=10, pady=5)
 
         ttk.Label(file_frame, text="檔案路徑:").grid(row=0, column=0, sticky="w", padx=5, pady=5)
-        self.file_path = tk.StringVar()
         self.file_entry = ttk.Entry(file_frame, textvariable=self.file_path, width=50)
         self.file_entry.grid(row=0, column=1, sticky="ew", padx=5, pady=5)
         file_frame.grid_columnconfigure(1, weight=1) # Make entry expand
@@ -388,22 +403,19 @@ class ResonatorAnalyzerGUI:
         self.browse_button.grid(row=0, column=2, sticky="e", padx=5, pady=5)
 
         # 參數框架
-        params_frame = ttk.LabelFrame(root, text="分析參數", padding=(10, 5))
+        params_frame = ttk.LabelFrame(self.frame, text="分析參數", padding=(10, 5))
         params_frame.pack(fill="x", padx=10, pady=5)
 
         # 檢查模式
-        self.check_only = tk.BooleanVar(value=False)
         ttk.Checkbutton(params_frame, text="僅檢查模式 (--check)", variable=self.check_only).grid(
             row=0, column=0, columnspan=3, sticky="w", padx=5, pady=5) # Span 3 columns
 
         # 頻率範圍
         ttk.Label(params_frame, text="左側頻率邊界 (GHz):").grid(row=1, column=0, sticky="w", padx=5, pady=5)
-        self.left_freq = tk.StringVar()
         self.left_freq_entry = ttk.Entry(params_frame, textvariable=self.left_freq, width=15)
         self.left_freq_entry.grid(row=1, column=1, sticky="w", padx=5, pady=5)
 
         ttk.Label(params_frame, text="右側頻率邊界 (GHz):").grid(row=2, column=0, sticky="w", padx=5, pady=5)
-        self.right_freq = tk.StringVar()
         self.right_freq_entry = ttk.Entry(params_frame, textvariable=self.right_freq, width=15)
         self.right_freq_entry.grid(row=2, column=1, sticky="w", padx=5, pady=5)
         
@@ -411,20 +423,19 @@ class ResonatorAnalyzerGUI:
         self.clear_boundaries_button = ttk.Button(params_frame, text="清空邊界", command=self.clear_frequency_boundaries)
         self.clear_boundaries_button.grid(row=1, column=2, rowspan=2, padx=5, pady=5, sticky="w")
 
-
         ttk.Label(params_frame, text="輸出目錄:").grid(row=3, column=0, sticky="w", padx=5, pady=5)
-        self.output_dir = tk.StringVar(value="Q_plot")
-        ttk.Entry(params_frame, textvariable=self.output_dir, width=15).grid(row=3, column=1, sticky="w", padx=5, pady=5)
+        self.output_dir_entry = ttk.Entry(params_frame, textvariable=self.output_dir, width=15) # Renamed to avoid conflict if any
+        self.output_dir_entry.grid(row=3, column=1, sticky="w", padx=5, pady=5)
 
         # 按鈕框架
-        button_frame = ttk.Frame(root)
+        button_frame = ttk.Frame(self.frame) # Parent is self.frame
         button_frame.pack(fill="x", pady=10, padx=10)
 
         self.run_button = ttk.Button(button_frame, text="執行分析", command=self.run_analysis)
         self.run_button.pack(side="right", padx=5)
 
         # 圖形和輸出框架（使用Notebook）
-        self.notebook = ttk.Notebook(root)
+        self.notebook = ttk.Notebook(self.frame) # Parent is self.frame
         self.notebook.pack(fill="both", expand=True, padx=10, pady=5)
 
         # 全頻譜圖標籤頁
@@ -451,84 +462,61 @@ class ResonatorAnalyzerGUI:
         scrollbar.pack(fill="y", side="right")
         self.output_text.config(yscrollcommand=scrollbar.set)
 
-        # 設置狀態欄
-        self.status_var = tk.StringVar(value="就緒")
-        self.status_bar = ttk.Label(root, textvariable=self.status_var, relief=tk.SUNKEN, anchor="w")
-        self.status_bar.pack(side="bottom", fill="x")
+        # Bindings
+        self.frame.bind("<F1>", self.show_help)
+        self.frame.bind('<Return>', lambda event: self.run_analysis())
 
-        # 保存當前工作目錄
-        self.current_dir = os.getcwd()
+        self.shared_state.log(f"FitterModule '{self.module_name}' UI constructed.")
 
-        # 設置協助提示
-        self.root.bind("<F1>", self.show_help)
-        # 按 Enter 鍵執行分析
-        self.root.bind('<Return>', lambda event: self.run_analysis())
-
-        # 圖形相關
-        self.plot_canvases = {}
-        self.figures = []  # Keep track of figures to close them properly
-        self.analyzer = None # To store the ResonatorAnalyzer instance
-        
-        # Register cleanup function for proper tkinter shutdown
-        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
-
-    def on_closing(self):
-        """Handle window closing - properly clean up resources"""
-        # Close all matplotlib figures
-        self.clear_plots()
-        plt.close('all')
-        
-        # Destroy root window
-        self.root.destroy()
-
-    def clear_frequency_boundaries(self):
-        """清空左右頻率邊界輸入框"""
-        self.left_freq.set("")
-        self.right_freq.set("")
+    def on_destroy(self):
+        # Resource cleanup, e.g., closing plots
+        self.clear_plots() # ensure this is the FitterModule's clear_plots
+        plt.close('all') # Ensure all matplotlib figures are closed
+        self.shared_state.log(f"FitterModule '{self.module_name}' is being destroyed.")
+        super().on_destroy()
 
     def browse_file(self):
         """瀏覽並選擇檔案"""
-        file_path = filedialog.askopenfilename(
+        # Use self.frame as parent for dialog if needed, though filedialog usually handles this
+        temp_file_path = filedialog.askopenfilename(
             initialdir=self.current_dir,
             title="選擇共振器數據檔案",
             filetypes=(("CSV檔案", "*.csv"), ("所有檔案", "*.*"))
         )
-        if file_path:
-            self.file_path.set(file_path)
-            # 更新當前目錄為選取檔案的目錄
-            self.current_dir = str(Path(file_path).parent)
+        if temp_file_path:
+            self.file_path.set(temp_file_path)
+            self.current_dir = str(Path(temp_file_path).parent)
+            self.shared_state.log(f"File selected: {temp_file_path}")
 
     def run_analysis(self):
         """執行共振器分析"""
-        # 檢查檔案是否存在
-        file_path = self.file_path.get().strip()
-        if not file_path:
-            messagebox.showerror("錯誤", "請選擇一個數據檔案")
+        file_path_str = self.file_path.get().strip()
+        if not file_path_str:
+            messagebox.showerror("錯誤", "請選擇一個數據檔案", parent=self.frame)
             return
 
-        if not os.path.exists(file_path):
-            messagebox.showerror("錯誤", f"檔案不存在: {file_path}")
+        if not os.path.exists(file_path_str):
+            messagebox.showerror("錯誤", f"檔案不存在: {file_path_str}", parent=self.frame)
             return
 
-        # 清空之前的圖形
         self.clear_plots()
-
-        # 清空輸出文字
         self.output_text.delete(1.0, tk.END)
-        self.status_var.set("正在分析...")
-        self.run_button.config(state="disabled")
+        # self.status_var.set("正在分析...") # Replaced by self.update_status
+        self.update_status("正在分析...")
+        if hasattr(self, 'run_button'): # Check if run_button exists
+            self.run_button.config(state="disabled")
 
-        # 準備參數
-        check_only = self.check_only.get()
-        output_dir = self.output_dir.get().strip()
+        check_only_val = self.check_only.get()
+        output_dir_val = self.output_dir.get().strip()
 
         left_freq_val = None
         if self.left_freq.get().strip():
             try:
                 left_freq_val = float(self.left_freq.get().strip())
             except ValueError:
-                messagebox.showerror("錯誤", "左側頻率必須是一個有效的數字")
-                self.run_button.config(state="normal")
+                messagebox.showerror("錯誤", "左側頻率必須是一個有效的數字", parent=self.frame)
+                if hasattr(self, 'run_button'): self.run_button.config(state="normal")
+                self.update_status("錯誤: 左側頻率無效")
                 return
 
         right_freq_val = None
@@ -536,74 +524,65 @@ class ResonatorAnalyzerGUI:
             try:
                 right_freq_val = float(self.right_freq.get().strip())
             except ValueError:
-                messagebox.showerror("錯誤", "右側頻率必須是一個有效的數字")
-                self.run_button.config(state="normal")
+                messagebox.showerror("錯誤", "右側頻率必須是一個有效的數字", parent=self.frame)
+                if hasattr(self, 'run_button'): self.run_button.config(state="normal")
+                self.update_status("錯誤: 右側頻率無效")
                 return
 
-        # 在新線程中運行分析，以免凍結GUI
+        self.shared_state.log(f"Running analysis for {file_path_str}. Output: {output_dir_val}, Check only: {check_only_val}, L-Freq: {left_freq_val}, R-Freq: {right_freq_val}")
         threading.Thread(target=self.run_analysis_thread,
-                         args=(file_path, check_only, output_dir, left_freq_val, right_freq_val),
+                         args=(file_path_str, check_only_val, output_dir_val, left_freq_val, right_freq_val),
                          daemon=True).start()
+
+    def clear_frequency_boundaries(self):
+        """清空左右頻率邊界輸入框"""
+        self.left_freq.set("")
+        self.right_freq.set("")
+        self.shared_state.log("Frequency boundaries cleared.")
 
     def run_analysis_thread(self, file_path, check_only, output_dir, left_freq, right_freq):
         """在單獨的線程中執行分析"""
         try:
-            # 初始化分析器
             self.analyzer = ResonatorAnalyzer(output_dir=output_dir)
-
-            # 轉換Hz為GHz
             manual_left = left_freq * 1e9 if left_freq is not None else None
             manual_right = right_freq * 1e9 if right_freq is not None else None
-
-            # 載入數據
             self.analyzer.load_data(file_path, manual_left=manual_left, manual_right=manual_right)
 
-            # 在主線程中創建全頻譜圖
-            self.root.after(0, self.create_and_display_full_spectrum)
+            self.frame.after(0, self.create_and_display_full_spectrum)
 
-            # 如果是僅檢查模式，則退出
             if check_only:
-                self.root.after(0, lambda: self.status_var.set("分析完成 (僅檢查模式)"))
-                self.root.after(0, lambda: self.run_button.config(state="normal"))
-                self.root.after(0, lambda: self.notebook.select(self.full_spectrum_frame))
+                # self.root.after(0, lambda: self.status_var.set("分析完成 (僅檢查模式)"))
+                self.frame.after(0, lambda: self.update_status("分析完成 (僅檢查模式)"))
+                if hasattr(self, 'run_button'): self.frame.after(0, lambda: self.run_button.config(state="normal"))
+                if hasattr(self, 'notebook') and hasattr(self, 'full_spectrum_frame'): self.frame.after(0, lambda: self.notebook.select(self.full_spectrum_frame))
+                self.shared_state.log("Analysis complete (check only mode).")
                 return
 
-            # 執行振幅擬合
             self.analyzer.perform_magnitude_fit()
-
-            # 輸出振幅擬合報告
             self.log_message("|S_{12}| fit report:\n")
             self.log_message(self.analyzer.magnitude_result.fit_report() + "\n")
+            self.frame.after(0, self.create_and_display_magnitude_fit)
 
-            # 在主線程中創建振幅擬合圖
-            self.root.after(0, self.create_and_display_magnitude_fit)
-
-            # 執行相位擬合
             self.analyzer.perform_circle_fit()
-
-            # 輸出相位擬合報告
             self.log_message("\nBest tau from grid search: " + str(self.analyzer.tau) + "\n")
             self.log_message("Grid search fit report:\n")
             self.log_message(lmfit.fit_report(self.analyzer.circle_result) + "\n")
-             # 輸出完整報告 (與之前版本一致，這裡重複了一次相位擬合報告，可以考慮移除)
-            # self.log_message("\nFinal phase fit report:\n")
-            # self.log_message(lmfit.fit_report(self.analyzer.circle_result) + "\n")
+            self.frame.after(0, self.create_and_display_circle_fit)
 
-
-            # 在主線程中創建相位擬合圖
-            self.root.after(0, self.create_and_display_circle_fit)
-
-
-            self.root.after(0, lambda: self.status_var.set("分析完成"))
-            self.root.after(0, lambda: self.notebook.select(self.full_spectrum_frame)) # Default to full spectrum
+            # self.root.after(0, lambda: self.status_var.set("分析完成"))
+            self.frame.after(0, lambda: self.update_status("分析完成"))
+            if hasattr(self, 'notebook') and hasattr(self, 'full_spectrum_frame'): self.frame.after(0, lambda: self.notebook.select(self.full_spectrum_frame))
+            self.shared_state.log("Analysis complete.")
 
         except Exception as e:
             import traceback
-            self.log_message(f"執行時發生錯誤: {str(e)}\n詳細錯誤: {traceback.format_exc()}\n")
-            self.root.after(0, lambda: self.status_var.set("發生錯誤"))
-
+            error_message = f"執行時發生錯誤: {str(e)}\n詳細錯誤: {traceback.format_exc()}\n"
+            self.log_message(error_message)
+            # self.root.after(0, lambda: self.status_var.set("發生錯誤"))
+            self.frame.after(0, lambda: self.update_status("發生錯誤"))
+            self.shared_state.log(f"Error during analysis: {error_message}", level="error")
         finally:
-            self.root.after(0, lambda: self.run_button.config(state="normal"))
+            if hasattr(self, 'run_button'): self.frame.after(0, lambda: self.run_button.config(state="normal"))
 
     def create_and_display_full_spectrum(self):
         """在主線程中創建並顯示全頻譜圖"""
@@ -612,8 +591,11 @@ class ResonatorAnalyzerGUI:
                 full_spectrum_fig = self.analyzer.create_full_magnitude_plot()
                 self.display_plot(full_spectrum_fig, self.full_spectrum_frame, "全頻譜圖")
             except Exception as e:
-                self.log_message(f"創建全頻譜圖時發生錯誤: {e}\n")
-                self.status_var.set("創建全頻譜圖錯誤")
+                error_msg = f"創建全頻譜圖時發生錯誤: {e}\n"
+                self.log_message(error_msg)
+                # self.status_var.set("創建全頻譜圖錯誤") # Replaced
+                self.update_status("創建全頻譜圖錯誤")
+                self.shared_state.log(error_msg, level="error")
 
 
     def create_and_display_magnitude_fit(self):
@@ -623,9 +605,11 @@ class ResonatorAnalyzerGUI:
                 magnitude_fig = self.analyzer.create_magnitude_fit_plot()
                 self.display_plot(magnitude_fig, self.magnitude_frame, "振幅擬合")
             except Exception as e:
-                self.log_message(f"創建振幅擬合圖時發生錯誤: {e}\n")
-                self.status_var.set("創建振幅擬合圖錯誤")
-
+                error_msg = f"創建振幅擬合圖時發生錯誤: {e}\n"
+                self.log_message(error_msg)
+                # self.status_var.set("創建振幅擬合圖錯誤") # Replaced
+                self.update_status("創建振幅擬合圖錯誤")
+                self.shared_state.log(error_msg, level="error")
 
     def create_and_display_circle_fit(self):
         """在主線程中創建並顯示相位擬合圖"""
@@ -634,74 +618,77 @@ class ResonatorAnalyzerGUI:
                 circle_fig = self.analyzer.create_circle_fit_plot()
                 self.display_plot(circle_fig, self.phase_frame, "相位擬合")
             except Exception as e:
-                self.log_message(f"創建相位擬合圖時發生錯誤: {e}\n")
-                self.status_var.set("創建相位擬合圖錯誤")
-
+                error_msg = f"創建相位擬合圖時發生錯誤: {e}\n"
+                self.log_message(error_msg)
+                # self.status_var.set("創建相位擬合圖錯誤") # Replaced
+                self.update_status("創建相位擬合圖錯誤")
+                self.shared_state.log(error_msg, level="error")
 
     def display_plot(self, figure, frame, title):
         """在指定的框架中顯示圖形"""
-        # 清空框架
         for widget in frame.winfo_children():
             widget.destroy()
 
-        # 創建畫布
         canvas = FigureCanvasTkAgg(figure, master=frame)
         canvas.draw()
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
-        # 添加鼠標移動事件處理
         def update_coordinates(event):
             if event.inaxes:
-                # 根据图表类型格式化坐标
                 if title == "全頻譜圖" or title == "振幅擬合":
                     coord_text = f"x: {event.xdata:.4f} GHz\ny: {event.ydata:.2f} dB"
-                else:  # 相位擬合
+                else:
                     coord_text = f"x: {event.xdata:.4f}\ny: {event.ydata:.4f}"
-
-                figure.coordinate_text.set_text(coord_text)
-                figure.coordinate_text.set_visible(True)
-                canvas.draw_idle()  # 只重繪文字部分，提高效率
+                if hasattr(figure, 'coordinate_text'): # Check if text object exists
+                    figure.coordinate_text.set_text(coord_text)
+                    figure.coordinate_text.set_visible(True)
+                    canvas.draw_idle()
             else:
-                if hasattr(figure, 'coordinate_text'): # Ensure text object exists
+                if hasattr(figure, 'coordinate_text'):
                     figure.coordinate_text.set_visible(False)
                     canvas.draw_idle()
         
-        # 添加鼠標點擊事件處理 (新功能)
         def on_plot_click(event):
-            if event.inaxes and (title == "全頻譜圖" or title == "振幅擬合"): # Only for freq plots
+            if event.inaxes and (title == "全頻譜圖" or title == "振幅擬合"):
                 x_coord_ghz = event.xdata 
-                if event.button == 1: # 左鍵點擊
-                    self.left_freq.set(f"{x_coord_ghz:.6f}") # 使用GHz單位
-                elif event.button == 3: # 右鍵點擊
-                    self.right_freq.set(f"{x_coord_ghz:.6f}") # 使用GHz單位
+                if event.button == 1:
+                    self.left_freq.set(f"{x_coord_ghz:.6f}")
+                elif event.button == 3:
+                    self.right_freq.set(f"{x_coord_ghz:.6f}")
 
-        # 連接事件
         canvas.mpl_connect('motion_notify_event', update_coordinates)
-        canvas.mpl_connect('button_press_event', on_plot_click) # 連接點擊事件
-
-
-        # 保存畫布引用
+        canvas.mpl_connect('button_press_event', on_plot_click)
         self.plot_canvases[title] = canvas
+        self.figures.append(figure) # Keep track of figure for explicit closing if needed
 
     def clear_plots(self):
         """清空所有圖形"""
-        frames = [self.full_spectrum_frame, self.magnitude_frame, self.phase_frame]
-        for frame in frames:
-            for widget in frame.winfo_children():
-                widget.destroy()
+        if hasattr(self, 'full_spectrum_frame') and self.full_spectrum_frame:
+             frames_to_clear = [self.full_spectrum_frame, self.magnitude_frame, self.phase_frame]
+             for frame in frames_to_clear:
+                 if frame: # Ensure frame exists before trying to access its children
+                    for widget in frame.winfo_children():
+                        widget.destroy()
 
-        # 清空畫布引用
+        for fig in self.figures: # Close matplotlib figures explicitly
+            plt.close(fig)
+        self.figures = []
+
         self.plot_canvases = {}
-        # 也關閉 matplotlib figures 以釋放內存
-        plt.close('all')
+        # plt.close('all') # This is broad; specific figure closing is better
+        self.shared_state.log("Plots cleared.")
 
 
     def log_message(self, message):
         """向輸出框添加消息"""
         def update_log():
-            self.output_text.insert(tk.END, message)
-            self.output_text.see(tk.END)
-        self.root.after(0, update_log)
+            if hasattr(self, 'output_text') and self.output_text: # Check if output_text exists
+                self.output_text.insert(tk.END, message)
+                self.output_text.see(tk.END)
+        # self.root.after(0, update_log) # Replaced
+        if hasattr(self, 'frame') and self.frame: # Check if frame exists
+            self.frame.after(0, update_log)
+
 
     def show_help(self, event=None):
         """顯示說明信息"""
@@ -721,17 +708,4 @@ class ResonatorAnalyzerGUI:
 
 提示: 完整分析會生成多個圖像，包括振幅擬合和相位擬合結果，這些圖形會顯示在不同標籤頁中，並同時保存到指定目錄。
 """
-        messagebox.showinfo("使用說明", help_text)
-
-
-def main():
-    """主程序入口"""
-    # 創建並啟動GUI
-    root = tk.Tk()
-    app = ResonatorAnalyzerGUI(root)
-    root.mainloop()
-
-
-if __name__ == "__main__":
-    import traceback # For more detailed error messages in the thread
-    main()
+        messagebox.showinfo("使用說明", help_text, parent=self.frame)
