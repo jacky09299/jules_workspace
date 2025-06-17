@@ -2,7 +2,6 @@ import tkinter as tk
 from tkinter import ttk
 import os
 import importlib.util
-import json
 from shared_state import SharedState
 import logging
 
@@ -393,7 +392,7 @@ class ModularGUI:
         s = ttk.Style()
         s.configure("DragHandle.TFrame", background="lightgrey")
 
-        self.shared_state = SharedState(config_file='layout_config.json')
+        self.shared_state = SharedState()
         self.shared_state.log("ModularGUI initialized.")
 
         self.modules_dir = "modules"
@@ -454,7 +453,6 @@ class ModularGUI:
         self.canvas.bind("<Configure>", self.on_canvas_configure)
 
         self.available_module_classes = {}
-        self.layout_config_file = 'layout_config.json'
         self.window_size_fixed_after_init = False
         self.shared_state.log(f"ModularGUI.__init__: self.window_size_fixed_after_init initialized to {self.window_size_fixed_after_init}", "INFO")
 
@@ -469,7 +467,7 @@ class ModularGUI:
                 command=lambda mn=module_name: self.add_module_from_menu(mn)
             )
 
-        self.load_layout_config()
+        self.setup_default_layout()
 
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
@@ -751,151 +749,8 @@ class ModularGUI:
         self.update_layout_scrollregion()
         self._finalize_initial_window_state()
 
-    def save_layout_config(self):
-        self.shared_state.log(f"Saving layout configuration to {self.layout_config_file}")
-        layout_data = {
-            'custom_modules_properties': None
-        }
-
-        if hasattr(self.main_layout_manager, 'get_layout_data'):
-            custom_module_data = self.main_layout_manager.get_layout_data()
-            layout_data['custom_modules_properties'] = custom_module_data
-            self.shared_state.log(f"Saved custom layout data: {custom_module_data}", level=logging.DEBUG)
-        else:
-            self.shared_state.log("CustomLayoutManager has no get_layout_data method. Cannot save layout.", level=logging.WARNING)
-
-        try:
-            with open(self.layout_config_file, 'w') as f:
-                json.dump(layout_data, f, indent=4)
-            self.shared_state.log(f"Layout configuration saved to {self.layout_config_file}")
-        except IOError as e:
-            self.shared_state.log(f"Error saving layout configuration to {self.layout_config_file}: {e}", level=logging.ERROR)
-        except Exception as e:
-             self.shared_state.log(f"An unexpected error occurred while saving layout: {e}", level=logging.ERROR)
-
-    def load_layout_config(self):
-        self.shared_state.log(f"Attempting to load layout configuration from {self.layout_config_file}")
-        try:
-            if not os.path.exists(self.layout_config_file):
-                self.shared_state.log(f"Layout config file '{self.layout_config_file}' not found. Using default layout.", level=logging.INFO)
-                self.setup_default_layout()
-                return
-
-            with open(self.layout_config_file, 'r') as f:
-                layout_data = json.load(f)
-
-            self.shared_state.log("Layout configuration loaded successfully.")
-
-            module_names_to_remove = list(self.loaded_modules.keys())
-            for module_name in module_names_to_remove:
-                if hasattr(self.main_layout_manager, 'remove_module'):
-                    self.main_layout_manager.remove_module(module_name)
-                module_data = self.loaded_modules.get(module_name)
-                if module_data:
-                    if module_data.get('instance'):
-                        try:
-                            module_data['instance'].on_destroy()
-                        except Exception as e:
-                            self.shared_state.log(f"Error during on_destroy for module {module_name} in load_layout_config: {e}", level=logging.ERROR)
-                    if module_data.get('frame_wrapper') and module_data['frame_wrapper'].winfo_exists():
-                        module_data['frame_wrapper'].destroy()
-                    del self.loaded_modules[module_name]
-
-            for module_name, module_data in list(self.loaded_modules.items()):
-                if module_data:
-                    if module_data.get('instance'):
-                        try:
-                            module_data['instance'].on_destroy()
-                        except Exception as e:
-                            self.shared_state.log(f"Error during on_destroy for module {module_name}: {e}", level=logging.ERROR)
-                    if module_data.get('frame_wrapper') and module_data['frame_wrapper'].winfo_exists():
-                        module_data['frame_wrapper'].destroy()
-            self.loaded_modules.clear()
-
-            self.loaded_modules.clear()
-
-            custom_modules_properties = layout_data.get('custom_modules_properties')
-            any_new_modules_instantiated = False
-            any_module_resized_from_config = False
-
-            if custom_modules_properties:
-                self.shared_state.log(f"Instantiating modules from custom_modules_properties: {list(custom_modules_properties.keys())}")
-                # Instantiate modules first. Keys in custom_modules_properties are instance_ids (e.g., "clock#1")
-                # We need to extract the base module_name (e.g., "clock") for instantiation.
-                temp_instance_to_base_map = {} # To map generated instance_id to base_module_name from config for resizing
-
-                for instance_id_from_config in custom_modules_properties.keys():
-                    base_module_name = instance_id_from_config.split('#')[0]
-                    if base_module_name in self.available_module_classes:
-                        # instantiate_module now generates a new instance_id (e.g., clock#1, then clock#2 if called again for "clock")
-                        # This means the instance_id_from_config might not match the one generated by instantiate_module
-                        # if the config has non-sequential IDs or if modules are added/removed manually before saving.
-                        # For now, we instantiate the type and then try to apply properties using the config's instance_id.
-                        # This part of the logic is complex if we need to perfectly restore exact previous instance_ids
-                        # when they might conflict with the _generate_instance_id sequence.
-                        # Assuming for now that instantiate_module creates the necessary instances,
-                        # and the resize loop below will find them if IDs match.
-                        # A more robust system might pass instance_id_from_config to instantiate_module.
-
-                        # Simplified: Instantiate based on type, then try to match ID for resize.
-                        # If config has clock#1, clock#2, this will create clock#1, clock#2 (if module_instance_counters is fresh)
-                        new_instance = self.instantiate_module(base_module_name, self.main_layout_manager) # Defers reflow
-                        if new_instance: # new_instance is the frame_wrapper; its module_instance is in self.loaded_modules
-                            any_new_modules_instantiated = True
-                    else:
-                        self.shared_state.log(f"Module type '{base_module_name}' (from config key '{instance_id_from_config}') not available.", level=logging.WARNING)
-
-                if any_new_modules_instantiated:
-                    self.root.update_idletasks() # Process pending UI events
-
-                self.shared_state.log(f"Resizing modules from custom_modules_properties...")
-                for instance_id_from_config, props in custom_modules_properties.items():
-                    if instance_id_from_config in self.loaded_modules:
-                        width = props.get('width', 200)
-                        height = props.get('height', 150)
-                        self.main_layout_manager.resize_module(instance_id_from_config, width, height, defer_reflow=True)
-                        any_module_resized_from_config = True
-                        self.shared_state.log(f"Resize for {instance_id_from_config} to w={width}, h={height} (reflow deferred).", level=logging.DEBUG)
-                    else:
-                        self.shared_state.log(f"Cannot apply size: Instance ID '{instance_id_from_config}' from layout config not found in loaded modules.", level=logging.WARNING)
-            else:
-                self.shared_state.log("No 'custom_modules_properties' found in layout config.", level=logging.INFO)
-
-            # After all instantiation and resizing:
-            if any_new_modules_instantiated or any_module_resized_from_config:
-                self.shared_state.log("Optimized load_layout_config: Triggering single reflow.")
-                self.main_layout_manager.reflow_layout()
-                self.update_min_window_size()
-                self.update_layout_scrollregion()
-            elif not self.loaded_modules: # No modules instantiated/resized from config, AND no modules were loaded before this call
-                self.shared_state.log("No modules from config and no pre-existing modules. Setting up default layout.")
-                self.setup_default_layout() # This will handle its own reflow and updates
-            else: # No modules from config, but some modules might have existed before, or only removals happened.
-                self.shared_state.log("No new modules or resize from config, but modules might exist/state changed. Triggering reflow.")
-                self.main_layout_manager.reflow_layout() # Ensure layout is correct for any remaining modules
-                self.update_min_window_size()
-                self.update_layout_scrollregion()
-
-            self._finalize_initial_window_state()
-
-        except Exception as e:
-            self.shared_state.log(f"Error loading layout configuration: {e}. Using default layout.", level=logging.ERROR)
-            # Fallback to default layout in case of any error during config loading
-            current_loaded_module_names = list(self.loaded_modules.keys())
-            for name in current_loaded_module_names:
-                if hasattr(self.main_layout_manager, 'remove_module'):
-                    self.main_layout_manager.remove_module(name)
-                mod_data = self.loaded_modules.pop(name, None)
-                if mod_data:
-                    if mod_data.get('instance'): mod_data['instance'].on_destroy()
-                    if mod_data.get('frame_wrapper') and mod_data['frame_wrapper'].winfo_exists(): mod_data['frame_wrapper'].destroy()
-
-            self.loaded_modules.clear()
-            self.setup_default_layout()
-
     def on_closing(self):
         self.shared_state.log("Application closing...")
-        self.save_layout_config()
         for module_name, module_data in list(self.loaded_modules.items()):
             if module_data and module_data.get('instance'):
                 try:
