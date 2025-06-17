@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import ttk
+from tkinter import simpledialog, messagebox
 import os
 import importlib.util
 from shared_state import SharedState
@@ -343,6 +344,8 @@ class CustomLayoutManager(tk.Frame):
 
 class ModularGUI:
     CONFIG_FILE = "layout_config.json"
+    PROFILE_PREFIX = "layout_profile_"
+    PROFILE_SUFFIX = ".json"
 
     def __init__(self, root):
         self.root = root
@@ -354,6 +357,14 @@ class ModularGUI:
 
         self.modules_menu = tk.Menu(self.menubar, tearoff=0)
         self.menubar.add_cascade(label="Modules", menu=self.modules_menu)
+
+        # 新增設定檔選單
+        self.profile_menu = tk.Menu(self.menubar, tearoff=0)
+        self.menubar.add_cascade(label="設定檔", menu=self.profile_menu)
+        self.profile_menu.add_command(label="儲存目前佈局為設定檔...", command=self.save_profile_dialog)
+        self.profile_menu.add_command(label="載入設定檔...", command=self.load_profile_dialog)
+        self.profile_menu.add_separator()
+        self.profile_menu.add_command(label="管理設定檔...", command=self.manage_profiles_dialog)
 
         s = ttk.Style()
         s.configure("DragHandle.TFrame", background="lightgrey")
@@ -772,6 +783,179 @@ class ModularGUI:
             return True
         except Exception as e:
             print(f"[LOAD][ERROR] Failed to load layout config: {e}")
+            return False
+
+    # 儲存目前佈局為設定檔
+    def save_profile_dialog(self):
+        name = simpledialog.askstring("儲存設定檔", "請輸入設定檔名稱：")
+        if not name:
+            return
+        filename = f"{self.PROFILE_PREFIX}{name}{self.PROFILE_SUFFIX}"
+        path = os.path.join(os.getcwd(), filename)
+        config = self._get_current_layout_config()
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=2)
+            messagebox.showinfo("儲存成功", f"設定檔已儲存為 {filename}")
+        except Exception as e:
+            messagebox.showerror("儲存失敗", f"無法儲存設定檔：{e}")
+
+    # 載入設定檔
+    def load_profile_dialog(self):
+        profiles = self._list_profiles()
+        if not profiles:
+            messagebox.showinfo("無設定檔", "目前沒有可用的設定檔。")
+            return
+        # 彈出選單讓用戶選擇
+        sel = self._choose_profile_dialog(profiles, "載入設定檔", "請選擇要載入的設定檔：")
+        if not sel:
+            return
+        filename = f"{self.PROFILE_PREFIX}{sel}{self.PROFILE_SUFFIX}"
+        path = os.path.join(os.getcwd(), filename)
+        self._load_layout_config_from_file(path)
+
+    # 管理設定檔（可刪除）
+    def manage_profiles_dialog(self):
+        profiles = self._list_profiles()
+        if not profiles:
+            messagebox.showinfo("無設定檔", "目前沒有可用的設定檔。")
+            return
+        sel = self._choose_profile_dialog(profiles, "刪除設定檔", "請選擇要刪除的設定檔：")
+        if not sel:
+            return
+        filename = f"{self.PROFILE_PREFIX}{sel}{self.PROFILE_SUFFIX}"
+        path = os.path.join(os.getcwd(), filename)
+        try:
+            os.remove(path)
+            messagebox.showinfo("刪除成功", f"設定檔 {filename} 已刪除")
+        except Exception as e:
+            messagebox.showerror("刪除失敗", f"無法刪除設定檔：{e}")
+
+    def _choose_profile_dialog(self, profiles, title, prompt):
+        # 彈出一個簡單的選擇視窗
+        dialog = tk.Toplevel(self.root)
+        dialog.title(title)
+        dialog.grab_set()
+        tk.Label(dialog, text=prompt).pack(padx=10, pady=(10, 5))
+        var = tk.StringVar(value=profiles[0])
+        listbox = tk.Listbox(dialog, listvariable=tk.StringVar(value=profiles), height=min(10, len(profiles)))
+        listbox.pack(padx=10, pady=5)
+        listbox.selection_set(0)
+        def on_ok():
+            sel = listbox.get(listbox.curselection())
+            var.set(sel)
+            dialog.destroy()
+        def on_cancel():
+            var.set("")
+            dialog.destroy()
+        btn_frame = tk.Frame(dialog)
+        btn_frame.pack(pady=(0,10))
+        tk.Button(btn_frame, text="確定", width=8, command=on_ok).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="取消", width=8, command=on_cancel).pack(side=tk.LEFT, padx=5)
+        dialog.wait_window()
+        return var.get()
+
+    def _list_profiles(self):
+        files = os.listdir(os.getcwd())
+        profiles = []
+        for f in files:
+            if f.startswith(self.PROFILE_PREFIX) and f.endswith(self.PROFILE_SUFFIX):
+                name = f[len(self.PROFILE_PREFIX):-len(self.PROFILE_SUFFIX)]
+                profiles.append(name)
+        return profiles
+
+    def _get_current_layout_config(self):
+        # 取得目前佈局設定（與 save_layout_config 類似，但回傳 dict）
+        if not self.loaded_modules:
+            return {
+                "modules": [],
+                "maximized_module_name": self.maximized_module_name,
+                "module_order": []
+            }
+        config = {
+            "modules": [],
+            "maximized_module_name": self.maximized_module_name,
+            "module_order": []
+        }
+        current_instance_ids = set(self.loaded_modules.keys()) & set(self.main_layout_manager.modules.keys())
+        config["module_order"] = [iid for iid in self.main_layout_manager.modules.keys() if iid in current_instance_ids]
+        for iid in config["module_order"]:
+            mod_data = self.loaded_modules.get(iid)
+            info = self.main_layout_manager.get_module_info(iid)
+            if mod_data:
+                config["modules"].append({
+                    "module_name": mod_data["module_name"],
+                    "instance_id": iid,
+                    "width": info["width"] if info else 200,
+                    "height": info["height"] if info else 150,
+                })
+        return config
+
+    def _load_layout_config_from_file(self, path):
+        print(f"[LOAD] Try loading layout config from: {path}")
+        if not os.path.exists(path):
+            print("[LOAD] No layout config file found, using default layout.")
+            messagebox.showerror("載入失敗", "找不到設定檔。")
+            return False
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+            for iid in list(self.loaded_modules.keys()):
+                self.hide_module(iid)
+            max_counters = {}
+            for mod in config.get("modules", []):
+                module_name = mod["module_name"]
+                iid = mod["instance_id"]
+                if "#" in iid:
+                    base, num = iid.rsplit("#", 1)
+                    try:
+                        num = int(num)
+                        if base not in max_counters or num > max_counters[base]:
+                            max_counters[base] = num
+                    except Exception:
+                        pass
+            for base, max_num in max_counters.items():
+                self.module_instance_counters[base] = max_num + 1
+
+            module_order = config.get("module_order")
+            if module_order:
+                iid_to_mod = {mod["instance_id"]: mod for mod in config.get("modules", [])}
+                ordered_mods = [iid_to_mod[iid] for iid in module_order if iid in iid_to_mod]
+            else:
+                ordered_mods = config.get("modules", [])
+
+            for mod in ordered_mods:
+                module_name = mod["module_name"]
+                iid = mod["instance_id"]
+                width = mod.get("width", 200)
+                height = mod.get("height", 150)
+                if module_name in self.available_module_classes:
+                    old_counter = self.module_instance_counters.get(module_name, 1)
+                    try:
+                        if "#" in iid:
+                            base, num = iid.rsplit("#", 1)
+                            num = int(num)
+                            self.module_instance_counters[module_name] = num
+                    except Exception:
+                        pass
+                    frame_wrapper = self.instantiate_module(module_name, self.main_layout_manager)
+                    self.module_instance_counters[module_name] = max(old_counter, max_counters.get(module_name, 0) + 1)
+                    if frame_wrapper:
+                        self.loaded_modules[iid] = self.loaded_modules.pop(list(self.loaded_modules.keys())[-1])
+                        self.loaded_modules[iid]["instance_id"] = iid
+                        self.main_layout_manager.resize_module(iid, width, height, defer_reflow=True)
+            self.main_layout_manager.reflow_layout()
+            self.update_min_window_size()
+            self.update_layout_scrollregion()
+            maximized = config.get("maximized_module_name")
+            if maximized and maximized in self.loaded_modules:
+                self.maximize_module(maximized)
+            print("[LOAD] Layout config loaded and restored.")
+            messagebox.showinfo("載入成功", "設定檔已載入。")
+            return True
+        except Exception as e:
+            print(f"[LOAD][ERROR] Failed to load layout config: {e}")
+            messagebox.showerror("載入失敗", f"無法載入設定檔：{e}")
             return False
 
     def on_closing(self):
