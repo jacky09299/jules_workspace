@@ -385,13 +385,20 @@ class FitterModule(Module):
         for widget in self.frame.winfo_children():
             widget.destroy()
 
+        # Create a main content frame within self.frame
+        # This new frame will house all module-specific UI elements,
+        # allowing the base Module class to manage its title bar and resize handle
+        # without interference.
+        module_main_content_frame = ttk.Frame(self.frame)
+        module_main_content_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
         # Styles - consider if this is needed or handled by main.py
         # self.style = ttk.Style() # If enabling, ensure it doesn't clash with main.py
         # self.style.configure("TButton", font=("Arial", 10))
         # ... other style configurations
 
-        # 文件框架
-        file_frame = ttk.LabelFrame(self.frame, text="檔案選擇", padding=(10, 5))
+        # 文件框架 - now parented to module_main_content_frame
+        file_frame = ttk.LabelFrame(module_main_content_frame, text="檔案選擇", padding=(10, 5))
         file_frame.pack(fill="x", padx=10, pady=5)
 
         ttk.Label(file_frame, text="檔案路徑:").grid(row=0, column=0, sticky="w", padx=5, pady=5)
@@ -402,8 +409,8 @@ class FitterModule(Module):
         self.browse_button = ttk.Button(file_frame, text="瀏覽...", command=self.browse_file)
         self.browse_button.grid(row=0, column=2, sticky="e", padx=5, pady=5)
 
-        # 參數框架
-        params_frame = ttk.LabelFrame(self.frame, text="分析參數", padding=(10, 5))
+        # 參數框架 - now parented to module_main_content_frame
+        params_frame = ttk.LabelFrame(module_main_content_frame, text="分析參數", padding=(10, 5))
         params_frame.pack(fill="x", padx=10, pady=5)
 
         # 檢查模式
@@ -427,15 +434,15 @@ class FitterModule(Module):
         self.output_dir_entry = ttk.Entry(params_frame, textvariable=self.output_dir, width=15) # Renamed to avoid conflict if any
         self.output_dir_entry.grid(row=3, column=1, sticky="w", padx=5, pady=5)
 
-        # 按鈕框架
-        button_frame = ttk.Frame(self.frame) # Parent is self.frame
+        # 按鈕框架 - now parented to module_main_content_frame
+        button_frame = ttk.Frame(module_main_content_frame)
         button_frame.pack(fill="x", pady=10, padx=10)
 
         self.run_button = ttk.Button(button_frame, text="執行分析", command=self.run_analysis)
         self.run_button.pack(side="right", padx=5)
 
-        # 圖形和輸出框架（使用Notebook）
-        self.notebook = ttk.Notebook(self.frame) # Parent is self.frame
+        # 圖形和輸出框架（使用Notebook） - now parented to module_main_content_frame
+        self.notebook = ttk.Notebook(module_main_content_frame)
         self.notebook.pack(fill="both", expand=True, padx=10, pady=5)
 
         # 全頻譜圖標籤頁
