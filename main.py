@@ -730,11 +730,20 @@ class ModularGUI:
             mod_data = self.loaded_modules.get(iid)
             info = self.main_layout_manager.get_module_info(iid)
             if mod_data:
+                # 取得目前視窗寬度作為基準
+                canvas_width = self.canvas.winfo_width()
+                if canvas_width <= 1:
+                    canvas_width = 800
+                    
+                # 計算相對寬度 (0~1 之間的值)
+                relative_width = info["width"] / canvas_width if info else 0.25
+                relative_height = info["height"] / canvas_width if info else 0.187
+                
                 config["modules"].append({
                     "module_name": mod_data["module_name"],
                     "instance_id": iid,
-                    "width": info["width"] if info else 200,
-                    "height": info["height"] if info else 150,
+                    "relative_width": relative_width,
+                    "relative_height": relative_height
                 })
         print(f"[SAVE] Writing layout config to: {config_path}")
         try:
@@ -779,8 +788,19 @@ class ModularGUI:
             for mod in ordered_mods:
                 module_name = mod["module_name"]
                 iid = mod["instance_id"]
-                width = mod.get("width", 200)
-                height = mod.get("height", 150)
+                
+                # 從相對值計算實際尺寸
+                canvas_width = self.canvas.winfo_width()
+                if canvas_width <= 1:
+                    canvas_width = 800
+                    
+                width = int(mod.get("relative_width", 0.25) * canvas_width)
+                height = int(mod.get("relative_height", 0.187) * canvas_width)
+                
+                # 確保最小尺寸
+                width = max(50, width)
+                height = max(50, height)
+                
                 if module_name in self.available_module_classes:
                     old_counter = self.module_instance_counters.get(module_name, 1)
                     try:
@@ -906,11 +926,20 @@ class ModularGUI:
             mod_data = self.loaded_modules.get(iid)
             info = self.main_layout_manager.get_module_info(iid)
             if mod_data:
+                # 取得目前視窗寬度作為基準
+                canvas_width = self.canvas.winfo_width()
+                if canvas_width <= 1:
+                    canvas_width = 800
+                    
+                # 計算相對寬度 (0~1 之間的值)
+                relative_width = info["width"] / canvas_width if info else 0.25
+                relative_height = info["height"] / canvas_width if info else 0.187
+                
                 config["modules"].append({
                     "module_name": mod_data["module_name"],
                     "instance_id": iid,
-                    "width": info["width"] if info else 200,
-                    "height": info["height"] if info else 150,
+                    "relative_width": relative_width,
+                    "relative_height": relative_height
                 })
         return config
 
@@ -950,8 +979,19 @@ class ModularGUI:
             for mod in ordered_mods:
                 module_name = mod["module_name"]
                 iid = mod["instance_id"]
-                width = mod.get("width", 200)
-                height = mod.get("height", 150)
+                
+                # 從相對值計算實際尺寸
+                canvas_width = self.canvas.winfo_width()
+                if canvas_width <= 1:
+                    canvas_width = 800
+                    
+                width = int(mod.get("relative_width", 0.25) * canvas_width)
+                height = int(mod.get("relative_height", 0.187) * canvas_width)
+                
+                # 確保最小尺寸
+                width = max(50, width)
+                height = max(50, height)
+                
                 if module_name in self.available_module_classes:
                     old_counter = self.module_instance_counters.get(module_name, 1)
                     try:
