@@ -932,27 +932,20 @@ class ModularGUI:
         self.root.bind("<ButtonRelease-1>", self.end_drag)
         
     def on_drag(self, event):
-        # 1. Basic Checks
         if not self.dragged_module_name or not self.ghost_canvas_window_id or \
-           self.dragged_module_name not in self.main_layout_manager.modules: # Ensure original module info is still there
-            # self.shared_state.log("on_drag: Missing dragged_module_name or ghost_canvas_window_id or original module info.", "DEBUG")
+           self.dragged_module_name not in self.main_layout_manager.modules:
             return
 
-        # 2. Mouse Position
         try:
             mouse_x_on_canvas = event.x_root - self.canvas.winfo_rootx()
             mouse_y_on_canvas = event.y_root - self.canvas.winfo_rooty()
         except tk.TclError: 
-            # self.shared_state.log("on_drag: Error getting canvas coordinates.", "WARNING")
             return
 
-        # 3. Determine Target for Preview (self.last_preview_target_module_name)
         other_modules_info = []
         for name, module_props in self.main_layout_manager.modules.items():
-            if name == self.dragged_module_name: # Exclude the module being dragged
+            if name == self.dragged_module_name:
                 continue
-            # Ensure module_props and its frame are valid, and it has geometry.
-            # The 'frame' itself isn't used in this part of logic, but its existence implies module is 'active'.
             if module_props and module_props.get('frame') and module_props['frame'].winfo_exists() and \
                all(k in module_props for k in ['x', 'y', 'width', 'height']):
                 other_modules_info.append({
