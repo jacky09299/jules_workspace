@@ -10,7 +10,7 @@ class Module:
     def __init__(self, master, shared_state, module_name="UnknownModule", gui_manager=None):
         self.master = master
         self.shared_state = shared_state
-        self.module_name = module_name
+        self.module_name = module_name  # Now this is instance_id
         self.gui_manager = gui_manager
 
         self.frame = ttk.Frame(self.master, borderwidth=1, relief=tk.SOLID)
@@ -410,7 +410,9 @@ class ModularGUI:
             os.makedirs(self.modules_dir)
             self.shared_state.log(f"Created modules directory: {self.modules_dir}")
 
-        self.loaded_modules = {}
+        # self.loaded_modules = {}
+        self.loaded_modules = {}  # Key: instance_id, Value: module data
+        self.module_instance_counters = {}  # Key: module_name, Value: next instance number
 
         # --- Add these lines to fix AttributeError ---
         self.maximized_module_name = None
@@ -608,16 +610,16 @@ class ModularGUI:
         except tk.TclError as e:
             self.shared_state.log(f"update_min_window_size: Error setting minsize: {e}", "WARNING")
 
+    def _generate_instance_id(self, module_name):
+        count = self.module_instance_counters.get(module_name, 1)
+        instance_id = f"{module_name}#{count}"
+        self.module_instance_counters[module_name] = count + 1
+        return instance_id
+
     def add_module_from_menu(self, module_name: str):
         self.shared_state.log(f"Attempting to add module '{module_name}' from menu.")
 
-        if module_name in self.loaded_modules:
-            module_data = self.loaded_modules.get(module_name)
-            if module_data and module_data.get('frame_wrapper') and \
-               module_data.get('frame_wrapper').winfo_ismapped():
-                self.shared_state.log(f"Module '{module_name}' is already loaded and likely visible. No action taken.", "INFO")
-                return
-
+        # Always allow adding new instance
         if module_name in self.available_module_classes:
             children = self.main_layout_manager.winfo_children()
             if len(children) == 1 and isinstance(children[0], ttk.Label):
@@ -673,28 +675,30 @@ class ModularGUI:
             return None
 
         ModuleClass = self.available_module_classes[module_name]
+        instance_id = self._generate_instance_id(module_name)
 
         frame_wrapper = ttk.Frame(parent_layout_manager, relief=tk.SUNKEN, borderwidth=1)
 
         try:
-            module_instance = ModuleClass(frame_wrapper, self.shared_state, module_name, self)
-
+            module_instance = ModuleClass(frame_wrapper, self.shared_state, instance_id, self)
             module_instance.get_frame().pack(fill=tk.BOTH, expand=True)
 
-            self.loaded_modules[module_name] = {
+            self.loaded_modules[instance_id] = {
                 'class': ModuleClass,
                 'instance': module_instance,
-                'frame_wrapper': frame_wrapper
+                'frame_wrapper': frame_wrapper,
+                'module_name': module_name,
+                'instance_id': instance_id
             }
 
             drag_handle_widget = module_instance.drag_handle_label
-            drag_handle_widget.bind("<ButtonPress-1>", lambda event, mn=module_name: self.start_drag(event, mn))
+            drag_handle_widget.bind("<ButtonPress-1>", lambda event, iid=instance_id: self.start_drag(event, iid))
 
             initial_width, initial_height = 200, 150
-            parent_layout_manager.add_module(frame_wrapper, module_name, initial_width, initial_height)
+            parent_layout_manager.add_module(frame_wrapper, instance_id, initial_width, initial_height)
             self.update_min_window_size()
             self.update_layout_scrollregion()
-            self.shared_state.log(f"Instantiated and added module '{module_name}' to layout manager.")
+            self.shared_state.log(f"Instantiated and added module '{instance_id}' to layout manager.")
             return frame_wrapper
         except Exception as e:
             self.shared_state.log(f"Error instantiating module {module_name}: {e}", level=logging.ERROR)
@@ -852,22 +856,22 @@ class ModularGUI:
         self.context_menu.add_command(label="Toggle Module Visibility:", state=tk.DISABLED)
         self.context_menu.add_separator()
 
-        visible_module_wrappers = []
-        for mod_name, mod_data in self.loaded_modules.items():
-            if mod_data.get('frame_wrapper') and mod_data.get('frame_wrapper').winfo_exists():
-                visible_module_wrappers.append(mod_data['frame_wrapper'])
-
-        for module_name in sorted(self.available_module_classes.keys()):
-            is_visible = False
-            if module_name in self.loaded_modules:
-                mod_data = self.loaded_modules[module_name]
-                if mod_data.get('instance') and mod_data.get('frame_wrapper') and mod_data.get('frame_wrapper').winfo_exists():
-                    is_visible = True
-
+        # List all instances
+        for instance_id, mod_data in self.loaded_modules.items():
+            module_name = mod_data.get('module_name', instance_id)
+            is_visible = mod_data.get('frame_wrapper') and mod_data.get('frame_wrapper').winfo_exists()
             prefix = "[x]" if is_visible else "[ ]"
             self.context_menu.add_command(
-                label=f"{prefix} {module_name}",
-                command=lambda mn=module_name: self.toggle_module_visibility(mn)
+                label=f"{prefix} {instance_id}",
+                command=lambda iid=instance_id: self.toggle_module_visibility(iid)
+            )
+
+        # Add option to add new instance for each module type
+        self.context_menu.add_separator()
+        for module_name in sorted(self.available_module_classes.keys()):
+            self.context_menu.add_command(
+                label=f"Add {module_name}",
+                command=lambda mn=module_name: self.add_module_from_menu(mn)
             )
 
         try:
@@ -875,63 +879,56 @@ class ModularGUI:
         finally:
             self.context_menu.grab_release()
 
-    def toggle_module_visibility(self, module_name):
-        self.shared_state.log(f"Toggle visibility for {module_name}", level=logging.DEBUG)
-
+    def toggle_module_visibility(self, instance_id):
+        self.shared_state.log(f"Toggle visibility for {instance_id}", level=logging.DEBUG)
         is_visible = False
         wrapper_to_check = None
-        if module_name in self.loaded_modules:
-            mod_data = self.loaded_modules[module_name]
-            if mod_data and mod_data.get('instance'):
-                wrapper_to_check = mod_data.get('frame_wrapper')
-                if wrapper_to_check and wrapper_to_check.winfo_exists():
-                    is_visible = True
+        if instance_id in self.loaded_modules:
+            mod_data = self.loaded_modules[instance_id]
+            wrapper_to_check = mod_data.get('frame_wrapper')
+            if wrapper_to_check and wrapper_to_check.winfo_exists():
+                is_visible = True
 
         if is_visible:
-            self.hide_module(module_name)
+            self.hide_module(instance_id)
         else:
-            self.shared_state.log(f"Showing module: {module_name}")
-            if module_name in self.available_module_classes:
-                self.instantiate_module(module_name, self.main_layout_manager)
-                self.root.update_idletasks()
-            else:
-                self.shared_state.log(f"Module '{module_name}' cannot be shown, not found in available modules.", level=logging.WARNING)
+            self.shared_state.log(f"Showing module: {instance_id}")
+            # Not supported: restoring a destroyed instance; user should add a new one
 
-    def hide_module(self, module_name: str):
+    def hide_module(self, instance_id: str):
         # Prevent hiding if maximized
-        if self.maximized_module_name == module_name:
+        if self.maximized_module_name == instance_id:
             self.restore_modules()
         else:
-            self.shared_state.log(f"Hiding module: {module_name} via close button/hide action.")
-            if module_name in self.loaded_modules:
-                module_data = self.loaded_modules[module_name]
+            self.shared_state.log(f"Hiding module: {instance_id} via close button/hide action.")
+            if instance_id in self.loaded_modules:
+                module_data = self.loaded_modules[instance_id]
                 frame_wrapper = module_data.get('frame_wrapper')
                 instance = module_data.get('instance')
 
                 if frame_wrapper and frame_wrapper.winfo_exists():
-                    self.main_layout_manager.remove_module(module_name)
+                    self.main_layout_manager.remove_module(instance_id)
 
                 if instance:
                     try:
                         instance.on_destroy()
                     except Exception as e:
-                        self.shared_state.log(f"Error during on_destroy for module {module_name} when hiding: {e}", "ERROR")
+                        self.shared_state.log(f"Error during on_destroy for module {instance_id} when hiding: {e}", "ERROR")
 
                 if frame_wrapper and frame_wrapper.winfo_exists():
                     frame_wrapper.destroy()
 
-                del self.loaded_modules[module_name]
-                self.shared_state.log(f"Module '{module_name}' hidden and instance destroyed.")
+                del self.loaded_modules[instance_id]
+                self.shared_state.log(f"Module '{instance_id}' hidden and instance destroyed.")
 
                 self.update_min_window_size()
                 self.update_layout_scrollregion()
-
             else:
-                self.shared_state.log(f"Module '{module_name}' not found or not loaded, cannot hide.", "WARNING")
+                self.shared_state.log(f"Module '{instance_id}' not found or not loaded, cannot hide.", "WARNING")
 
-    def start_drag(self, event, module_name):
-        self.shared_state.log(f"Start dragging module: {module_name}", level=logging.DEBUG)
-        self.dragged_module_name = module_name
+    def start_drag(self, event, instance_id):
+        self.shared_state.log(f"Start dragging module: {instance_id}", level=logging.DEBUG)
+        self.dragged_module_name = instance_id
         self.drag_start_widget = event.widget # This is the drag handle (ttk.Label)
 
         # Get original module details
@@ -1188,24 +1185,23 @@ class ModularGUI:
         self.last_preview_target_module_name = None
         # self.drop_target_module_frame_wrapper = None # Should already be None / not used
 
-    def maximize_module(self, module_name):
-        if self.maximized_module_name == module_name:
+    def maximize_module(self, instance_id):
+        if self.maximized_module_name == instance_id:
             return  # Already maximized
 
-        self.shared_state.log(f"Maximizing module: {module_name}", "INFO")
+        self.shared_state.log(f"Maximizing module: {instance_id}", "INFO")
         self._pre_maximize_layout = self.main_layout_manager.get_layout_data()
-        self.maximized_module_name = module_name
+        self.maximized_module_name = instance_id
 
         canvas_width = self.canvas.winfo_width()
         canvas_height = self.canvas.winfo_height()
         self.main_layout_manager.config(width=canvas_width, height=canvas_height)
         self.canvas.itemconfig(self.main_layout_manager_window_id, width=canvas_width, height=canvas_height)
 
-        # Hide all other modules except the maximized one
-        for name, mod_data in self.loaded_modules.items():
+        for iid, mod_data in self.loaded_modules.items():
             frame_wrapper = mod_data.get('frame_wrapper')
             instance = mod_data.get('instance')
-            if name == module_name:
+            if iid == instance_id:
                 if frame_wrapper and frame_wrapper.winfo_exists():
                     frame_wrapper.lift()
                     frame_wrapper.place(x=0, y=0, width=canvas_width, height=canvas_height)
@@ -1217,13 +1213,13 @@ class ModularGUI:
                 if instance:
                     instance.is_maximized = False
 
-        # 這裡直接設 scrollregion 為 canvas 大小
         self.canvas.config(scrollregion=(0, 0, canvas_width, canvas_height))
+
     def restore_modules(self):
         if not self.maximized_module_name:
             return
         self.shared_state.log("Restoring modules from maximized state.", "INFO")
-        for name, mod_data in self.loaded_modules.items():
+        for iid, mod_data in self.loaded_modules.items():
             instance = mod_data.get('instance')
             if instance:
                 instance.is_maximized = False
@@ -1234,16 +1230,14 @@ class ModularGUI:
         self.canvas.itemconfig(self.main_layout_manager_window_id, width=content_width, height=content_height)
 
         if self._pre_maximize_layout:
-            for name, props in self._pre_maximize_layout.items():
-                if name in self.loaded_modules:
-                    self.main_layout_manager.resize_module(name, props.get('width', 200), props.get('height', 150))
+            for iid, props in self._pre_maximize_layout.items():
+                if iid in self.loaded_modules:
+                    self.main_layout_manager.resize_module(iid, props.get('width', 200), props.get('height', 150))
             self.main_layout_manager.reflow_layout()
         else:
             self.main_layout_manager.reflow_layout()
 
-        # 恢復 scrollregion
         self.canvas.config(scrollregion=(0, 0, content_width, content_height))
-
         self.update_layout_scrollregion()
         self.maximized_module_name = None
         self._pre_maximize_layout = None
