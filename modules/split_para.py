@@ -3,12 +3,11 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import os
 import re
+from main import Module
 
-class CSVProcessorApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("CSV Data Processor")
-        self.root.geometry("600x500")
+class CSVProcessorApp(Module):
+    def __init__(self, master, shared_state, module_name="SplitPara", gui_manager=None):
+        super().__init__(master, shared_state, module_name, gui_manager)
         
         # Variables
         self.input_file_var = tk.StringVar()
@@ -24,10 +23,10 @@ class CSVProcessorApp:
         self.selected_values = {v: tk.BooleanVar(value=True) for v in self.split_values}
         
         # Create UI
-        self.create_widgets()
+        self.create_ui()
     
-    def create_widgets(self):
-        main_frame = ttk.Frame(self.root, padding="10")
+    def create_ui(self):
+        main_frame = ttk.Frame(self.frame, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
         
         # Input file section
@@ -67,7 +66,7 @@ class CSVProcessorApp:
         button_frame = ttk.Frame(main_frame)
         button_frame.pack(fill=tk.X, pady=10)
         ttk.Button(button_frame, text="Process Data", command=self.process_data).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Exit", command=self.root.quit).pack(side=tk.RIGHT, padx=5)
+        # Removed Exit button
         
         # Status bar
         status_frame = ttk.Frame(main_frame, relief=tk.SUNKEN, borderwidth=1)
@@ -116,7 +115,8 @@ class CSVProcessorApp:
     def browse_input_file(self):
         filename = filedialog.askopenfilename(
             title="Select Input CSV File",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            parent=self.frame
         )
         if filename:
             self.input_file_var.set(filename)
@@ -130,7 +130,8 @@ class CSVProcessorApp:
     
     def browse_output_dir(self):
         dirname = filedialog.askdirectory(
-            title="Select Output Directory"
+            title="Select Output Directory",
+            parent=self.frame
         )
         if dirname:
             self.output_dir_var.set(dirname)
@@ -153,21 +154,21 @@ class CSVProcessorApp:
         
         # Validation
         if not input_file:
-            messagebox.showerror("Error", "Please select an input CSV file")
+            messagebox.showerror("Error", "Please select an input CSV file", parent=self.frame)
             return
         
         # 不再檢查 L
         selected_values = [v for v in self.split_values if self.selected_values[v].get()]
         if not selected_values:
-            messagebox.showerror("Error", "Please select at least one value")
+            messagebox.showerror("Error", "Please select at least one value", parent=self.frame)
             return
         
         try:
             self.status_var.set(f"Reading file: {input_file}")
-            self.root.update()
+            # self.root.update() # Removed
             data = pd.read_csv(input_file)
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to read CSV file: {str(e)}")
+            messagebox.showerror("Error", f"Failed to read CSV file: {str(e)}", parent=self.frame)
             self.status_var.set("Error reading file")
             return
         
@@ -183,7 +184,7 @@ class CSVProcessorApp:
                 # Check if columns exist
                 if re_col not in data.columns or im_col not in data.columns:
                     self.status_var.set(f"Skipping {v}: Missing required columns")
-                    self.root.update()
+                    # self.root.update() # Removed
                     error_count += 1
                     continue
                 
@@ -199,22 +200,22 @@ class CSVProcessorApp:
                 
                 success_count += 1
                 self.status_var.set(f"Processed: {v} ({success_count}/{len(selected_values)})")
-                self.root.update()
+                # self.root.update() # Removed
                 
             except Exception as e:
                 error_count += 1
                 self.status_var.set(f"Error processing {v}: {str(e)}")
-                self.root.update()
+                # self.root.update() # Removed
         
         # Final status
         if error_count == 0:
             self.status_var.set(f"Completed! {success_count} files processed successfully")
-            messagebox.showinfo("Success", f"All {success_count} files were processed successfully.")
+            messagebox.showinfo("Success", f"All {success_count} files were processed successfully.", parent=self.frame)
         else:
             self.status_var.set(f"Completed with errors. {success_count} successful, {error_count} errors")
-            messagebox.showwarning("Warning", f"Completed with {error_count} errors. {success_count} files were processed successfully.")
+            messagebox.showwarning("Warning", f"Completed with {error_count} errors. {success_count} files were processed successfully.", parent=self.frame)
 
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = CSVProcessorApp(root)
-    root.mainloop()
+# if __name__ == "__main__":
+#     root = tk.Tk()
+#     app = CSVProcessorApp(root)
+#     root.mainloop()
