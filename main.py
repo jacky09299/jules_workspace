@@ -321,6 +321,13 @@ class CustomLayoutManager(tk.Frame):
 
         self.config(width=layout_manager_own_width, height=self.last_calculated_content_height)
 
+    def scale_modules(self, scale_ratio):
+        """Scale all modules' width and height and reposition them."""
+        for module_info in self.modules.values():
+            module_info['width'] = int(module_info['width'] * scale_ratio)
+            module_info['height'] = int(module_info['height'] * scale_ratio)
+        self.reflow_layout()
+
     def get_max_module_width(self) -> int:
         if not self.modules:
             return 0
@@ -535,23 +542,37 @@ class ModularGUI:
     def on_canvas_configure(self, event):
         canvas_width = event.width
 
-        self.canvas.itemconfig(self.main_layout_manager_window_id, width=canvas_width)
-
-        if hasattr(self.main_layout_manager, 'current_canvas_width'):
-            self.main_layout_manager.current_canvas_width = canvas_width
-
-        # If maximized, update the maximized module's size
+        # 如果有最大化模組，讓 main_layout_manager 永遠填滿 canvas
         if self.maximized_module_name and self.maximized_module_name in self.loaded_modules:
+            canvas_height = self.canvas.winfo_height()
+            self.main_layout_manager.config(width=canvas_width, height=canvas_height)
+            self.canvas.itemconfig(self.main_layout_manager_window_id, width=canvas_width, height=canvas_height)
             mod_data = self.loaded_modules[self.maximized_module_name]
             frame_wrapper = mod_data.get('frame_wrapper')
             if frame_wrapper and frame_wrapper.winfo_exists():
-                frame_wrapper.place(x=0, y=0, width=canvas_width, height=self.canvas.winfo_height())
+                frame_wrapper.place(x=0, y=0, width=canvas_width, height=canvas_height)
+            # 不要呼叫 scale_modules 或 reflow_layout
+            self.canvas.config(scrollregion=(0, 0, canvas_width, canvas_height))
+        else:
+            self.canvas.itemconfig(self.main_layout_manager_window_id, width=canvas_width)
+            if hasattr(self.main_layout_manager, 'current_canvas_width'):
+                prev_width = self.main_layout_manager.current_canvas_width
+                self.main_layout_manager.current_canvas_width = canvas_width
+            else:
+                prev_width = self.last_canvas_width
 
-        elif hasattr(self.main_layout_manager, 'reflow_layout'):
-             self.main_layout_manager.reflow_layout()
+            # --- Begin: scale modules when window width changes ---
+            if prev_width > 0 and canvas_width > 0 and prev_width != canvas_width:
+                scale_ratio = canvas_width / prev_width
+                if hasattr(self.main_layout_manager, 'scale_modules'):
+                    self.main_layout_manager.scale_modules(scale_ratio)
+            elif hasattr(self.main_layout_manager, 'reflow_layout'):
+                self.main_layout_manager.reflow_layout()
+            # --- End: scale modules when window width changes ---
 
-        self.update_layout_scrollregion()
+            self.last_canvas_width = canvas_width  # Update last_canvas_width
 
+            self.update_layout_scrollregion()
     def update_min_window_size(self):
         flag_exists = hasattr(self, 'window_size_fixed_after_init')
         flag_value = self.window_size_fixed_after_init if flag_exists else "N/A"
