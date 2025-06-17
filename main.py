@@ -70,13 +70,15 @@ class Module:
         if self.gui_manager and hasattr(self.gui_manager, 'window_size_fixed_after_init') and self.gui_manager.window_size_fixed_after_init and hasattr(self.gui_manager, 'root') and hasattr(self.gui_manager.root, 'maxsize') and hasattr(self.gui_manager.root, 'winfo_width') and hasattr(self.gui_manager.root, 'winfo_height'):
             self.gui_manager.is_module_resizing = True
             self.gui_manager.root_maxsize_backup = self.gui_manager.root.maxsize()
+            self.gui_manager.root_minsize_backup = self.gui_manager.root.minsize()  # <-- store minsize
             current_width = self.gui_manager.root.winfo_width()
             current_height = self.gui_manager.root.winfo_height()
             self.gui_manager.window_geometry_before_module_resize = f"{current_width}x{current_height}"
             self.gui_manager.root.maxsize(current_width, current_height)
+            self.gui_manager.root.minsize(current_width, current_height)  # <-- lock minsize
             if hasattr(self.gui_manager, 'shared_state'):
                 self.gui_manager.shared_state.log(
-                    f"Module resize started: Geometry '{self.gui_manager.window_geometry_before_module_resize}' stored. Maxsize temporarily set to {current_width}x{current_height}.", "DEBUG"
+                    f"Module resize started: Geometry '{self.gui_manager.window_geometry_before_module_resize}' stored. Maxsize/minsize temporarily set to {current_width}x{current_height}.", "DEBUG"
                 )
         elif self.gui_manager and hasattr(self.gui_manager, 'shared_state'):
              if not (hasattr(self.gui_manager, 'window_size_fixed_after_init') and self.gui_manager.window_size_fixed_after_init):
@@ -106,7 +108,7 @@ class Module:
             return
 
         delta_x = event.x_root - self.resize_start_x
-        delta_y = event.x_root - self.resize_start_x
+        delta_y = event.y_root - self.resize_start_y  # <-- fix: use y_root for y
 
         new_width = self.resize_start_width + delta_x
         new_height = self.resize_start_height + delta_y
@@ -130,6 +132,7 @@ class Module:
             self.gui_manager.update_layout_scrollregion()
 
         if self.gui_manager and hasattr(self.gui_manager, 'is_module_resizing') and self.gui_manager.is_module_resizing:
+            # Restore maxsize
             if hasattr(self.gui_manager, 'root_maxsize_backup') and self.gui_manager.root_maxsize_backup is not None and hasattr(self.gui_manager, 'root') and hasattr(self.gui_manager.root, 'maxsize'):
                 self.gui_manager.root.maxsize(
                     self.gui_manager.root_maxsize_backup[0],
@@ -143,24 +146,37 @@ class Module:
                 self.gui_manager.shared_state.log(
                     "Module resize ended: No valid maxsize backup found to restore.", "WARNING"
                 )
-
-            if hasattr(self.gui_manager, 'window_geometry_before_module_resize') and self.gui_manager.window_geometry_before_module_resize is not None and hasattr(self.gui_manager, 'root') and hasattr(self.gui_manager, 'geometry'):
-                self.gui_manager.root.geometry(self.gui_manager.window_geometry_before_module_resize)
+            # Restore minsize
+            if hasattr(self.gui_manager, 'root_minsize_backup') and self.gui_manager.root_minsize_backup is not None and hasattr(self.gui_manager, 'root') and hasattr(self.gui_manager.root, 'minsize'):
+                self.gui_manager.root.minsize(
+                    self.gui_manager.root_minsize_backup[0],
+                    self.gui_manager.root_minsize_backup[1]
+                )
                 if hasattr(self.gui_manager, 'shared_state'):
                     self.gui_manager.shared_state.log(
-                        f"Module resize ended: Main window geometry restored to {self.gui_manager.window_geometry_before_module_resize}.", "DEBUG"
+                        f"Module resize ended: Main window minsize restored to {self.gui_manager.root_minsize_backup}.", "DEBUG"
                     )
             elif self.gui_manager and hasattr(self.gui_manager, 'shared_state'):
-                 self.gui_manager.shared_state.log(
-                    "Module resize ended: No stored geometry found to restore.", "WARNING"
+                self.gui_manager.shared_state.log(
+                    "Module resize ended: No valid minsize backup found to restore.", "WARNING"
                 )
+
+            # Do NOT restore geometry here, just leave as is
+
+            # 強制把視窗尺寸設回目前大小，避免自動調整
+            if hasattr(self.gui_manager, 'root'):
+                w = self.gui_manager.root.winfo_width()
+                h = self.gui_manager.root.winfo_height()
+                self.gui_manager.root.geometry(f"{w}x{h}")
 
             self.gui_manager.is_module_resizing = False
             if hasattr(self.gui_manager, 'root_maxsize_backup'):
                 self.gui_manager.root_maxsize_backup = None
+            if hasattr(self.gui_manager, 'root_minsize_backup'):
+                self.gui_manager.root_minsize_backup = None
             if hasattr(self.gui_manager, 'window_geometry_before_module_resize'):
                 self.gui_manager.window_geometry_before_module_resize = None
-
+                
     def get_frame(self):
         return self.frame
 
