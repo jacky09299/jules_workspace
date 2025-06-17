@@ -118,6 +118,13 @@ class Module:
         new_width = max(min_width, new_width)
         new_height = max(min_height, new_height)
 
+        # --- Cap width to canvas width if it exceeds ---
+        if self.gui_manager and hasattr(self.gui_manager, "canvas"):
+            canvas_width = self.gui_manager.canvas.winfo_width()
+            if canvas_width > 1:
+                new_width = min(new_width, canvas_width)
+        # ----------------------------------------------
+
         self.gui_manager.main_layout_manager.resize_module(self.module_name, new_width, new_height)
         
         if self.gui_manager and hasattr(self.gui_manager, 'update_layout_manager_canvas_item_config'):
