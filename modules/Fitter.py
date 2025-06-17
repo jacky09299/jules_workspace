@@ -381,10 +381,6 @@ class FitterModule(Module):
         self.create_ui()
 
     def create_ui(self):
-        # Clear placeholder if any - Module base class creates self.frame
-        for widget in self.frame.winfo_children():
-            widget.destroy()
-
         # Create a main content frame within self.frame
         # This new frame will house all module-specific UI elements,
         # allowing the base Module class to manage its title bar and resize handle
