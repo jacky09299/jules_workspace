@@ -39,7 +39,7 @@ class Module:
         self.resize_start_width = 0
         self.resize_start_height = 0
 
-        self.shared_state.log(f"Module '{self.module_name}' initialized with title bar and FS button.")
+        self.shared_state.log(f"Module '{self.module_name}' initialized with title bar.")
 
     def close_module_action(self):
         if self.gui_manager:
