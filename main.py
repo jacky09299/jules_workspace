@@ -28,6 +28,13 @@ class Module:
                                         command=self.close_module_action)
         self.close_button.pack(side=tk.RIGHT, padx=(0, 2))
 
+        # Add maximize button (square symbol)
+        self.maximize_button = ttk.Button(
+            self.title_bar_frame, text="⬜", width=3,
+            command=self.toggle_maximize_action
+        )
+        self.maximize_button.pack(side=tk.RIGHT, padx=(0, 2))
+
         self.resize_handle = ttk.Sizegrip(self.frame)
         self.resize_handle.pack(side=tk.BOTTOM, anchor=tk.SE)
         self.resize_handle.bind("<ButtonPress-1>", self._on_resize_start)
@@ -39,6 +46,8 @@ class Module:
         self.resize_start_width = 0
         self.resize_start_height = 0
 
+        self.is_maximized = False  # Track maximize state
+
         self.shared_state.log(f"Module '{self.module_name}' initialized with title bar.")
 
     def close_module_action(self):
@@ -47,6 +56,15 @@ class Module:
             self.gui_manager.hide_module(self.module_name)
         else:
             self.shared_state.log(f"Cannot close module '{self.module_name}': gui_manager not available.", "ERROR")
+
+    def toggle_maximize_action(self):
+        if not self.gui_manager:
+            self.shared_state.log(f"Cannot maximize module '{self.module_name}': gui_manager not available.", "ERROR")
+            return
+        if not self.is_maximized:
+            self.gui_manager.maximize_module(self.module_name)
+        else:
+            self.gui_manager.restore_modules()
 
     def _on_resize_start(self, event):
         # --- Start of updated logic for _on_resize_start ---
@@ -387,6 +405,11 @@ class ModularGUI:
 
         self.loaded_modules = {}
 
+        # --- Add these lines to fix AttributeError ---
+        self.maximized_module_name = None
+        self._pre_maximize_layout = None
+        # --- End fix ---
+
         self.dragged_module_name = None
         self.drag_start_widget = None
         self.drop_target_module_frame_wrapper = None 
@@ -517,7 +540,14 @@ class ModularGUI:
         if hasattr(self.main_layout_manager, 'current_canvas_width'):
             self.main_layout_manager.current_canvas_width = canvas_width
 
-        if hasattr(self.main_layout_manager, 'reflow_layout'):
+        # If maximized, update the maximized module's size
+        if self.maximized_module_name and self.maximized_module_name in self.loaded_modules:
+            mod_data = self.loaded_modules[self.maximized_module_name]
+            frame_wrapper = mod_data.get('frame_wrapper')
+            if frame_wrapper and frame_wrapper.winfo_exists():
+                frame_wrapper.place(x=0, y=0, width=canvas_width, height=self.canvas.winfo_height())
+
+        elif hasattr(self.main_layout_manager, 'reflow_layout'):
              self.main_layout_manager.reflow_layout()
 
         self.update_layout_scrollregion()
@@ -847,32 +877,36 @@ class ModularGUI:
                 self.shared_state.log(f"Module '{module_name}' cannot be shown, not found in available modules.", level=logging.WARNING)
 
     def hide_module(self, module_name: str):
-        self.shared_state.log(f"Hiding module: {module_name} via close button/hide action.")
-        if module_name in self.loaded_modules:
-            module_data = self.loaded_modules[module_name]
-            frame_wrapper = module_data.get('frame_wrapper')
-            instance = module_data.get('instance')
-
-            if frame_wrapper and frame_wrapper.winfo_exists():
-                self.main_layout_manager.remove_module(module_name)
-
-            if instance:
-                try:
-                    instance.on_destroy()
-                except Exception as e:
-                    self.shared_state.log(f"Error during on_destroy for module {module_name} when hiding: {e}", "ERROR")
-
-            if frame_wrapper and frame_wrapper.winfo_exists():
-                frame_wrapper.destroy()
-
-            del self.loaded_modules[module_name]
-            self.shared_state.log(f"Module '{module_name}' hidden and instance destroyed.")
-
-            self.update_min_window_size()
-            self.update_layout_scrollregion()
-
+        # Prevent hiding if maximized
+        if self.maximized_module_name == module_name:
+            self.restore_modules()
         else:
-            self.shared_state.log(f"Module '{module_name}' not found or not loaded, cannot hide.", "WARNING")
+            self.shared_state.log(f"Hiding module: {module_name} via close button/hide action.")
+            if module_name in self.loaded_modules:
+                module_data = self.loaded_modules[module_name]
+                frame_wrapper = module_data.get('frame_wrapper')
+                instance = module_data.get('instance')
+
+                if frame_wrapper and frame_wrapper.winfo_exists():
+                    self.main_layout_manager.remove_module(module_name)
+
+                if instance:
+                    try:
+                        instance.on_destroy()
+                    except Exception as e:
+                        self.shared_state.log(f"Error during on_destroy for module {module_name} when hiding: {e}", "ERROR")
+
+                if frame_wrapper and frame_wrapper.winfo_exists():
+                    frame_wrapper.destroy()
+
+                del self.loaded_modules[module_name]
+                self.shared_state.log(f"Module '{module_name}' hidden and instance destroyed.")
+
+                self.update_min_window_size()
+                self.update_layout_scrollregion()
+
+            else:
+                self.shared_state.log(f"Module '{module_name}' not found or not loaded, cannot hide.", "WARNING")
 
     def start_drag(self, event, module_name):
         self.shared_state.log(f"Start dragging module: {module_name}", level=logging.DEBUG)
@@ -1133,7 +1167,65 @@ class ModularGUI:
         self.last_preview_target_module_name = None
         # self.drop_target_module_frame_wrapper = None # Should already be None / not used
 
+    def maximize_module(self, module_name):
+        if self.maximized_module_name == module_name:
+            return  # Already maximized
 
+        self.shared_state.log(f"Maximizing module: {module_name}", "INFO")
+        self._pre_maximize_layout = self.main_layout_manager.get_layout_data()
+        self.maximized_module_name = module_name
+
+        canvas_width = self.canvas.winfo_width()
+        canvas_height = self.canvas.winfo_height()
+        self.main_layout_manager.config(width=canvas_width, height=canvas_height)
+        self.canvas.itemconfig(self.main_layout_manager_window_id, width=canvas_width, height=canvas_height)
+
+        # Hide all other modules except the maximized one
+        for name, mod_data in self.loaded_modules.items():
+            frame_wrapper = mod_data.get('frame_wrapper')
+            instance = mod_data.get('instance')
+            if name == module_name:
+                if frame_wrapper and frame_wrapper.winfo_exists():
+                    frame_wrapper.lift()
+                    frame_wrapper.place(x=0, y=0, width=canvas_width, height=canvas_height)
+                if instance:
+                    instance.is_maximized = True
+            else:
+                if frame_wrapper and frame_wrapper.winfo_exists():
+                    frame_wrapper.place_forget()
+                if instance:
+                    instance.is_maximized = False
+
+        # 這裡直接設 scrollregion 為 canvas 大小
+        self.canvas.config(scrollregion=(0, 0, canvas_width, canvas_height))
+    def restore_modules(self):
+        if not self.maximized_module_name:
+            return
+        self.shared_state.log("Restoring modules from maximized state.", "INFO")
+        for name, mod_data in self.loaded_modules.items():
+            instance = mod_data.get('instance')
+            if instance:
+                instance.is_maximized = False
+
+        content_height = self.main_layout_manager.last_calculated_content_height
+        content_width = self.main_layout_manager.last_calculated_content_width
+        self.main_layout_manager.config(width=content_width, height=content_height)
+        self.canvas.itemconfig(self.main_layout_manager_window_id, width=content_width, height=content_height)
+
+        if self._pre_maximize_layout:
+            for name, props in self._pre_maximize_layout.items():
+                if name in self.loaded_modules:
+                    self.main_layout_manager.resize_module(name, props.get('width', 200), props.get('height', 150))
+            self.main_layout_manager.reflow_layout()
+        else:
+            self.main_layout_manager.reflow_layout()
+
+        # 恢復 scrollregion
+        self.canvas.config(scrollregion=(0, 0, content_width, content_height))
+
+        self.update_layout_scrollregion()
+        self.maximized_module_name = None
+        self._pre_maximize_layout = None
 if __name__ == "__main__":
     import sys
     if '__main__' in sys.modules:
