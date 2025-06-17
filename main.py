@@ -28,9 +28,6 @@ class Module:
                                         command=self.close_module_action)
         self.close_button.pack(side=tk.RIGHT, padx=(0, 2))
 
-        self.fullscreen_button = ttk.Button(self.title_bar_frame, text="FS", width=3, command=self.invoke_fullscreen_toggle)
-        self.fullscreen_button.pack(side=tk.RIGHT, padx=(0, 5))
-
         self.resize_handle = ttk.Sizegrip(self.frame)
         self.resize_handle.pack(side=tk.BOTTOM, anchor=tk.SE)
         self.resize_handle.bind("<ButtonPress-1>", self._on_resize_start)
@@ -164,12 +161,6 @@ class Module:
             if hasattr(self.gui_manager, 'window_geometry_before_module_resize'):
                 self.gui_manager.window_geometry_before_module_resize = None
         # --- End of updated logic for _on_resize_release ---
-
-    def invoke_fullscreen_toggle(self):
-        if self.gui_manager:
-            self.gui_manager.toggle_fullscreen(self.module_name)
-        else:
-            self.shared_state.log(f"Cannot toggle fullscreen for {self.module_name}: gui_manager not available.", logging.ERROR)
 
     def get_frame(self):
         return self.frame
@@ -405,7 +396,6 @@ class ModularGUI:
         self.ghost_canvas_window_id = None
         self.last_preview_target_module_name = None
 
-        self.fullscreen_module_name = None
         # self.root_resizable_backup = None # This was removed, ensure it's not re-added
         self.is_module_resizing = False # This should be present
         self.root_maxsize_backup = None # This should be present
@@ -685,19 +675,15 @@ class ModularGUI:
     def save_layout_config(self):
         self.shared_state.log(f"Saving layout configuration to {self.layout_config_file}")
         layout_data = {
-            'fullscreen_module': self.fullscreen_module_name,
             'custom_modules_properties': None
         }
 
-        if not self.fullscreen_module_name:
-            if hasattr(self.main_layout_manager, 'get_layout_data'):
-                custom_module_data = self.main_layout_manager.get_layout_data()
-                layout_data['custom_modules_properties'] = custom_module_data
-                self.shared_state.log(f"Saved custom layout data: {custom_module_data}", level=logging.DEBUG)
-            else:
-                self.shared_state.log("CustomLayoutManager has no get_layout_data method. Cannot save layout.", level=logging.WARNING)
-        elif self.fullscreen_module_name:
-            self.shared_state.log("Saving layout while in fullscreen mode. Main layout properties not saved.", level=logging.INFO)
+        if hasattr(self.main_layout_manager, 'get_layout_data'):
+            custom_module_data = self.main_layout_manager.get_layout_data()
+            layout_data['custom_modules_properties'] = custom_module_data
+            self.shared_state.log(f"Saved custom layout data: {custom_module_data}", level=logging.DEBUG)
+        else:
+            self.shared_state.log("CustomLayoutManager has no get_layout_data method. Cannot save layout.", level=logging.WARNING)
 
         try:
             with open(self.layout_config_file, 'w') as f:
@@ -775,26 +761,8 @@ class ModularGUI:
             else:
                 self.shared_state.log("No 'custom_modules_properties' found in layout config.", level=logging.INFO)
 
-            fullscreen_module_to_load = layout_data.get('fullscreen_module')
-            if fullscreen_module_to_load:
-                if fullscreen_module_to_load not in self.loaded_modules:
-                    if fullscreen_module_to_load in self.available_module_classes:
-                        self.shared_state.log(f"Fullscreen module '{fullscreen_module_to_load}' not in main layout, loading it.", level=logging.INFO)
-                        self.instantiate_module(fullscreen_module_to_load, self.main_layout_manager)
-                        if custom_modules_properties and fullscreen_module_to_load in custom_modules_properties:
-                            props = custom_modules_properties[fullscreen_module_to_load]
-                            width = props.get('width', 200)
-                            height = props.get('height', 150)
-                            self.main_layout_manager.resize_module(fullscreen_module_to_load, width, height)
-                    else:
-                         self.shared_state.log(f"Fullscreen module '{fullscreen_module_to_load}' not available.", level=logging.ERROR)
-                         fullscreen_module_to_load = None
-
-                if fullscreen_module_to_load and fullscreen_module_to_load in self.loaded_modules:
-                    self.enter_fullscreen(fullscreen_module_to_load)
-
-            if not loaded_any_module_from_config and not fullscreen_module_to_load and not self.loaded_modules:
-                self.shared_state.log("Layout config processed, but no modules loaded and not entering fullscreen. Setting up default layout.", level=logging.INFO)
+            if not loaded_any_module_from_config and not self.loaded_modules:
+                self.shared_state.log("Layout config processed, but no modules loaded. Setting up default layout.", level=logging.INFO)
                 self.setup_default_layout()
             else:
                 self.update_min_window_size()
@@ -830,31 +798,26 @@ class ModularGUI:
     def show_context_menu(self, event):
         self.context_menu.delete(0, tk.END)
 
-        if self.fullscreen_module_name:
-            self.context_menu.add_command(label="Exit Fullscreen to manage modules", command=self.exit_fullscreen)
-        else:
-            self.context_menu.add_command(label="Toggle Module Visibility:", state=tk.DISABLED)
-            self.context_menu.add_separator()
+        self.context_menu.add_command(label="Toggle Module Visibility:", state=tk.DISABLED)
+        self.context_menu.add_separator()
 
-            visible_module_wrappers = []
-            if not self.fullscreen_module_name:
-                for mod_name, mod_data in self.loaded_modules.items():
-                    if mod_data.get('frame_wrapper') and mod_data['frame_wrapper'].winfo_exists():
-                        visible_module_wrappers.append(mod_data['frame_wrapper'])
+        visible_module_wrappers = []
+        for mod_name, mod_data in self.loaded_modules.items():
+            if mod_data.get('frame_wrapper') and mod_data.get('frame_wrapper').winfo_exists():
+                visible_module_wrappers.append(mod_data['frame_wrapper'])
 
+        for module_name in sorted(self.available_module_classes.keys()):
+            is_visible = False
+            if module_name in self.loaded_modules:
+                mod_data = self.loaded_modules[module_name]
+                if mod_data.get('instance') and mod_data.get('frame_wrapper') and mod_data.get('frame_wrapper').winfo_exists():
+                    is_visible = True
 
-            for module_name in sorted(self.available_module_classes.keys()):
-                is_visible = False
-                if module_name in self.loaded_modules and not self.fullscreen_module_name:
-                    mod_data = self.loaded_modules[module_name]
-                    if mod_data.get('instance') and mod_data.get('frame_wrapper') and mod_data.get('frame_wrapper').winfo_exists():
-                        is_visible = True
-
-                prefix = "[x]" if is_visible else "[ ]"
-                self.context_menu.add_command(
-                    label=f"{prefix} {module_name}",
-                    command=lambda mn=module_name: self.toggle_module_visibility(mn)
-                )
+            prefix = "[x]" if is_visible else "[ ]"
+            self.context_menu.add_command(
+                label=f"{prefix} {module_name}",
+                command=lambda mn=module_name: self.toggle_module_visibility(mn)
+            )
 
         try:
             self.context_menu.tk_popup(event.x_root, event.y_root)
@@ -866,7 +829,7 @@ class ModularGUI:
 
         is_visible = False
         wrapper_to_check = None
-        if module_name in self.loaded_modules and not self.fullscreen_module_name:
+        if module_name in self.loaded_modules:
             mod_data = self.loaded_modules[module_name]
             if mod_data and mod_data.get('instance'):
                 wrapper_to_check = mod_data.get('frame_wrapper')
@@ -1177,55 +1140,6 @@ class ModularGUI:
         self.last_preview_target_module_name = None
         # self.drop_target_module_frame_wrapper = None # Should already be None / not used
 
-
-    def toggle_fullscreen(self, module_name):
-        if self.fullscreen_module_name:
-            if self.fullscreen_module_name == module_name:
-                self.exit_fullscreen()
-            else:
-                self.exit_fullscreen()
-                self.enter_fullscreen(module_name)
-        else:
-            self.enter_fullscreen(module_name)
-
-    def enter_fullscreen(self, module_name):
-        if module_name not in self.loaded_modules:
-            self.shared_state.log(f"Module {module_name} not found for fullscreen.", logging.ERROR)
-            return
-
-        self.fullscreen_module_name = module_name
-        fs_module_data = self.loaded_modules[module_name]
-        fs_module_wrapper = fs_module_data['frame_wrapper']
-        fs_module_instance = fs_module_data['instance']
-
-        self.shared_state.log(f"Entering fullscreen for module: {module_name}", logging.INFO)
-
-        self.main_layout_manager.pack_forget()
-
-        fs_module_wrapper.pack(fill=tk.BOTH, expand=True, before=self.main_layout_manager)
-
-        if fs_module_instance:
-            fs_module_instance.fullscreen_button.config(text="Exit")
-
-    def exit_fullscreen(self):
-        if not self.fullscreen_module_name:
-            return
-
-        fs_module_data = self.loaded_modules[self.fullscreen_module_name]
-        fs_module_wrapper = fs_module_data['frame_wrapper']
-        fs_module_instance = fs_module_data['instance']
-
-        self.shared_state.log(f"Exiting fullscreen for module: {self.fullscreen_module_name}", logging.INFO)
-
-        fs_module_wrapper.pack_forget()
-
-        self.main_layout_manager.pack(fill=tk.BOTH, expand=True)
-
-        if fs_module_instance:
-            fs_module_instance.fullscreen_button.config(text="FS")
-
-        self.fullscreen_module_name = None
-        self.store_main_pane_children.clear()
 
 if __name__ == "__main__":
     import sys
