@@ -758,7 +758,6 @@ class ModularGUI:
                 except Exception as e:
                     self.shared_state.log(f"Error during on_destroy for module {module_name}: {e}", level=logging.ERROR)
 
-        self.shared_state.save_config()
         self.root.destroy()
 
     def show_context_menu(self, event):
