@@ -1,5 +1,5 @@
 import os
-from moviepy import VideoFileClip
+from moviepy.editor import VideoFileClip
 
 # 設定來源資料夾與輸出資料夾
 input_folder = "mp4_folder"       # 放 MP4 的資料夾
