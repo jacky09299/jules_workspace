@@ -44,7 +44,25 @@ class CMDEmulator:
         self.command_entry.bind('<Up>', self.history_up)
         self.command_entry.bind('<Down>', self.history_down)
         self.command_entry.focus_set()
-        
+
+        # --- 新增: 按鈕區域 ---
+        self.button_frame = tk.Frame(self.main_frame, bg='black')
+        self.button_frame.pack(fill=tk.X, pady=(5, 0))
+
+        self.deactivate_btn = tk.Button(
+            self.button_frame, text="切換為正常CMD",
+            command=self.conda_deactivate,
+            bg='#222', fg='white', font=('Consolas', 10), relief=tk.RAISED
+        )
+        self.deactivate_btn.pack(side=tk.LEFT, padx=5)
+
+        self.activate_btn = tk.Button(
+            self.button_frame, text="切換為Conda(base)",
+            command=self.conda_activate_base,
+            bg='#222', fg='white', font=('Consolas', 10), relief=tk.RAISED
+        )
+        self.activate_btn.pack(side=tk.LEFT, padx=5)
+
         self.process = None
         self.command_history = []
         self.history_index = -1
@@ -211,6 +229,25 @@ class CMDEmulator:
                 self.history_index = len(self.command_history)
                 self.command_entry.delete(0, tk.END)
     
+    # --- 新增: 按鈕事件處理 ---
+    def conda_deactivate(self):
+        if self.process and self.process.poll() is None:
+            try:
+                self.process.stdin.write('conda deactivate\n')
+                self.process.stdin.flush()
+            except Exception as e:
+                self.append_output(f"\n執行 conda deactivate 時出錯: {str(e)}\n")
+                self.restart_cmd_process()
+
+    def conda_activate_base(self):
+        if self.process and self.process.poll() is None:
+            try:
+                self.process.stdin.write('conda activate base\n')
+                self.process.stdin.flush()
+            except Exception as e:
+                self.append_output(f"\n執行 conda activate base 時出錯: {str(e)}\n")
+                self.restart_cmd_process()
+
     def on_closing(self):
         self.is_running = False
         try:
