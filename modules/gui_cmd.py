@@ -1,21 +1,32 @@
 import tkinter as tk
-from tkinter import scrolledtext, messagebox
+from tkinter import scrolledtext, messagebox, filedialog
 import threading
 import subprocess
 import os
 import sys
 import queue
 import re
-from tkinter import filedialog  # 新增
+# Removed filedialog import from here as it's already imported above with messagebox
+from main import Module
 
-class CMDEmulator:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("CMD 模擬器 (已修正)")
-        self.root.geometry("900x700")
-        self.root.configure(bg='black')
-        
-        self.main_frame = tk.Frame(root, bg='black')
+class CMDModule(Module):
+    def __init__(self, master, shared_state, module_name="CMD Emulator", gui_manager=None):
+        super().__init__(master, shared_state, module_name, gui_manager)
+        # Initialize attributes that were in the old __init__ here, if they are needed before create_ui
+        self.process = None
+        self.command_history = []
+        self.history_index = -1
+        self.output_queue = queue.Queue()
+        self.is_running = True # Will be set to False in on_destroy
+
+        self.envs = [] # Will be populated in create_ui
+        self.selected_env = tk.StringVar() # Will be set in create_ui
+
+        self.create_ui()
+
+    def create_ui(self):
+        # All widget creation and packing logic moved here
+        self.main_frame = tk.Frame(self.frame, bg='black') # Parent is self.frame
         self.main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
         self.text_area = scrolledtext.ScrolledText(
@@ -29,8 +40,6 @@ class CMDEmulator:
         )
         self.text_area.pack(fill=tk.BOTH, expand=True)
         
-        # --- [修改 1] 簡化輸入區域 ---
-        # 我們不再需要一個假的 prompt_label，因為 cmd.exe 會自己顯示真實的提示符。
         self.command_entry = tk.Entry(
             self.main_frame,
             bg='black',
@@ -46,7 +55,6 @@ class CMDEmulator:
         self.command_entry.bind('<Down>', self.history_down)
         self.command_entry.focus_set()
 
-        # --- 新增: 按鈕區域 ---
         self.button_frame = tk.Frame(self.main_frame, bg='black')
         self.button_frame.pack(fill=tk.X, pady=(5, 0))
 
@@ -64,13 +72,15 @@ class CMDEmulator:
         )
         self.activate_btn.pack(side=tk.LEFT, padx=5)
 
-        # --- 新增: conda 環境選單 ---
         self.envs = self.detect_conda_envs()
         self.selected_env = tk.StringVar()
         if self.envs:
             self.selected_env.set(self.envs[0])
+        else:
+            self.selected_env.set('base') # Default if no envs detected
+
         self.env_menu = tk.OptionMenu(
-            self.button_frame, self.selected_env, *self.envs
+            self.button_frame, self.selected_env, *(self.envs if self.envs else ['base'])
         )
         self.env_menu.config(bg='#222', fg='white', font=('Consolas', 10))
         self.env_menu.pack(side=tk.LEFT, padx=5)
@@ -82,28 +92,20 @@ class CMDEmulator:
         )
         self.activate_env_btn.pack(side=tk.LEFT, padx=5)
 
-        # --- 新增: 切換目錄按鈕 ---
         self.cd_btn = tk.Button(
             self.button_frame, text="切換目錄",
             command=self.change_directory,
             bg='#222', fg='white', font=('Consolas', 10), relief=tk.RAISED
         )
         self.cd_btn.pack(side=tk.LEFT, padx=5)
-
-        self.process = None
-        self.command_history = []
-        self.history_index = -1
-        # 我們不再需要自己追蹤 current_directory，讓 cmd.exe 內部處理
-        self.output_queue = queue.Queue()
-        self.is_running = True
         
         self.init_cmd_process()
         self.start_output_threads()
         
-        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        # self.root.protocol("WM_DELETE_WINDOW", self.on_closing) # Removed
         
-        self.append_output("=== CMD 模擬器已啟動 ===\n")
-        self.append_output("支援 conda, python, cd, dir 等所有原生命令\n\n")
+        self.append_output("=== CMD Emulator Module Loaded ===\n")
+        self.append_output("Supports conda, python, cd, dir and all other native commands.\n\n")
 
     def init_cmd_process(self):
         try:
@@ -122,7 +124,7 @@ class CMDEmulator:
                 encoding='utf-8', # 明確指定編碼
                 errors='replace', # 處理潛在的編碼錯誤
                 bufsize=1,  # 行緩衝
-                cwd=os.getcwd(),
+                cwd=os.getcwd(), # Consider using a configurable initial directory
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
                 env=env
             )
@@ -131,49 +133,64 @@ class CMDEmulator:
             self.process.stdin.flush()
 
         except Exception as e:
-            messagebox.showerror("錯誤", f"無法啟動 CMD 進程: {str(e)}")
-            self.root.destroy()
-            sys.exit(1)
+            # Use append_output for errors if GUI is already partially set up
+            self.append_output(f"Error: Could not start CMD process: {str(e)}\n")
+            if self.master: # If master exists, it means UI might be there
+                messagebox.showerror("Error", f"Could not start CMD process: {str(e)}")
+            # sys.exit(1) # Avoid exiting the whole app
+            # self.master.destroy() # Avoid destroying the main window directly
     
     def start_output_threads(self):
+        if hasattr(self, 'output_thread') and self.output_thread.is_alive():
+            # Avoid starting multiple threads if this method is called again
+            return
         self.output_thread = threading.Thread(target=self.read_output, daemon=True)
         self.output_thread.start()
         
+        if hasattr(self, 'display_thread') and self.display_thread.is_alive():
+            # Avoid starting multiple threads
+            return
         self.display_thread = threading.Thread(target=self.process_output, daemon=True)
         self.display_thread.start()
     
     def read_output(self):
         # 使用 iter 來讀取輸出，這比 read(1) 更高效且不易出錯
         try:
+            if not self.process or not self.process.stdout:
+                return
             for char in iter(lambda: self.process.stdout.read(1), ''):
                 if not self.is_running:
                     break
                 self.output_queue.put(char)
-        except Exception as e:
+        except Exception as e: # Can include ValueError if stdout is closed
             if self.is_running:
-                print(f"讀取輸出時發生錯誤: {e}")
+                # Using print for thread-internal errors, or log to a file
+                print(f"Error reading CMD output: {e}")
 
     def process_output(self):
         """處理輸出隊列，不再進行複雜的清理"""
         while self.is_running:
             try:
                 # 從隊列中一次性獲取所有可用數據，減少 GUI 更新次數
-                output_chunk = self.output_queue.get(block=True, timeout=0.1)
+                output_chunk = self.output_queue.get(block=True, timeout=0.1) # block with timeout
                 while not self.output_queue.empty():
-                    output_chunk += self.output_queue.get_nowait()
+                    try:
+                        output_chunk += self.output_queue.get_nowait() # non-blocking
+                    except queue.Empty:
+                        break # Should not happen if not empty, but good practice
                 
                 if output_chunk:
                     # --- [修改 2] 簡化清理邏輯 ---
                     # 我們只做最基本的清理，不再過濾提示符
                     cleaned_output = self.clean_output(output_chunk)
-                    self.append_output(cleaned_output)
+                    self.append_output(cleaned_output) # This will use self.master.after
                     
             except queue.Empty:
-                continue
+                continue # Timeout occurred, loop again
             except Exception as e:
                 if self.is_running:
-                    print(f"處理輸出時發生錯誤: {e}")
-                break
+                    print(f"Error processing CMD output: {e}")
+                break # Exit thread on other exceptions
     
     # --- [修改 3] 大幅簡化 clean_output ---
     def clean_output(self, output):
@@ -185,16 +202,27 @@ class CMDEmulator:
         return output
     
     def append_output(self, text):
+        # Ensure text_area is available and master is valid
+        if not hasattr(self, 'text_area') or not self.master:
+            print("Debug (append_output): text_area or master not available yet.")
+            return
+
         def update_text():
-            self.text_area.config(state=tk.NORMAL)
-            self.text_area.insert(tk.END, text)
-            self.text_area.see(tk.END)
-            self.text_area.config(state=tk.DISABLED)
-        
-        if threading.current_thread() == threading.main_thread():
-            update_text()
-        else:
-            self.root.after(0, update_text)
+            if not self.is_running: # Check if we are shutting down
+                 return
+            try:
+                self.text_area.config(state=tk.NORMAL)
+                self.text_area.insert(tk.END, text)
+                self.text_area.see(tk.END)
+                self.text_area.config(state=tk.DISABLED)
+            except tk.TclError as e:
+                # This can happen if the widget is destroyed
+                if self.is_running:
+                    print(f"TclError in append_output: {e}")
+
+        # Always use `self.master.after` for thread safety with Tkinter
+        # self.master refers to the root Tk window of the main application
+        self.master.after(0, update_text)
     
     # --- [修改 4] 移除 update_prompt 方法，不再需要 ---
     
@@ -327,21 +355,56 @@ class CMDEmulator:
                     self.append_output(f"\n切換目錄時出錯: {str(e)}\n")
                     self.restart_cmd_process()
 
-    def on_closing(self):
-        self.is_running = False
+    def on_destroy(self): # Renamed from on_closing, will be called by Module base class
+        self.is_running = False # Signal threads to stop
+
+        # Give threads a moment to stop
+        if hasattr(self, 'output_thread') and self.output_thread.is_alive():
+            self.output_thread.join(timeout=0.2)
+        if hasattr(self, 'display_thread') and self.display_thread.is_alive():
+            self.display_thread.join(timeout=0.2)
+
         try:
             if self.process and self.process.poll() is None:
-                # 結束整個進程組，避免 conda 之類的進程殘留
-                subprocess.run(['taskkill', '/F', '/T', '/PID', str(self.process.pid)], check=False)
+                # Politely ask cmd.exe to exit first
+                try:
+                    self.process.stdin.write('exit\n')
+                    self.process.stdin.flush()
+                except (OSError, ValueError): # stdin might be closed
+                    pass
+
+                # Wait a bit for cmd.exe to exit on its own
+                try:
+                    self.process.wait(timeout=0.5) # Wait for half a second
+                except subprocess.TimeoutExpired:
+                    # If it doesn't exit, then force kill
+                    print("CMD process did not exit gracefully, attempting to kill.")
+                    # Using taskkill for Windows to ensure child processes (like conda) are also handled.
+                    # CREATE_NEW_PROCESS_GROUP was used, so process.kill() might not be enough.
+                    try:
+                        subprocess.run(['taskkill', '/F', '/T', '/PID', str(self.process.pid)],
+                                       check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    except FileNotFoundError: # taskkill might not be available on all systems/PATH
+                        self.process.kill() # Fallback to simple kill
+                except Exception as e:
+                    print(f"Error during process wait/kill: {e}")
+
+            # Ensure stdin, stdout, stderr are closed if they exist
+            if self.process:
+                for pipe in [self.process.stdin, self.process.stdout, self.process.stderr]:
+                    if pipe:
+                        try:
+                            pipe.close()
+                        except OSError:
+                            pass # Ignore errors on close, pipe might be already closed
+
         except Exception as e:
-            print(f"關閉進程時出錯: {e}")
-        finally:
-            self.root.destroy()
+            # Log any other errors during shutdown
+            print(f"Error during CMD module shutdown: {e}")
 
-def main():
-    root = tk.Tk()
-    app = CMDEmulator(root)
-    root.mainloop()
+        # The Module base class will handle destroying self.frame
+        # No need to call self.master.destroy() or self.frame.destroy() here
+        super().on_destroy() # Call base class on_destroy if it has one
 
-if __name__ == "__main__":
-    main()
+# Removed main() and if __name__ == "__main__": block
+# This class is now intended to be used as a module within a larger application.
