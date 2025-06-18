@@ -6,6 +6,7 @@ import os
 import sys
 import queue
 import re
+from tkinter import filedialog  # 新增
 
 class CMDEmulator:
     def __init__(self, root):
@@ -62,6 +63,32 @@ class CMDEmulator:
             bg='#222', fg='white', font=('Consolas', 10), relief=tk.RAISED
         )
         self.activate_btn.pack(side=tk.LEFT, padx=5)
+
+        # --- 新增: conda 環境選單 ---
+        self.envs = self.detect_conda_envs()
+        self.selected_env = tk.StringVar()
+        if self.envs:
+            self.selected_env.set(self.envs[0])
+        self.env_menu = tk.OptionMenu(
+            self.button_frame, self.selected_env, *self.envs
+        )
+        self.env_menu.config(bg='#222', fg='white', font=('Consolas', 10))
+        self.env_menu.pack(side=tk.LEFT, padx=5)
+
+        self.activate_env_btn = tk.Button(
+            self.button_frame, text="切換",
+            command=self.conda_activate_selected,
+            bg='#222', fg='white', font=('Consolas', 10), relief=tk.RAISED
+        )
+        self.activate_env_btn.pack(side=tk.LEFT, padx=5)
+
+        # --- 新增: 切換目錄按鈕 ---
+        self.cd_btn = tk.Button(
+            self.button_frame, text="切換目錄",
+            command=self.change_directory,
+            bg='#222', fg='white', font=('Consolas', 10), relief=tk.RAISED
+        )
+        self.cd_btn.pack(side=tk.LEFT, padx=5)
 
         self.process = None
         self.command_history = []
@@ -247,6 +274,58 @@ class CMDEmulator:
             except Exception as e:
                 self.append_output(f"\n執行 conda activate base 時出錯: {str(e)}\n")
                 self.restart_cmd_process()
+
+    # --- 新增: 偵測 conda 環境 ---
+    def detect_conda_envs(self):
+        try:
+            # 只取名稱欄位
+            result = subprocess.run(
+                ['conda', 'env', 'list'],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding='utf-8'
+            )
+            envs = []
+            for line in result.stdout.splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                # 解析格式: env_name [*] path
+                m = re.match(r'^([^\s*]+)', line)
+                if m:
+                    envs.append(m.group(1))
+            # base 環境優先
+            if 'base' in envs:
+                envs.remove('base')
+                envs.insert(0, 'base')
+            return envs if envs else ['base']
+        except Exception as e:
+            return ['base']
+
+    # --- 新增: 切換到選擇的 conda 環境 ---
+    def conda_activate_selected(self):
+        env = self.selected_env.get()
+        if env:
+            if self.process and self.process.poll() is None:
+                try:
+                    self.process.stdin.write(f'conda activate {env}\n')
+                    self.process.stdin.flush()
+                except Exception as e:
+                    self.append_output(f"\n執行 conda activate {env} 時出錯: {str(e)}\n")
+                    self.restart_cmd_process()
+
+    # --- 新增: 切換目錄功能 ---
+    def change_directory(self):
+        folder = filedialog.askdirectory(title="選擇目錄")
+        if folder:
+            if self.process and self.process.poll() is None:
+                try:
+                    self.process.stdin.write(f'cd /d "{folder}"\n')
+                    self.process.stdin.flush()
+                except Exception as e:
+                    self.append_output(f"\n切換目錄時出錯: {str(e)}\n")
+                    self.restart_cmd_process()
 
     def on_closing(self):
         self.is_running = False
