@@ -4,26 +4,23 @@ import threading
 import subprocess
 import os
 import sys
-import time
 import queue
 import re
 
 class CMDEmulator:
     def __init__(self, root):
         self.root = root
-        self.root.title("CMD 模擬器 - Tkinter + subprocess")
+        self.root.title("CMD 模擬器 (已修正)")
         self.root.geometry("900x700")
         self.root.configure(bg='black')
         
-        # 創建主框架
         self.main_frame = tk.Frame(root, bg='black')
         self.main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # 創建文本顯示區域
         self.text_area = scrolledtext.ScrolledText(
             self.main_frame,
             bg='black',
-            fg='#00ff00',  # 綠色文字，更像終端
+            fg='#00ff00',
             font=('Consolas', 11),
             insertbackground='white',
             wrap=tk.WORD,
@@ -31,21 +28,10 @@ class CMDEmulator:
         )
         self.text_area.pack(fill=tk.BOTH, expand=True)
         
-        # 創建命令輸入框
-        self.input_frame = tk.Frame(self.main_frame, bg='black')
-        self.input_frame.pack(fill=tk.X, pady=(5, 0))
-        
-        self.prompt_label = tk.Label(
-            self.input_frame,
-            text="C:\\>",
-            bg='black',
-            fg='#00ff00',
-            font=('Consolas', 11)
-        )
-        self.prompt_label.pack(side=tk.LEFT)
-        
+        # --- [修改 1] 簡化輸入區域 ---
+        # 我們不再需要一個假的 prompt_label，因為 cmd.exe 會自己顯示真實的提示符。
         self.command_entry = tk.Entry(
-            self.input_frame,
+            self.main_frame,
             bg='black',
             fg='white',
             font=('Consolas', 11),
@@ -53,129 +39,107 @@ class CMDEmulator:
             relief=tk.FLAT,
             bd=0
         )
-        self.command_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.command_entry.pack(fill=tk.X, pady=(5, 0))
         self.command_entry.bind('<Return>', self.execute_command)
         self.command_entry.bind('<Up>', self.history_up)
         self.command_entry.bind('<Down>', self.history_down)
         self.command_entry.focus_set()
         
-        # 初始化變量
         self.process = None
         self.command_history = []
         self.history_index = -1
-        self.current_directory = os.getcwd()
+        # 我們不再需要自己追蹤 current_directory，讓 cmd.exe 內部處理
         self.output_queue = queue.Queue()
         self.is_running = True
         
-        # 啟動 CMD 進程
         self.init_cmd_process()
-        
-        # 啟動輸出讀取線程
         self.start_output_threads()
         
-        # 設置關閉事件
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         
-        # 初始顯示
         self.append_output("=== CMD 模擬器已啟動 ===\n")
-        self.append_output(f"當前目錄: {self.current_directory}\n")
-        self.append_output("支援 conda activate, python, cd, dir 等所有命令\n\n")
-        
-        # 移除自動更新提示符
-        
+        self.append_output("支援 conda, python, cd, dir 等所有原生命令\n\n")
+
     def init_cmd_process(self):
-        """初始化 CMD 進程"""
         try:
-            # 使用 subprocess.Popen 創建持久的 CMD 進程
+            # 設定環境變數，確保 conda 可以被找到
+            # 這一步很重要，特別是如果 conda 不在系統預設的 PATH 中
+            env = os.environ.copy()
+            # 如果你的 conda 不在預設路徑，可能需要手動添加 conda 的 Scripts 路徑
+            # 例如: env['PATH'] = 'C:\\path\\to\\anaconda3\\Scripts;' + env['PATH']
+            
             self.process = subprocess.Popen(
-                'cmd.exe',
+                ['cmd.exe'],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                stderr=subprocess.STDOUT, # 將 stderr 合併到 stdout
                 text=True,
-                bufsize=0,  # 無緩衝
-                cwd=self.current_directory,
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+                encoding='utf-8', # 明確指定編碼
+                errors='replace', # 處理潛在的編碼錯誤
+                bufsize=1,  # 行緩衝
+                cwd=os.getcwd(),
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+                env=env
             )
-            self.append_output("CMD 進程已啟動\n")
+            # 啟動時發送一個 enter，讓初始提示符顯示出來
+            self.process.stdin.write('\n')
+            self.process.stdin.flush()
+
         except Exception as e:
             messagebox.showerror("錯誤", f"無法啟動 CMD 進程: {str(e)}")
+            self.root.destroy()
             sys.exit(1)
     
     def start_output_threads(self):
-        """啟動輸出讀取線程"""
-        # 輸出讀取線程
         self.output_thread = threading.Thread(target=self.read_output, daemon=True)
         self.output_thread.start()
         
-        # 輸出處理線程
         self.display_thread = threading.Thread(target=self.process_output, daemon=True)
         self.display_thread.start()
     
     def read_output(self):
-        """讀取 CMD 輸出"""
-        while self.is_running and self.process and self.process.poll() is None:
-            try:
-                char = self.process.stdout.read(1)
-                if char:
-                    self.output_queue.put(char)
-            except Exception as e:
-                if self.is_running:
-                    print(f"讀取輸出錯誤: {e}")
-                break
-    
+        # 使用 iter 來讀取輸出，這比 read(1) 更高效且不易出錯
+        try:
+            for char in iter(lambda: self.process.stdout.read(1), ''):
+                if not self.is_running:
+                    break
+                self.output_queue.put(char)
+        except Exception as e:
+            if self.is_running:
+                print(f"讀取輸出時發生錯誤: {e}")
+
     def process_output(self):
-        """處理輸出隊列"""
-        buffer = ""
+        """處理輸出隊列，不再進行複雜的清理"""
         while self.is_running:
             try:
-                # 從隊列中獲取字符
-                char = self.output_queue.get(timeout=0.1)
-                buffer += char
+                # 從隊列中一次性獲取所有可用數據，減少 GUI 更新次數
+                output_chunk = self.output_queue.get(block=True, timeout=0.1)
+                while not self.output_queue.empty():
+                    output_chunk += self.output_queue.get_nowait()
                 
-                # 如果遇到換行符或緩衝區達到一定大小，就輸出
-                if char == '\n' or len(buffer) > 100:
-                    if buffer.strip():
-                        cleaned_buffer = self.clean_output(buffer)
-                        if cleaned_buffer:
-                            self.append_output(cleaned_buffer)
-                            # 移除自動更新提示符的調用
-                    buffer = ""
+                if output_chunk:
+                    # --- [修改 2] 簡化清理邏輯 ---
+                    # 我們只做最基本的清理，不再過濾提示符
+                    cleaned_output = self.clean_output(output_chunk)
+                    self.append_output(cleaned_output)
                     
             except queue.Empty:
-                # 如果隊列為空但緩衝區有內容，也要輸出
-                if buffer.strip():
-                    cleaned_buffer = self.clean_output(buffer)
-                    if cleaned_buffer:
-                        self.append_output(cleaned_buffer)
-                        # 移除自動更新提示符的調用
-                    buffer = ""
                 continue
             except Exception as e:
                 if self.is_running:
-                    print(f"處理輸出錯誤: {e}")
+                    print(f"處理輸出時發生錯誤: {e}")
                 break
     
+    # --- [修改 3] 大幅簡化 clean_output ---
     def clean_output(self, output):
-        """清理輸出"""
-        # 移除一些不需要的控制字符和重複的提示符
-        output = re.sub(r'\x08+', '', output)  # 移除退格符
-        output = re.sub(r'\r\n', '\n', output)  # 統一換行符
-        output = re.sub(r'\r', '\n', output)    # 處理回車符
-        
-        # 過濾掉重複的提示符顯示
-        lines = output.split('\n')
-        filtered_lines = []
-        for line in lines:
-            # 跳過空的提示符行
-            if re.match(r'^[A-Z]:\\.*?>$', line.strip()):
-                continue
-            filtered_lines.append(line)
-        
-        return '\n'.join(filtered_lines)
+        """只進行最基本的清理，例如統一換行符"""
+        # cmd.exe 在互動模式下通常使用 \r\n，但有時也可能混雜其他東西
+        # 我們把 \r\n 轉成 \n，並移除單獨的 \r
+        output = output.replace('\r\n', '\n')
+        output = output.replace('\r', '')
+        return output
     
     def append_output(self, text):
-        """安全地添加輸出到文本區域"""
         def update_text():
             self.text_area.config(state=tk.NORMAL)
             self.text_area.insert(tk.END, text)
@@ -187,52 +151,42 @@ class CMDEmulator:
         else:
             self.root.after(0, update_text)
     
-    def update_prompt(self):
-        """更新命令提示符"""
-        try:
-            # 不自動發送cd命令，只是靜態更新提示符
-            # 提示符會在用戶執行cd命令後自然更新
-            pass
-        except:
-            pass
+    # --- [修改 4] 移除 update_prompt 方法，不再需要 ---
     
     def execute_command(self, event):
-        """執行命令"""
         command = self.command_entry.get().strip()
         if not command:
+            # 如果用戶只按 enter，我們也發送一個換行符到 cmd
+            # 這樣可以觸發 cmd 顯示一個新的提示符，體驗更流暢
+            if self.process and self.process.poll() is None:
+                self.process.stdin.write('\n')
+                self.process.stdin.flush()
             return
         
-        # 添加到歷史記錄
         if command not in self.command_history:
             self.command_history.append(command)
         self.history_index = len(self.command_history)
         
-        # 顯示命令
-        prompt = self.prompt_label.cget('text')
-        self.append_output(f"{prompt} {command}\n")
-        
-        # 清空輸入框
         self.command_entry.delete(0, tk.END)
         
-        # 發送命令到 CMD
+        # --- [修改 5] 不再手動顯示 "prompt + command" ---
+        # cmd.exe 自己會回顯(echo)命令，我們不需要再畫蛇添足。
+        # self.append_output(f"{prompt} {command}\n") # <--- 移除此行
+        
         try:
             if self.process and self.process.poll() is None:
                 self.process.stdin.write(command + '\n')
                 self.process.stdin.flush()
                 
-                # 特殊處理 cd 命令
-                if command.startswith('cd ') or command == 'cd':
-                    time.sleep(0.1)  # 給 cd 命令一點時間執行
-                    
+                # --- [修改 6] 移除對 'cd' 的特殊處理，不再需要 ---
             else:
-                self.append_output("錯誤: CMD 進程未運行\n")
+                self.append_output("\n錯誤: CMD 進程未運行。正在嘗試重啟...\n")
                 self.restart_cmd_process()
         except Exception as e:
-            self.append_output(f"命令執行錯誤: {str(e)}\n")
+            self.append_output(f"\n命令執行錯誤: {str(e)}\n")
             self.restart_cmd_process()
     
     def restart_cmd_process(self):
-        """重啟 CMD 進程"""
         try:
             if self.process:
                 self.process.terminate()
@@ -242,14 +196,12 @@ class CMDEmulator:
             self.append_output(f"重啟進程失敗: {str(e)}\n")
     
     def history_up(self, event):
-        """向上瀏覽命令歷史"""
         if self.command_history and self.history_index > 0:
             self.history_index -= 1
             self.command_entry.delete(0, tk.END)
             self.command_entry.insert(0, self.command_history[self.history_index])
     
     def history_down(self, event):
-        """向下瀏覽命令歷史"""
         if self.command_history:
             if self.history_index < len(self.command_history) - 1:
                 self.history_index += 1
@@ -260,31 +212,20 @@ class CMDEmulator:
                 self.command_entry.delete(0, tk.END)
     
     def on_closing(self):
-        """處理窗口關閉事件"""
         self.is_running = False
         try:
             if self.process and self.process.poll() is None:
-                self.process.terminate()
-                self.process.wait(timeout=2)
-        except:
-            pass
-        self.root.destroy()
+                # 結束整個進程組，避免 conda 之類的進程殘留
+                subprocess.run(['taskkill', '/F', '/T', '/PID', str(self.process.pid)], check=False)
+        except Exception as e:
+            print(f"關閉進程時出錯: {e}")
+        finally:
+            self.root.destroy()
 
 def main():
-    """主函數"""
-    try:
-        root = tk.Tk()
-        app = CMDEmulator(root)
-        
-        # 添加一些鍵盤快捷鍵
-        root.bind('<Control-c>', lambda e: app.command_entry.focus_set())
-        root.bind('<Control-l>', lambda e: app.text_area.delete(1.0, tk.END))
-        
-        root.mainloop()
-        
-    except Exception as e:
-        print(f"啟動錯誤: {e}")
-        messagebox.showerror("啟動錯誤", f"無法啟動應用程序: {str(e)}")
+    root = tk.Tk()
+    app = CMDEmulator(root)
+    root.mainloop()
 
 if __name__ == "__main__":
     main()
