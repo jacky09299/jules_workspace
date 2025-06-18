@@ -5,8 +5,8 @@ import io # Added for BytesIO for reportlab
 import logging # Added for consistency with other modules
 
 # PyPDF2 for PDF manipulation
-from PyPDF2 import PdfReader, PdfWriter, PageMerge
-
+from PyPDF2 import PdfReader, PdfWriter
+from pdfrw import PageMerge
 # reportlab for creating watermark PDFs
 from reportlab.pdfgen import canvas as reportlab_canvas
 # from reportlab.lib.pagesizes import letter # Not strictly needed if using dynamic page sizes
