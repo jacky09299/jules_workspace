@@ -98,6 +98,14 @@ class CMDModule(Module):
             bg='#222', fg='white', font=('Consolas', 10), relief=tk.RAISED
         )
         self.cd_btn.pack(side=tk.LEFT, padx=5)
+
+        # 新增：安裝Conda環境按鈕
+        self.create_env_btn = tk.Button(
+            self.button_frame, text="安裝Conda環境",
+            command=self.open_create_env_dialog,
+            bg='#222', fg='white', font=('Consolas', 10), relief=tk.RAISED
+        )
+        self.create_env_btn.pack(side=tk.LEFT, padx=5)
         
         self.init_cmd_process()
         self.start_output_threads()
@@ -354,6 +362,75 @@ class CMDModule(Module):
                 except Exception as e:
                     self.append_output(f"\n切換目錄時出錯: {str(e)}\n")
                     self.restart_cmd_process()
+
+    # 新增：彈出建立Conda環境的對話框
+    def open_create_env_dialog(self):
+        dialog = tk.Toplevel(self.master)
+        dialog.title("建立Conda環境")
+        dialog.grab_set()
+        dialog.resizable(False, False)
+
+        tk.Label(dialog, text="環境名稱:").grid(row=0, column=0, sticky="e", padx=5, pady=5)
+        name_entry = tk.Entry(dialog, width=20)
+        name_entry.grid(row=0, column=1, padx=5, pady=5)
+
+        tk.Label(dialog, text="Python版本 (可選):").grid(row=1, column=0, sticky="e", padx=5, pady=5)
+        python_entry = tk.Entry(dialog, width=20)
+        python_entry.grid(row=1, column=1, padx=5, pady=5)
+
+        tk.Label(dialog, text="套件 (以空格分隔，可選):").grid(row=2, column=0, sticky="e", padx=5, pady=5)
+        pkgs_entry = tk.Entry(dialog, width=30)
+        pkgs_entry.grid(row=2, column=1, padx=5, pady=5)
+
+        def on_create():
+            env_name = name_entry.get().strip()
+            python_ver = python_entry.get().strip()
+            pkgs = pkgs_entry.get().strip()
+            if not env_name:
+                messagebox.showerror("錯誤", "請輸入環境名稱")
+                return
+            args = [env_name]
+            if python_ver:
+                args.append(f"python={python_ver}")
+            if pkgs:
+                args.extend(pkgs.split())
+            self.create_conda_env(args)
+            dialog.destroy()
+
+        btn_frame = tk.Frame(dialog)
+        btn_frame.grid(row=3, column=0, columnspan=2, pady=10)
+        tk.Button(btn_frame, text="建立", command=on_create, width=8).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="取消", command=dialog.destroy, width=8).pack(side=tk.LEFT, padx=5)
+
+    # 新增：執行 conda create 指令
+    def create_conda_env(self, args):
+        self.append_output(f"\n[建立Conda環境] 執行: conda create -y -n {' '.join(args)}\n")
+        def run_create():
+            try:
+                cmd = ['conda', 'create', '-y', '-n'] + args
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    encoding='utf-8'
+                )
+                for line in proc.stdout:
+                    self.append_output(line)
+                proc.wait()
+                if proc.returncode == 0:
+                    self.append_output("[建立Conda環境] 完成。\n")
+                    # 重新載入環境列表
+                    self.envs = self.detect_conda_envs()
+                    menu = self.env_menu['menu']
+                    menu.delete(0, 'end')
+                    for env in self.envs:
+                        menu.add_command(label=env, command=lambda v=env: self.selected_env.set(v))
+                else:
+                    self.append_output(f"[建立Conda環境] 發生錯誤，請檢查訊息。\n")
+            except Exception as e:
+                self.append_output(f"[建立Conda環境] 執行失敗: {str(e)}\n")
+        threading.Thread(target=run_create, daemon=True).start()
 
     def on_destroy(self): # Renamed from on_closing, will be called by Module base class
         self.is_running = False # Signal threads to stop
