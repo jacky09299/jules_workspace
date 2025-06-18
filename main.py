@@ -375,6 +375,11 @@ class ModularGUI:
         self.root.title("Modular GUI Framework")
         self.root.geometry("800x600")
 
+        # 新增儲存檔資料夾
+        self.saves_dir = os.path.join("modules", "saves")
+        if not os.path.exists(self.saves_dir):
+            os.makedirs(self.saves_dir)
+
         self.menubar = tk.Menu(self.root)
         self.root.config(menu=self.menubar)
 
@@ -703,10 +708,9 @@ class ModularGUI:
         self.load_layout_config()
 
     def save_layout_config(self):
-        config_path = os.path.join(os.getcwd(), self.CONFIG_FILE)
+        config_path = os.path.join(self.saves_dir, self.CONFIG_FILE)
         if not self.loaded_modules:
             print("[SAVE] No modules loaded, skip saving layout config.")
-            # 寫入空 config
             empty_config = {
                 "modules": [],
                 "maximized_module_name": None,
@@ -752,8 +756,9 @@ class ModularGUI:
             print(f"[SAVE] Layout config written.")
         except Exception as e:
             print(f"[SAVE][ERROR] Failed to write layout config: {e}")
+
     def load_layout_config(self):
-        config_path = os.path.join(os.getcwd(), self.CONFIG_FILE)
+        config_path = os.path.join(self.saves_dir, self.CONFIG_FILE)
         print(f"[LOAD] Try loading layout config from: {config_path}")
         if not os.path.exists(config_path):
             print("[LOAD] No layout config file found, using default layout.")
@@ -834,7 +839,7 @@ class ModularGUI:
         if not name:
             return
         filename = f"{self.PROFILE_PREFIX}{name}{self.PROFILE_SUFFIX}"
-        path = os.path.join(os.getcwd(), filename)
+        path = os.path.join(self.saves_dir, filename)
         config = self._get_current_layout_config()
         try:
             with open(path, "w", encoding="utf-8") as f:
@@ -854,7 +859,7 @@ class ModularGUI:
         if not sel:
             return
         filename = f"{self.PROFILE_PREFIX}{sel}{self.PROFILE_SUFFIX}"
-        path = os.path.join(os.getcwd(), filename)
+        path = os.path.join(self.saves_dir, filename)
         self._load_layout_config_from_file(path)
 
     # 管理設定檔（可刪除）
@@ -867,7 +872,7 @@ class ModularGUI:
         if not sel:
             return
         filename = f"{self.PROFILE_PREFIX}{sel}{self.PROFILE_SUFFIX}"
-        path = os.path.join(os.getcwd(), filename)
+        path = os.path.join(self.saves_dir, filename)
         try:
             os.remove(path)
             messagebox.showinfo("刪除成功", f"設定檔 {filename} 已刪除")
@@ -899,7 +904,9 @@ class ModularGUI:
         return var.get()
 
     def _list_profiles(self):
-        files = os.listdir(os.getcwd())
+        if not os.path.exists(self.saves_dir):
+            return []
+        files = os.listdir(self.saves_dir)
         profiles = []
         for f in files:
             if f.startswith(self.PROFILE_PREFIX) and f.endswith(self.PROFILE_SUFFIX):
