@@ -43,8 +43,6 @@ class ChromeBrowser:
         
         # 綁定關閉事件
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
-        # 延遲啟動瀏覽器，確保 window id 有效
-        self.root.after(100, self.start_browser)
         
     def init_cef(self):
         """初始化 CEF 設置"""
@@ -77,6 +75,9 @@ class ChromeBrowser:
         
         # 創建狀態欄
         self.create_status_bar(main_frame)
+        
+        # 啟動瀏覽器
+        self.start_browser()
         
     def create_toolbar(self, parent):
         """創建工具欄"""
@@ -159,39 +160,42 @@ class ChromeBrowser:
         
     def start_browser(self):
         """啟動瀏覽器"""
-        # 確保 window id 有效
-        wid = self.browser_container.winfo_id()
-        if wid == 0:
-            # 還沒 ready，延遲再試
-            self.root.after(100, self.start_browser)
-            return
-
-        window_info = cef.WindowInfo()
-        window_info.SetAsChild(wid)
-        
-        # 瀏覽器設置
-        browser_settings = {
-            "web_security_disabled": True,
-            "file_access_from_file_urls_allowed": True,
-            "universal_access_from_file_urls_allowed": True,
-        }
-        
-        # 創建瀏覽器
-        self.browser = cef.CreateBrowserSync(
-            window_info=window_info,
-            url="https://www.google.com",
-            settings=browser_settings
-        )
-        
-        # 設置客戶端處理器
-        client_handler = ClientHandler(self)
-        self.browser.SetClientHandler(client_handler)
-        
-        # 設置初始 URL
-        self.url_var.set("https://www.google.com")
-        
-        # 啟動消息循環
-        self.message_loop()
+        try:
+            # 確保容器已經顯示
+            self.root.update()
+            
+            # 獲取容器的窗口句柄
+            window_info = cef.WindowInfo()
+            window_info.SetAsChild(self.browser_container.winfo_id())
+            
+            # 瀏覽器設置
+            browser_settings = {
+                "web_security_disabled": True,
+                "file_access_from_file_urls_allowed": True,
+                "universal_access_from_file_urls_allowed": True,
+            }
+            
+            # 創建瀏覽器
+            self.browser = cef.CreateBrowserSync(
+                window_info=window_info,
+                url="https://www.google.com",
+                settings=browser_settings
+            )
+            
+            # 設置客戶端處理器
+            client_handler = ClientHandler(self)
+            self.browser.SetClientHandler(client_handler)
+            
+            # 設置初始 URL
+            self.url_var.set("https://www.google.com")
+            
+            # 啟動消息循環
+            self.message_loop()
+            
+        except Exception as e:
+            print(f"啟動瀏覽器時發生錯誤: {e}")
+            messagebox.showerror("錯誤", f"無法啟動瀏覽器引擎: {e}")
+            self.root.quit()
         
     def message_loop(self):
         """CEF 消息循環"""
@@ -434,15 +438,28 @@ class ChromeBrowser:
             
     def on_closing(self):
         """關閉程序"""
-        self.save_bookmarks()
-        self.save_history()
-        
-        if self.browser:
-            self.browser.CloseBrowser(True)
-        
-        cef.Shutdown()
-        self.root.quit()
-        self.root.destroy()
+        try:
+            self.save_bookmarks()
+            self.save_history()
+            
+            if self.browser:
+                self.browser.CloseBrowser(True)
+            
+            # 等待一小段時間讓瀏覽器正確關閉
+            self.root.after(100, self._final_shutdown)
+        except Exception as e:
+            print(f"關閉錯誤: {e}")
+            self._final_shutdown()
+            
+    def _final_shutdown(self):
+        """最終關閉程序"""
+        try:
+            cef.Shutdown()
+        except:
+            pass
+        finally:
+            self.root.quit()
+            self.root.destroy()
         
     def run(self):
         """運行瀏覽器"""
@@ -457,62 +474,85 @@ class ClientHandler:
         
     def OnLoadStart(self, browser, frame, **_):
         """頁面開始加載"""
-        if frame.IsMain():
-            self.browser_app.is_loading = True
-            self.browser_app.status_label.config(text="正在加載...")
-            self.browser_app.progress.start()
+        try:
+            if frame.IsMain():
+                self.browser_app.is_loading = True
+                self.browser_app.status_label.config(text="正在加載...")
+                self.browser_app.progress.start()
+        except Exception as e:
+            print(f"OnLoadStart 錯誤: {e}")
             
-    def OnLoadEnd(self, browser, frame, http_status_code, **_):
+    def OnLoadEnd(self, browser, frame, **_):
         """頁面加載完成"""
-        if frame.IsMain():
-            self.browser_app.is_loading = False
-            self.browser_app.status_label.config(text="載入完成")
-            self.browser_app.progress.stop()
-            
-            # 更新地址欄
-            url = browser.GetUrl()
-            self.browser_app.url_var.set(url)
-            
-            # 更新標題
-            title = browser.GetTitle()
-            if title:
-                self.browser_app.root.title(f"{title} - Chrome瀏覽器")
-                self.browser_app.tab_label.config(text=title[:20] + "..." if len(title) > 20 else title)
+        try:
+            if frame.IsMain():
+                self.browser_app.is_loading = False
+                self.browser_app.status_label.config(text="載入完成")
+                self.browser_app.progress.stop()
                 
-            # 更新 SSL 指示器
-            if url.startswith("https://"):
-                self.browser_app.ssl_label.config(text="🔒", foreground="green")
-            else:
-                self.browser_app.ssl_label.config(text="🔓", foreground="red")
+                # 更新地址欄
+                url = browser.GetUrl()
+                self.browser_app.url_var.set(url)
                 
-            # 更新書籤按鈕
-            if url in [b['url'] if isinstance(b, dict) else b for b in self.browser_app.bookmarks]:
-                self.browser_app.bookmark_btn.config(text="★")
-            else:
-                self.browser_app.bookmark_btn.config(text="☆")
+                # 更新標題
+                try:
+                    title = browser.GetTitle() if hasattr(browser, 'GetTitle') else "新標籤頁"
+                    if title:
+                        self.browser_app.root.title(f"{title} - Chrome瀏覽器")
+                        self.browser_app.tab_label.config(text=title[:20] + "..." if len(title) > 20 else title)
+                except:
+                    pass
+                    
+                # 更新 SSL 指示器
+                if url.startswith("https://"):
+                    self.browser_app.ssl_label.config(text="🔒", foreground="green")
+                else:
+                    self.browser_app.ssl_label.config(text="🔓", foreground="red")
+                    
+                # 更新書籤按鈕
+                if url in [b['url'] if isinstance(b, dict) else b for b in self.browser_app.bookmarks]:
+                    self.browser_app.bookmark_btn.config(text="★")
+                else:
+                    self.browser_app.bookmark_btn.config(text="☆")
+        except Exception as e:
+            print(f"OnLoadEnd 錯誤: {e}")
                 
     def OnLoadError(self, browser, frame, error_code, error_text_out, failed_url):
         """頁面加載錯誤"""
-        if frame.IsMain():
-            self.browser_app.status_label.config(text=f"載入錯誤: {error_text_out}")
-            self.browser_app.progress.stop()
+        try:
+            if frame.IsMain():
+                self.browser_app.status_label.config(text=f"載入錯誤: {error_text_out}")
+                self.browser_app.progress.stop()
+        except Exception as e:
+            print(f"OnLoadError 錯誤: {e}")
             
     def OnLoadingStateChange(self, browser, is_loading, **_):
         """加載狀態改變"""
-        # 這裡不檢查 IsMain，直接更新按鈕狀態
-        can_go_back = browser.CanGoBack()
-        can_go_forward = browser.CanGoForward()
-        self.browser_app.back_btn.config(state="normal" if can_go_back else "disabled")
-        self.browser_app.forward_btn.config(state="normal" if can_go_forward else "disabled")
+        try:
+            # 更新按鈕狀態
+            can_go_back = browser.CanGoBack()
+            can_go_forward = browser.CanGoForward()
+            
+            self.browser_app.back_btn.config(state="normal" if can_go_back else "disabled")
+            self.browser_app.forward_btn.config(state="normal" if can_go_forward else "disabled")
+        except Exception as e:
+            print(f"OnLoadingStateChange 錯誤: {e}")
 
 
 if __name__ == "__main__":
     # 檢查 CEF 支持
     try:
+        print("正在啟動瀏覽器...")
         app = ChromeBrowser()
+        print("瀏覽器已初始化，正在運行...")
         app.run()
+    except KeyboardInterrupt:
+        print("用戶中斷程序")
     except Exception as e:
         print(f"啟動瀏覽器時發生錯誤: {e}")
+        print(f"錯誤類型: {type(e).__name__}")
         print("\n請確保已安裝以下依賴:")
         print("pip install cefpython3")
         print("\n注意: cefpython3 可能需要特定的 Python 版本和系統環境")
+        print("支持的 Python 版本通常為 3.6-3.9")
+        input("按 Enter 鍵退出...")
