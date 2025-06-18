@@ -17,3 +17,5 @@ Thumbs.db
 # 忽略 IDE 檔案
 .vscode/
 .idea/
+
+*exe
