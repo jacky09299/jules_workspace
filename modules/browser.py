@@ -4,15 +4,22 @@ import sys
 import os
 import json
 from cefpython3 import cefpython as cef
+from main import Module
 
-class ChromeBrowser(tk.Frame):
-    def __init__(self, root):
-        super().__init__(root)
-        self.root = root
-        self.root.title("Chrome瀏覽器")
-        self.root.geometry("1200x800")
-        self.root.minsize(800, 600)
-        self.pack(fill=tk.BOTH, expand=True)
+class ChromeBrowser(Module):
+    cef_initialized = False
+
+    def __init__(self, master, shared_state, module_name="Browser", gui_manager=None):
+        super().__init__(master, shared_state, module_name, gui_manager)
+
+        if not ChromeBrowser.cef_initialized:
+            # Ensure sys is imported if not already at the top
+            # import sys # This should be at the top of the file
+            settings = {"multi_threaded_message_loop": False}
+            cef.Initialize(settings=settings)
+            sys.excepthook = cef.ExceptHook
+            ChromeBrowser.cef_initialized = True
+            self.shared_state.log("CEF Initialized by ChromeBrowser module.", "INFO")
 
         self.bookmarks = []
         self.history = []
@@ -23,11 +30,10 @@ class ChromeBrowser(tk.Frame):
         self.load_bookmarks()
         self.load_history()
 
-        self.create_interface()
-        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.create_ui()
 
-    def create_interface(self):
-        main_frame = ttk.Frame(self)
+    def create_ui(self): # Renamed from create_interface
+        main_frame = ttk.Frame(self.frame) # main_frame is child of self.frame (Module's frame)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
 
         self.create_toolbar(main_frame)
@@ -36,7 +42,7 @@ class ChromeBrowser(tk.Frame):
         self.tab_container.pack(fill=tk.BOTH, expand=True)
         self.create_status_bar(main_frame)
 
-        # self.new_tab()  # <-- 移除這行
+        self.new_tab() # Create an initial tab
 
     def create_toolbar(self, parent):
         toolbar = ttk.Frame(parent)
@@ -138,7 +144,9 @@ class ChromeBrowser(tk.Frame):
 
     # --- Menu ---
     def show_menu(self):
-        menu = tk.Menu(self.root, tearoff=0)
+        top_level_window = self.frame.winfo_toplevel()
+        menu = tk.Menu(top_level_window, tearoff=0)
+        # menu.add_command(label="新視窗", command=self.new_window) # Feature disabled
         menu.add_command(label="新標籤頁", command=self.new_tab)
         menu.add_separator()
         menu.add_command(label="書籤管理", command=self.show_bookmarks)
@@ -154,17 +162,24 @@ class ChromeBrowser(tk.Frame):
         finally:
             menu.grab_release()
 
-    def new_window(self):
-        # 用 Toplevel 開新視窗，避免多主執行緒 CEF 問題
-        new_win = tk.Toplevel(self.root)
-        new_win.title("Chrome瀏覽器")
-        ChromeBrowser(new_win)
+    # def new_window(self):
+    #     # 用 Toplevel 開新視窗，避免多主執行緒 CEF 問題
+    #     # new_win = tk.Toplevel(self.master) # Changed self.root to self.master
+    #     # new_win.title("Chrome瀏覽器")
+    #     # TODO: This instantiation will need to be updated to match the new __init__
+    #     # For now, this will likely cause an error if called.
+    #     # Consider how to handle new window creation in a modular context.
+    #     # Perhaps it should request the gui_manager to create a new instance.
+    #     # ChromeBrowser(new_win) # This line is problematic
+    #     messagebox.showinfo("Info", "New window functionality needs refactoring for modular GUI / is disabled.")
+
 
     def show_bookmarks(self):
         if not self.bookmarks:
-            messagebox.showinfo("書籤", "沒有書籤")
+            messagebox.showinfo("書籤", "沒有書籤", parent=self.frame.winfo_toplevel())
             return
-        bookmark_window = tk.Toplevel(self.root)
+        top_level_window = self.frame.winfo_toplevel()
+        bookmark_window = tk.Toplevel(top_level_window)
         bookmark_window.title("書籤管理")
         bookmark_window.geometry("400x300")
         listbox = tk.Listbox(bookmark_window, font=("Arial", 10))
@@ -186,9 +201,10 @@ class ChromeBrowser(tk.Frame):
 
     def show_history(self):
         if not self.history:
-            messagebox.showinfo("歷史記錄", "沒有歷史記錄")
+            messagebox.showinfo("歷史記錄", "沒有歷史記錄", parent=self.frame.winfo_toplevel())
             return
-        history_window = tk.Toplevel(self.root)
+        top_level_window = self.frame.winfo_toplevel()
+        history_window = tk.Toplevel(top_level_window)
         history_window.title("歷史記錄")
         history_window.geometry("500x400")
         listbox = tk.Listbox(history_window, font=("Arial", 10))
@@ -230,36 +246,57 @@ class ChromeBrowser(tk.Frame):
 開發者: Python 愛好者"""
         messagebox.showinfo("關於", about_text)
 
-    def on_closing(self):
-        """參考tkinter_.py，正確釋放所有 CEF browser 與 Tk 資源"""
+    # def on_closing(self): # This method is being replaced by on_destroy
+    #     """參考tkinter_.py，正確釋放所有 CEF browser 與 Tk 資源"""
+    #     pass
+
+    def on_destroy(self): # Overriding Module's on_destroy
+        self.shared_state.log(f"ChromeBrowser module '{self.module_name}' on_destroy starting.", "INFO")
         try:
             self.save_bookmarks()
             self.save_history()
-            # 關閉所有 tab 的 browser
-            for tab in self.tabs:
-                if tab.browser:
-                    tab.browser.CloseBrowser(True)
-                    tab.browser = None
-            # 直接銷毀 Tk 視窗（tkinter_.py 是這樣做的）
-            self.root.destroy()
-            # 關閉 CEF
-            cef.Shutdown()
-        except Exception as e:
-            print(f"關閉錯誤: {e}")
-            try:
-                cef.Shutdown()
-            except:
-                pass
-            self.root.destroy()
+            self.shared_state.log(f"Bookmarks and history saved for {self.module_name}.", "DEBUG")
 
-    def on_tab_closed(self):
-        """當標籤頁關閉時呼叫"""
-        self.closing_tabs -= 1
-        if self.closing_tabs <= 0:
-            self._final_shutdown()
+            # Gracefully close all CEF browser instances in tabs
+            if hasattr(self, 'tabs') and self.tabs:
+                self.shared_state.log(f"Closing {len(self.tabs)} tabs for {self.module_name}.", "DEBUG")
+                for tab in self.tabs:
+                    if hasattr(tab, 'close_browser') and callable(tab.close_browser):
+                        try:
+                            tab.close_browser()
+                            self.shared_state.log(f"Called close_browser() for tab in {self.module_name}.", "DEBUG")
+                        except Exception as e:
+                            self.shared_state.log(f"Error calling tab.close_browser() for {self.module_name}: {e}", "ERROR")
+            else:
+                self.shared_state.log(f"No tabs to close for {self.module_name}.", "DEBUG")
+
+            # CEF shutdown should NOT be called here.
+            # It should be handled by the main application lifecycle manager or
+            # a mechanism that tracks all browser module instances.
+            # self.shared_state.log("CEF Shutdown NOT called from ChromeBrowser on_destroy (handled globally).", "INFO")
+
+        except Exception as e:
+            self.shared_state.log(f"Error during ChromeBrowser on_destroy for {self.module_name}: {e}", "ERROR")
+        finally:
+            self.shared_state.log(f"ChromeBrowser module '{self.module_name}' on_destroy finishing. Calling super().on_destroy().", "INFO")
+            super().on_destroy()
+
+
+    def _handle_internal_tab_close_for_cef(self): # Renamed from on_tab_closed
+        """Handles CEF's OnBeforeClose, related to tab resource release from CEF's perspective."""
+        # self.closing_tabs -= 1 # This logic was for global shutdown
+        # if self.closing_tabs <= 0:
+        #    self._final_shutdown() # _final_shutdown (and global cef.Shutdown) removed
+        self.shared_state.log("LifespanHandler.OnBeforeClose triggered _handle_internal_tab_close_for_cef.", "DEBUG")
+        pass # Global CEF shutdown is not handled at this module level.
+
+    # def _final_shutdown(self): # Removed as CEF shutdown is handled globally
+    #     pass
 
     def run(self):
-        self.root.mainloop()
+        # self.root.mainloop() # Mainloop is handled by the main ModularGUI application
+        self.shared_state.log("ChromeBrowser.run() called, but mainloop is external.", "WARNING")
+        pass
 
     # --- 書籤與歷史記錄共用 ---
     def add_to_history(self, url):
@@ -348,7 +385,10 @@ class Tab(ttk.Frame):
     def embed_browser(self):
         if self.browser:
             return
-        self.browser_app.root.update_idletasks()
+
+        top_level_window = self.browser_app.frame.winfo_toplevel()
+        top_level_window.update_idletasks()
+
         window_info = cef.WindowInfo()
         width = self.browser_container.winfo_width()
         height = self.browser_container.winfo_height()
@@ -371,7 +411,11 @@ class Tab(ttk.Frame):
 
     def message_loop_work(self):
         cef.MessageLoopWork()
-        self.browser_app.root.after(10, self.message_loop_work)
+        if self.browser_app.frame: # Use self.browser_app.frame as it's the module's actual frame
+            self.browser_app.frame.after(10, self.message_loop_work)
+        elif self.browser_app.master: # Fallback, though frame should exist
+            self.browser_app.master.after(10, self.message_loop_work)
+
 
     def navigate_to_url(self, event=None):
         url = self.url_var.get().strip()
@@ -439,11 +483,17 @@ class Tab(ttk.Frame):
             self.browser.LoadUrl(source_url)
 
     def close_browser(self):
-        """關閉瀏覽器"""
+        """Closes the CEF browser for this tab."""
         if self.browser:
-            self.closing = True
-            self.browser.CloseBrowser(True)
-            self.browser = None
+            self.shared_state.log(f"Tab attempting to close browser for URL: {self.url_var.get()}", "DEBUG")
+            self.closing = True # Signal that we are intentionally closing
+            self.browser.CloseBrowser(True) # Force close
+            # self.browser = None # CEF will set this to None after OnBeforeClose/DoClose
+            # LifespanHandler.OnBeforeClose will be called, which then calls _handle_internal_tab_close_for_cef
+        else:
+            self.shared_state.log("Tab.close_browser called but no browser instance exists.", "DEBUG")
+        self.browser = None # Ensure it's None even if never existed or already closed.
+
 
     def can_go_back(self):
         return self.browser and self.browser.CanGoBack()
@@ -489,7 +539,13 @@ class ClientHandler:
                     title = browser.GetTitle() if hasattr(browser, 'GetTitle') else "新標籤頁"
                     if title:
                         self.tab.update_title(title[:20] + "..." if len(title) > 20 else title)
-                        self.tab.browser_app.root.title(f"{title} - Chrome瀏覽器")
+                        # self.tab.browser_app.root.title(f"{title} - Chrome瀏覽器") # Module should not set root title
+                        # The main application or GUI manager should handle window titles.
+                        # Perhaps the module can emit an event or update shared state if title change is needed.
+                        if self.tab.browser_app.gui_manager and hasattr(self.tab.browser_app.gui_manager, 'root'):
+                            # This is still a bit direct, ideally a more abstract notification
+                            # self.tab.browser_app.gui_manager.root.title(f"{title} - ModularApp")
+                            pass # Let main app handle title based on active/focused module
                 except:
                     pass
                 if url.startswith("https://"):
@@ -520,19 +576,44 @@ class LifespanHandler(object):
 
     def OnBeforeClose(self, browser, **_):
         """在瀏覽器關閉前呼叫"""
-        if self.tab.closing:
-            self.tab.browser_app.on_tab_closed()
+        if self.tab.closing: # Check if the tab initiated the closing
+            self.tab.browser_app._handle_internal_tab_close_for_cef()
+        # If not self.tab.closing, it might be an external close (e.g. devtools closing itself)
+        # Or a JS window.close(). We might need to handle this differently if tabs should persist.
+        # For now, any OnBeforeClose will lead to the tab's browser resources being released.
+        # self.tab.browser_app.shared_state.log(f"LifespanHandler.OnBeforeClose called for tab. self.tab.closing = {self.tab.closing}", "DEBUG")
+        # self.tab.browser = None # CEF does this
 
 def main():
-    sys.excepthook = cef.ExceptHook
-    root = tk.Tk()
-    settings = {
-        "multi_threaded_message_loop": False,
-    }
-    cef.Initialize(settings=settings)
-    app = ChromeBrowser(root)
-    app.new_tab()
-    app.run()
+    # sys.excepthook = cef.ExceptHook # Commented out: Handled by first module instance
+    # root = tk.Tk() # Root window created by ModularGUI
+    # settings = {
+    #     "multi_threaded_message_loop": False, # CEF settings managed by main app
+    # }
+    # cef.Initialize(settings=settings) # Commented out: Handled by first module instance
 
-if __name__ == "__main__":
-    main()
+    # This main function is for standalone testing, which will need adjustment
+    # For now, it's commented out as it's not compatible with the new Module structure
+    # app = ChromeBrowser(root) # Old instantiation
+    # app.new_tab()
+    # app.run()
+    pass
+
+# if __name__ == "__main__":
+#     # main() # Commented out for now
+#     print("The main execution block in browser.py is not designed to run standalone after Module integration.")
+#     print("Run this module through the main ModularGUI application.")
+#     # Example of how it might be run if ModularGUI was also here (conceptual)
+#     # if hasattr(sys, 'modules') and 'main' in sys.modules and hasattr(sys.modules['main'], 'ModularGUI'):
+#     #     root = tk.Tk()
+#     #     gui = sys.modules['main'].ModularGUI(root)
+#     #     # To add this module:
+#     #     # browser_module_frame = gui.instantiate_module("browser", gui.main_layout_manager)
+#     #     # if browser_module_frame:
+#     #     #     browser_instance = gui.loaded_modules.get("browser#1") # or actual instance_id
+#     #     #     if browser_instance and browser_instance['instance']:
+#     #     #         browser_instance['instance'].new_tab() # Call new_tab if needed
+#     #     root.mainloop()
+#     # else:
+#     #     print("Run main.py to start the application.")
+#     pass
