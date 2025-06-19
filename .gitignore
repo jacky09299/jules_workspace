@@ -4,7 +4,7 @@
 __pycache__/
 
 # 忽略 JSON 檔案
-*.json
+#*.json
 
 # 忽略虛擬環境
 venv/
