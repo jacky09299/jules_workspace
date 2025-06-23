@@ -1,5 +1,14 @@
 {
-  "modules": [],
-  "maximized_module_name": null,
-  "module_order": []
+  "modules": [
+    {
+      "module_name": "image_editor",
+      "instance_id": "image_editor#2",
+      "relative_width": 0.06912442396313365,
+      "relative_height": 0.051349572086899276
+    }
+  ],
+  "maximized_module_name": "image_editor#2",
+  "module_order": [
+    "image_editor#2"
+  ]
 }
