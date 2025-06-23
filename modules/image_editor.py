@@ -3,6 +3,7 @@ from tkinter import ttk, filedialog, colorchooser, simpledialog, messagebox
 from PIL import Image, ImageTk, ImageDraw, ImageFont
 import os
 import uuid # For unique IDs
+import math
 
 # --- Object Model for Drawn Items ---
 class BaseObject:
@@ -29,6 +30,10 @@ class BaseObject:
 
     def move(self, dx, dy):
         """Placeholder for moving logic. Should be implemented by subclasses."""
+        raise NotImplementedError
+
+    def rotate_around(self, cx, cy, angle_deg):
+        """Rotate the object around (cx, cy) by angle_deg (counter-clockwise)."""
         raise NotImplementedError
 
 class FreehandPathObject(BaseObject):
@@ -81,178 +86,150 @@ class FreehandPathObject(BaseObject):
         pil_points = [tuple(p) for p in self.points]
         draw_context.line(pil_points, fill=self.color, width=self.thickness, joint="curve")
 
+    def rotate_around(self, cx, cy, angle_deg):
+        angle_rad = math.radians(angle_deg)
+        cos_a = math.cos(angle_rad)
+        sin_a = math.sin(angle_rad)
+        def rotate_point(x, y):
+            dx, dy = x - cx, y - cy
+            rx = dx * cos_a - dy * sin_a + cx
+            ry = dx * sin_a + dy * cos_a + cy
+            return (rx, ry)
+        self.points = [rotate_point(x, y) for x, y in self.points]
+
 
 class TextObject(BaseObject):
     def __init__(self, x_img, y_img, text_content, font_family="Arial", font_size_pt=12, color="black", anchor="nw"):
         super().__init__("text", color)
-        self.x_img = x_img  # Image coordinate X
-        self.y_img = y_img  # Image coordinate Y
+        self.x_img = x_img
+        self.y_img = y_img
         self.text_content = text_content
         self.font_family = font_family
-        self.font_size_pt = font_size_pt # Font size in points
-        self.anchor = anchor # tk.NW, tk.CENTER etc. for canvas text anchor
+        self.font_size_pt = font_size_pt
+        self.anchor = anchor
         self.pil_font = None
         self._update_pil_font()
 
     def _update_pil_font(self):
         try:
-            # Attempt to load the specified font.
-            # For more robust font finding, might need fontconfig or platform-specific logic.
-            self.pil_font = ImageFont.truetype(f"{self.font_family.lower()}.ttf", self.font_size_pt)
-        except IOError:
-            # Fallback to a default font if the specified one isn't found/loadable
+            # Check if the font file exists before using it
+            font_path = f"{self.font_family.lower()}.ttf"
+            if not os.path.isfile(font_path):
+                # Try system font directory (Windows)
+                import sys
+                if sys.platform == "win32":
+                    font_path = os.path.join(os.environ.get("WINDIR", "C:\\Windows"), "Fonts", f"{self.font_family}.ttf")
+            self.pil_font = ImageFont.truetype(font_path, self.font_size_pt)
+        except Exception:
             try:
-                self.pil_font = ImageFont.truetype("arial.ttf", self.font_size_pt) # Common fallback
-                self.font_family = "Arial" # Update to reflect fallback
-            except IOError:
-                # Generic Pillow default font if arial also fails
+                self.pil_font = ImageFont.truetype("arial.ttf", self.font_size_pt)
+                self.font_family = "Arial"
+            except Exception:
                 self.pil_font = ImageFont.load_default()
-                self.font_family = "Default" # Update to reflect fallback
+                self.font_family = "Default"
 
-    def draw(self, canvas, image_to_canvas_coords_func, active_preview=False):
-        # active_preview is not really used for text in the same way as freehand, but kept for interface consistency
+    def draw(self, canvas, image_to_canvas_coords_func, active_preview=False, zoom_factor=1.0):
+        # 支援縮放（已移除旋轉）
         canvas_x, canvas_y = image_to_canvas_coords_func(self.x_img, self.y_img)
-
-        # Note: Tkinter's font size is roughly in points.
-        # PIL's font size is also in points for truetype.
-        # If scaling text with zoom is desired, font size calculation would be more complex here.
-        # For now, let's use a fixed point size that PIL renders, and Tkinter displays.
-        # The visual size will scale with the zoom of the canvas coordinates.
-
-        return canvas.create_text(
-            canvas_x, canvas_y,
-            text=self.text_content,
-            font=(self.font_family, self.font_size_pt), # Tkinter font tuple
-            fill=self.color,
-            anchor=self.anchor,
-            tags=self.get_canvas_tags()
-        )
-
-    def calculate_bounding_box(self):
-        if not self.text_content or not self.pil_font:
-            # If no text or font, return a zero-size box at the anchor point
-            return (self.x_img, self.y_img, self.x_img, self.y_img)
-
+        scaled_font_size = max(1, int(self.font_size_pt * zoom_factor))
+        from PIL import Image, ImageDraw, ImageFont, ImageTk
         try:
-            # Get the bounding box of the text if its origin (0,0) is the drawing point.
-            # For most fonts, bbox[0] is usually 0 or small negative, bbox[1] is negative (ascent).
-            # bbox[2] is width, bbox[3] is descent.
-            bbox = self.pil_font.getbbox(self.text_content)
-            text_left_offset = bbox[0]
-            text_top_offset = bbox[1]
-            text_width = bbox[2] - bbox[0]
-            text_height = bbox[3] - bbox[1]
-
-        except Exception as e:
-            # Fallback to approximation if getbbox fails for some reason
-            self.shared_state.log(f"Pillow getbbox failed for '{self.text_content}': {e}. Using approximation.", "WARNING")
-            text_width = len(self.text_content) * self.font_size_pt * 0.6
-            text_height = self.font_size_pt * 1.2
-            text_left_offset = 0
-            text_top_offset = -text_height * 0.8 # Crude guess for ascent part
-
-        # Adjust bounding box based on the anchor relative to self.x_img, self.y_img
-        # self.x_img, self.y_img is the point specified by the anchor.
-
-        # Default to top-left behavior (anchor="nw")
-        # For "nw", self.x_img, self.y_img is the top-left of the text's rendering box.
-        # The text itself might render slightly offset due to font metrics (e.g. bbox[0], bbox[1])
-        # So, actual top-left of ink is (self.x_img + text_left_offset, self.y_img + text_top_offset)
-
-        min_x = self.x_img + text_left_offset
-        min_y = self.y_img + text_top_offset
-
-        if self.anchor == tk.CENTER:
-            min_x = self.x_img - text_width / 2 + text_left_offset # Center of the ink
-            min_y = self.y_img - text_height / 2 + text_top_offset
-        elif self.anchor == tk.N:
-            min_x = self.x_img - text_width / 2 + text_left_offset
-            min_y = self.y_img + text_top_offset # self.y_img is top-center
-        elif self.anchor == tk.S:
-            min_x = self.x_img - text_width / 2 + text_left_offset
-            min_y = self.y_img - text_height + text_top_offset # self.y_img is bottom-center
-        elif self.anchor == tk.W:
-            min_x = self.x_img + text_left_offset # self.x_img is left-middle
-            min_y = self.y_img - text_height / 2 + text_top_offset
-        elif self.anchor == tk.E:
-            min_x = self.x_img - text_width + text_left_offset # self.x_img is right-middle
-            min_y = self.y_img - text_height / 2 + text_top_offset
-        # Add NE, NW, SE, SW if needed, NW is default
-        elif self.anchor == tk.NE:
-            min_x = self.x_img - text_width + text_left_offset
-            min_y = self.y_img + text_top_offset
-        elif self.anchor == tk.SW:
-            min_x = self.x_img + text_left_offset
-            min_y = self.y_img - text_height + text_top_offset
-        elif self.anchor == tk.SE:
-            min_x = self.x_img - text_width + text_left_offset
-            min_y = self.y_img - text_height + text_top_offset
-
-        # Default is NW, which is already min_x, min_y based on initial assignment
-
-        max_x = min_x + text_width
-        max_y = min_y + text_height
-
-        return (min_x, min_y, max_x, max_y)
-
-    def move(self, dx_img, dy_img):
-        self.x_img += dx_img
-        self.y_img += dy_img
-
-    def render_on_pil_image(self, draw_context: ImageDraw.ImageDraw):
-        # ImageDraw.text anchor is different from Tkinter's canvas text anchor.
-        # Pillow's default anchor for .text is top-left.
-        # If self.anchor is "nw" (top-left), then self.x_img, self.y_img can be used directly.
-        # If other anchors like "center" were used for x_img, y_img, we'd need to adjust
-        # the xy passed to draw_context.text based on text size (pil_font.getbbox).
-        # For simplicity, assuming self.x_img, self.y_img are intended as top-left for PIL rendering.
-        # Or, if self.anchor is used consistently, translate it.
-        # For now, let's assume self.anchor matches Pillow's anchor options or we default to "lt" (left-top)
-
-        pil_anchor = "lt" # Default Pillow anchor (left-top)
-        # A more robust mapping from tk anchors to pil anchors might be:
-        # anchor_map = {"nw": "lt", "n": "mt", "ne": "rt", ...}
-        # pil_anchor = anchor_map.get(self.anchor, "lt")
-        # However, PIL's getbbox and textlength are also needed for precise non-"lt" anchoring.
-
-        # If self.anchor is 'nw', it corresponds to PIL's 'lt' (left, top).
-        # If self.anchor is 'center', we'd need to calculate offset.
-        # For now, let's use the object's x_img, y_img and PIL's default (top-left)
-        # or map 'nw' to 'lt'.
-
-        # Using text_obj.pil_font which should be updated via _update_pil_font()
-        if not self.pil_font:
-            self._update_pil_font() # Ensure font is loaded
-
-        # Pillow's ImageDraw.text uses (x,y) as top-left corner by default.
-        # If self.anchor is 'nw', this is fine.
-        # If self.anchor is 'center', we'd need to:
-        # text_width, text_height = draw_context.textbbox((0,0), self.text_content, font=self.pil_font)[2:4]
-        # actual_x = self.x_img - text_width / 2
-        # actual_y = self.y_img - text_height / 2
-        # For now, stick to 'nw' behavior for simplicity on PIL.
-        actual_x, actual_y = self.x_img, self.y_img
-        if self.anchor == "center": # Basic center handling
+            font_path = f"{self.font_family.lower()}.ttf"
+            if not os.path.isfile(font_path):
+                import sys
+                if sys.platform == "win32":
+                    font_path = os.path.join(os.environ.get("WINDIR", "C:\\Windows"), "Fonts", f"{self.font_family}.ttf")
+            pil_font = ImageFont.truetype(font_path, scaled_font_size)
+        except Exception:
             try:
-                # Get bounding box of text if rendered at (0,0)
-                bbox = self.pil_font.getbbox(self.text_content) # (left, top, right, bottom)
-                text_width = bbox[2] - bbox[0]
-                text_height = bbox[3] - bbox[1] # ascent - descent
-                actual_x = self.x_img - text_width / 2
-                actual_y = self.y_img - text_height / 2
-            except Exception: # Fallback if getbbox fails or font not loaded
-                pass # Use x_img, y_img as is
+                pil_font = ImageFont.truetype("arial.ttf", scaled_font_size)
+            except Exception:
+                pil_font = ImageFont.load_default()
+        text = self.text_content if self.text_content else ""
+        # 取得文字大小
+        bbox = pil_font.getbbox(text)
+        text_w = bbox[2] - bbox[0]
+        text_h = bbox[3] - bbox[1]
+        # 建立透明底圖
+        img = Image.new("RGBA", (text_w+4, text_h+4), (0,0,0,0))
+        draw = ImageDraw.Draw(img)
+        draw.text((2-bbox[0],2-bbox[1]), text, font=pil_font, fill=self.color)
+        # 已移除旋轉
+        tk_img = ImageTk.PhotoImage(img)
+        # 為避免影像被垃圾回收，掛到 canvas 物件上
+        if not hasattr(canvas, "_text_images"):
+            canvas._text_images = []
+        canvas._text_images.append(tk_img)
+        # anchor 處理
+        anchor_map = {
+            "nw": tk.NW, "n": tk.N, "ne": tk.NE,
+            "w": tk.W, "center": tk.CENTER, "e": tk.E,
+            "sw": tk.SW, "s": tk.S, "se": tk.SE
+        }
+        anchor = anchor_map.get(self.anchor, tk.NW)
+        return canvas.create_image(canvas_x, canvas_y, image=tk_img, anchor=anchor, tags=self.get_canvas_tags())
 
-        draw_context.text(
-            (actual_x, actual_y),
-            self.text_content,
-            font=self.pil_font,
-            fill=self.color
-            # Pillow's ImageDraw.text doesn't have a direct 'anchor' parameter like canvas.create_text for all versions.
-            # Newer versions might have an 'anchor' parameter (e.g. "lt", "mm" for middle-middle).
-            # If using an older Pillow or for max compatibility, manual adjustment for anchors other than top-left is needed.
-            # Assuming self.x_img, self.y_img is the top-left for now.
-        )
+    def render_on_pil_image(self, draw_context: ImageDraw.ImageDraw, zoom_factor=1.0):
+        # 只做縮放，不做旋轉
+        scaled_font_size = max(1, int(self.font_size_pt * zoom_factor))
+        try:
+            pil_font = ImageFont.truetype(f"{self.font_family.lower()}.ttf", scaled_font_size)
+        except Exception:
+            try:
+                pil_font = ImageFont.truetype("arial.ttf", scaled_font_size)
+            except Exception:
+                pil_font = ImageFont.load_default()
+        text = self.text_content if self.text_content else ""
+        bbox = pil_font.getbbox(text)
+        text_w = bbox[2] - bbox[0]
+        text_h = bbox[3] - bbox[1]
+        img = Image.new("RGBA", (text_w+4, text_h+4), (0,0,0,0))
+        d = ImageDraw.Draw(img)
+        d.text((2-bbox[0],2-bbox[1]), text, font=pil_font, fill=self.color)
+        # 已移除旋轉
+        paste_x, paste_y = self.x_img, self.y_img
+        if self.anchor == "center":
+            paste_x -= img.width // 2
+            paste_y -= img.height // 2
+        elif self.anchor == "n":
+            paste_x -= img.width // 2
+        elif self.anchor == "e":
+            paste_x -= img.width
+            paste_y -= img.height // 2
+        elif self.anchor == "s":
+            paste_x -= img.width // 2
+            paste_y -= img.height
+        elif self.anchor == "w":
+            paste_y -= img.height // 2
+        elif self.anchor == "ne":
+            paste_x -= img.width
+        elif self.anchor == "se":
+            paste_x -= img.width
+            paste_y -= img.height
+        elif self.anchor == "sw":
+            paste_y -= img.height
+        base_img = getattr(draw_context, "im", None)
+        if base_img is None:
+            base_img = getattr(draw_context, "image", None)
+        if base_img is None:
+            return
+        px, py = int(round(paste_x)), int(round(paste_y))
+        if px >= base_img.width or py >= base_img.height or px + img.width <= 0 or py + img.height <= 0:
+            return
+        crop_x0 = max(0, -px)
+        crop_y0 = max(0, -py)
+        crop_x1 = min(img.width, base_img.width - px)
+        crop_y1 = min(img.height, base_img.height - py)
+        if crop_x1 <= crop_x0 or crop_y1 <= crop_y0:
+            return
+        img_cropped = img.crop((crop_x0, crop_y0, crop_x1, crop_y1))
+        px += crop_x0
+        py += crop_y0
+        base_img.paste(img_cropped, (px, py), img_cropped)
+
+# 移除 rotate_around 方法
+# def rotate_around(self, cx, cy, angle_deg, rotate_angle=True):
+#     ...已刪除...
 
 # --- Classes for Line, Rectangle, Oval Objects ---
 
@@ -291,6 +268,16 @@ class LineObject(BaseObject):
     def render_on_pil_image(self, draw_context: ImageDraw.ImageDraw):
         draw_context.line([(self.x0_img, self.y0_img), (self.x1_img, self.y1_img)],
                           fill=self.color, width=self.thickness)
+
+    def rotate_around(self, cx, cy, angle_deg):
+        angle_rad = math.radians(angle_deg)
+        def rotate_point(x, y):
+            dx, dy = x - cx, y - cy
+            rx = dx * math.cos(angle_rad) - dy * math.sin(angle_rad) + cx
+            ry = dx * math.sin(angle_rad) + dy * math.cos(angle_rad) + cy
+            return rx, ry
+        self.x0_img, self.y0_img = rotate_point(self.x0_img, self.y0_img)
+        self.x1_img, self.y1_img = rotate_point(self.x1_img, self.y1_img)
 
 class RectangleObject(BaseObject):
     def __init__(self, x0_img, y0_img, x1_img, y1_img, color, thickness, fill_color=None): # fill_color is future
@@ -333,6 +320,18 @@ class RectangleObject(BaseObject):
                   max(self.x0_img, self.x1_img), max(self.y0_img, self.y1_img))
         draw_context.rectangle(coords, outline=self.color, width=self.thickness) # Add fill=self.fill_color if implemented
 
+    def rotate_around(self, cx, cy, angle_deg):
+        angle_rad = math.radians(angle_deg)
+        def rotate_point(x, y):
+            dx, dy = x - cx, y - cy
+            rx = dx * math.cos(angle_rad) - dy * math.sin(angle_rad) + cx
+            ry = dx * math.sin(angle_rad) + dy * math.cos(angle_rad) + cy
+            return rx, ry
+        x0, y0 = rotate_point(self.x0_img, self.y0_img)
+        x1, y1 = rotate_point(self.x1_img, self.y1_img)
+        self.x0_img, self.y0_img = x0, y0
+        self.x1_img, self.y1_img = x1, y1
+
 class OvalObject(BaseObject):
     def __init__(self, x0_img, y0_img, x1_img, y1_img, color, thickness, fill_color=None): # fill_color is future
         super().__init__("oval", color, thickness)
@@ -371,6 +370,18 @@ class OvalObject(BaseObject):
         coords = (min(self.x0_img, self.x1_img), min(self.y0_img, self.y1_img),
                   max(self.x0_img, self.x1_img), max(self.y0_img, self.y1_img))
         draw_context.ellipse(coords, outline=self.color, width=self.thickness) # Add fill=self.fill_color if implemented
+
+    def rotate_around(self, cx, cy, angle_deg):
+        angle_rad = math.radians(angle_deg)
+        def rotate_point(x, y):
+            dx, dy = x - cx, y - cy
+            rx = dx * math.cos(angle_rad) - dy * math.sin(angle_rad) + cx
+            ry = dx * math.sin(angle_rad) + dy * math.cos(angle_rad) + cy
+            return rx, ry
+        x0, y0 = rotate_point(self.x0_img, self.y0_img)
+        x1, y1 = rotate_point(self.x1_img, self.y1_img)
+        self.x0_img, self.y0_img = x0, y0
+        self.x1_img, self.y1_img = x1, y1
 
 
 class DrawnObjectManager:
@@ -461,17 +472,17 @@ class ImageEditorModule(Module):
         self.draw_start_coords = None # For storing (x,y) of mouse press on canvas
         self.current_drawing_tool = "line"
         self.drawing_color = "red"
-self.line_thickness = 2 # Default line thickness
-# self.drawn_items = [] # List to store drawn shapes/text objects (deferred for full object model)
-self.drawn_object_manager = DrawnObjectManager() # Manages all drawn objects
-self.active_drawing_item_id = None # Canvas ID for temporary shape preview (for existing tools)
-self.active_object_preview_id = None # Canvas ID for new object previews (e.g. freehand path)
-self.current_active_object = None # Stores the object being actively drawn (e.g. a FreehandPathObject)
-self.selected_object = None # Stores the currently selected TextObject or FreehandPathObject
-self.selection_drag_start_img_coords = None # For calculating drag delta of selected object
-self.selection_visual_id = None # Canvas item ID for the selection rectangle
+        self.line_thickness = 2 # Default line thickness
+        # self.drawn_items = [] # List to store drawn shapes/text objects (deferred for full object model)
+        self.drawn_object_manager = DrawnObjectManager() # Manages all drawn objects
+        self.active_drawing_item_id = None # Canvas ID for temporary shape preview (for existing tools)
+        self.active_object_preview_id = None # Canvas ID for new object previews (e.g. freehand path)
+        self.current_active_object = None # Stores the object being actively drawn (e.g. a FreehandPathObject)
+        self.selected_object = None # Stores the currently selected TextObject or FreehandPathObject
+        self.selection_drag_start_img_coords = None # For calculating drag delta of selected object
+        self.selection_visual_id = None # Canvas item ID for the selection rectangle
 
-self.image_draw_layer = None # PIL ImageDraw object for drawing on edit_buffer_image (for old method, may deprecate)
+        self.image_draw_layer = None # PIL ImageDraw object for drawing on edit_buffer_image (for old method, may deprecate)
         self.edit_buffer_image = None # PIL image copy for drawing during an edit session
 
         # Zoom/Pan related
@@ -763,8 +774,30 @@ self.image_draw_layer = None # PIL ImageDraw object for drawing on edit_buffer_i
                 return
             try:
                 angle = float(angle_degrees)
+                # --- 計算旋轉前中心點 ---
+                old_w, old_h = self.current_image_pil.size
+                old_cx, old_cy = old_w / 2, old_h / 2
+
                 # PIL rotates counter-clockwise.
-                self.current_image_pil = self.current_image_pil.rotate(angle, expand=True, fillcolor=(0,0,0,0))
+                rotated_img = self.current_image_pil.rotate(angle, expand=True, fillcolor=(0,0,0,0))
+                new_w, new_h = rotated_img.size
+                new_cx, new_cy = new_w / 2, new_h / 2
+
+                # --- 物件同步旋轉 ---
+                for obj in self.drawn_object_manager.get_all_objects():
+                    # For TextObject, do not accumulate rotation when rotating the image
+                    if isinstance(obj, TextObject):
+                        obj.rotate_around(old_cx, old_cy, angle, rotate_angle=False)
+                    else:
+                        obj.rotate_around(old_cx, old_cy, angle)
+                    # 旋轉後再平移物件，使其中心與新圖片中心對齊
+                    dx = new_cx - old_cx
+                    dy = new_cy - old_cy
+                    obj.move(dx, dy)
+                # --- End 物件同步旋轉 ---
+
+                self.current_image_pil = rotated_img
+
                 # Reset zoom and pan after rotation for simplicity, as dimensions change
                 self.zoom_factor = 1.0
                 self.canvas_image_x = 0
@@ -825,21 +858,6 @@ self.image_draw_layer = None # PIL ImageDraw object for drawing on edit_buffer_i
                     img_left = (left_can - self.canvas_image_x) / self.zoom_factor
                     img_top = (top_can - self.canvas_image_y) / self.zoom_factor
                     img_right = (right_can - self.canvas_image_x) / self.zoom_factor
-                    img_bottom = (bottom_can - self.canvas_image_y) / self.zoom_factor
-                    self.shared_state.log(f"[CropDebug] Calculated img coords (before clamp): L:{img_left}, T:{img_top}, R:{img_right}, B:{img_bottom}", "DEBUG")
-
-                    # Clamp to image boundaries
-                    img_w, img_h = self.current_image_pil.size
-                    self.shared_state.log(f"[CropDebug] Original image_pil size: W:{img_w}, H:{img_h}", "DEBUG")
-
-                    img_left = max(0, img_left)
-                    img_top = max(0, img_top)
-                    img_right = min(img_w, img_right)
-                    img_bottom = min(img_h, img_bottom)
-                    self.shared_state.log(f"[CropDebug] Clamped img coords: L:{img_left}, T:{img_top}, R:{img_right}, B:{img_bottom}", "DEBUG")
-
-                    is_valid_crop_area = img_left < img_right and img_top < img_bottom
-                    self.shared_state.log(f"[CropDebug] Is valid crop area (L<R and T<B): {is_valid_crop_area}", "DEBUG")
 
                     if is_valid_crop_area:
                         crop_box = (int(img_left), int(img_top), int(img_right), int(img_bottom))
@@ -847,6 +865,12 @@ self.image_draw_layer = None # PIL ImageDraw object for drawing on edit_buffer_i
 
                         # Additional check after int conversion for zero-dimension images
                         if crop_box[0] < crop_box[2] and crop_box[1] < crop_box[3]:
+                            # --- 物件同步平移 ---
+                            dx = -crop_box[0]
+                            dy = -crop_box[1]
+                            for obj in self.drawn_object_manager.get_all_objects():
+                                obj.move(dx, dy)
+                            # --- End 物件同步平移 ---
                             self.current_image_pil = self.current_image_pil.crop(crop_box)
                             # 更新原始圖片（可選，讓取消時能回復到裁剪前）
                             self.original_image = self.current_image_pil.copy()
@@ -933,7 +957,11 @@ self.image_draw_layer = None # PIL ImageDraw object for drawing on edit_buffer_i
                 self.shared_state.log(f"Flattening {len(self.drawn_object_manager.get_all_objects())} objects onto image for saving.", "INFO")
                 for obj in self.drawn_object_manager.get_all_objects():
                     try:
-                        obj.render_on_pil_image(draw_context)
+                        # 新增 zoom_factor 參數
+                        if isinstance(obj, TextObject):
+                            obj.render_on_pil_image(draw_context, zoom_factor=1.0)
+                        else:
+                            obj.render_on_pil_image(draw_context)
                     except AttributeError:
                         self.shared_state.log(f"Object type {obj.obj_type} (ID: {obj.id}) does not have render_on_pil_image method. Skipping.", "WARNING")
                     except Exception as e:
@@ -1019,7 +1047,7 @@ self.image_draw_layer = None # PIL ImageDraw object for drawing on edit_buffer_i
             self.set_status("Cropping cancelled (placeholder).")
             action_cancelled = True # To trigger redraw and remove visual artifacts
         else:
-            # TODO: General cancel/undo logic if applicable (e.g., undo last rotation)
+            # TODO: General cancel/undo logic if applicable (e.g., revert last rotation)
             # For now, maybe revert to original image if one exists
             if self.original_image:
                 if self.current_image_pil.tobytes() != self.original_image.tobytes():
@@ -1027,11 +1055,7 @@ self.image_draw_layer = None # PIL ImageDraw object for drawing on edit_buffer_i
                     # Baked-in drawings are part of original_image if they were saved before this cancel.
                     # If drawn_items were for a separate object layer, this would be different.
                     # For now, current_image_pil holds everything.
-                    self.drawn_items = [] # Reset if we had a separate drawing layer concept
-
-                    self.zoom_factor = 1.0
-                    self.canvas_image_x = 0
-                    self.canvas_image_y = 0
+                    # self.drawn_items = [] # Reset if we had a separate drawing layer concept
 
                     action_cancelled = True
                     self.set_status("變更已還原至原始載入圖片")
@@ -1092,18 +1116,13 @@ self.image_draw_layer = None # PIL ImageDraw object for drawing on edit_buffer_i
             self.canvas.create_image(self.canvas_image_x, self.canvas_image_y, anchor=tk.NW, image=self.displayed_image_tk, tags="base_image") # Tagged as base_image
 
             # --- Draw all objects from DrawnObjectManager ---
-            # Ensure drawn objects are on top of the image and previews.
-            # Clear old object previews first if any (though usually done in drag/release)
             self.canvas.delete("active_preview_object")
-
             for obj in self.drawn_object_manager.get_all_objects():
-                obj.draw(self.canvas, self._image_to_canvas_coords)
-
-            # If there's an object currently being drawn (e.g. freehand path being dragged),
-            # it might have its own preview logic in _edit_on_drag which creates an "active_preview_object".
-            # This loop ensures all committed objects are drawn. The active preview is separate.
-
-            # After drawing all objects, update/redraw the selection visual if an object is selected
+                # 新增 zoom_factor 參數
+                if isinstance(obj, TextObject):
+                    obj.draw(self.canvas, self._image_to_canvas_coords, zoom_factor=self.zoom_factor)
+                else:
+                    obj.draw(self.canvas, self._image_to_canvas_coords)
             self._update_selection_visuals()
 
             log_msg_suffix = " (Edit Buffer)" if use_edit_buffer and self.edit_buffer_image else ""
@@ -1285,6 +1304,7 @@ self.image_draw_layer = None # PIL ImageDraw object for drawing on edit_buffer_i
             # Finalize points for the object
             img_x_start, img_y_start = self._canvas_to_image_coords(self.draw_start_coords[0], self.draw_start_coords[1])
             img_x_end, img_y_end = self._canvas_to_image_coords(event.x, event.y)
+           
             self.current_active_object.update_points_img(img_x_start, img_y_start, img_x_end, img_y_end)
 
             self.drawn_object_manager.add_object(self.current_active_object)
@@ -1674,6 +1694,13 @@ if __name__ == '__main__':
     # For this test, we pack it directly if it's not already part of the root's layout.
     # The Module base class creates 'self.frame'. We need to make sure it's displayed.
 
+    # To simulate how ModularGUI would handle it, we can pack the module's main frame:
+    editor_module.frame.pack(fill=tk.BOTH, expand=True)
+
+    root.title("Image Editor Module Test")
+    root.mainloop()
+    root.title("Image Editor Module Test")
+    root.mainloop()
     # To simulate how ModularGUI would handle it, we can pack the module's main frame:
     editor_module.frame.pack(fill=tk.BOTH, expand=True)
 
