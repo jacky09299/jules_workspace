@@ -139,12 +139,12 @@ class ImageEditorModule(Module):
 
         # Configure the main frame (self.frame) created by the parent Module class
         self.frame.config(borderwidth=2, relief=tk.GROOVE)
-        self.frame.columnconfigure(0, weight=1)
-        self.frame.rowconfigure(1, weight=1) # Make canvas row expand
+        # self.frame.columnconfigure(0, weight=1)
+        # self.frame.rowconfigure(1, weight=1) # Remove grid config for self.frame
 
         # Toolbar frame
         toolbar_frame = ttk.Frame(self.frame)
-        toolbar_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
+        toolbar_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)  # Use pack instead of grid
 
         tools = ["Freehand", "Line", "Rectangle", "Circle"]
         for tool in tools:
@@ -196,13 +196,13 @@ class ImageEditorModule(Module):
         # Main content frame (renamed from previous content_frame to avoid confusion)
         # Now, the canvas is directly inside a canvas_container_frame for better structure
         canvas_container_frame = ttk.Frame(self.frame)
-        canvas_container_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=(0,5))
-        canvas_container_frame.rowconfigure(0, weight=1)
-        canvas_container_frame.columnconfigure(0, weight=1)
+        canvas_container_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=5, pady=(0,5))  # Use pack instead of grid
+        # canvas_container_frame.rowconfigure(0, weight=1)
+        # canvas_container_frame.columnconfigure(0, weight=1)
 
         # Canvas for image display/editing
         self.canvas = tk.Canvas(canvas_container_frame, bg="white", relief="sunken", borderwidth=1)
-        self.canvas.grid(row=0, column=0, sticky="nsew")
+        self.canvas.pack(fill=tk.BOTH, expand=True)  # Use pack for the canvas
 
         self.canvas.bind("<Button-1>", self.start_draw)
         self.canvas.bind("<B1-Motion>", self.draw)
@@ -264,7 +264,7 @@ class ImageEditorModule(Module):
             # Resize canvas to image size
             self.canvas.config(width=self.loaded_image_tk.width(), height=self.loaded_image_tk.height())
             # Display image
-            self.canvas.create_image(0, 0, anchor=tk.NW, image=self.loaded_image_tk)
+            item_id = self.canvas.create_image(0, 0, anchor=tk.NW, image=self.loaded_image_tk)
             self.canvas_objects.append({'id': item_id, 'type': 'image', 'coords': (0,0),
                                         'image_ref': self.loaded_image_tk,
                                         'filepath': filepath}) # Store filepath
@@ -595,7 +595,7 @@ class ImageEditorModule(Module):
             self.shared_state.log(f"Created {obj_data['type']} (ID: {item_id}). Object count: {len(self.canvas_objects)}", level=logging.DEBUG)
 
         self.shared_state.log(f"Draw action ended for {self.current_tool}. Coords: ({self.start_x},{self.start_y})-({end_x},{end_y})", level=logging.DEBUG)
-            self.start_x, self.start_y = None, None
+        self.start_x, self.start_y = None, None
 
 
     def _update_object_coords_in_tracking(self, item_id, dx, dy):
