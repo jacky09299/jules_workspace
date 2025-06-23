@@ -333,12 +333,19 @@ class ImageEditorModule(Module):
 
     def toggle_crop_mode_action(self):
         self.shared_state.log(f"ImageEditorModule: 'Toggle Crop Mode' action triggered. Current crop_mode_active: {self.crop_mode_active}")
-        if self.crop_mode_active: # Was in crop mode, now confirming/exiting
-            if self.crop_rect_id and self.current_image_pil:
+        if self.crop_mode_active:
+            # --- 直接執行裁剪 ---
+            if not self.crop_rect_id:
+                messagebox.showwarning("未選擇區域", "請先在圖片上拖曳選擇裁剪區域，再按確認裁剪。", parent=self.frame)
+                self.set_status("請先選擇裁剪區域")
+                return
+            if self.current_image_pil:
                 try:
                     c_coords = self.canvas.coords(self.crop_rect_id)
-                    self.shared_state.log(f"[CropDebug] Raw canvas_coords(crop_rect_id): {c_coords}", "DEBUG")
-
+                    if len(c_coords) != 4:
+                        messagebox.showwarning("裁剪區域錯誤", "裁剪區域座標無效，請重新選擇。", parent=self.frame)
+                        self.set_status("裁剪區域座標無效")
+                        return
                     # Ensure correct order: left_can = min(x1_can, x2_can), etc.
                     left_can, top_can, right_can, bottom_can = min(c_coords[0], c_coords[2]), min(c_coords[1], c_coords[3]), max(c_coords[0], c_coords[2]), max(c_coords[1], c_coords[3])
                     self.shared_state.log(f"[CropDebug] Ordered canvas coords: L:{left_can}, T:{top_can}, R:{right_can}, B:{bottom_can}", "DEBUG")
@@ -364,34 +371,27 @@ class ImageEditorModule(Module):
                     self.shared_state.log(f"[CropDebug] Is valid crop area (L<R and T<B): {is_valid_crop_area}", "DEBUG")
 
                     if is_valid_crop_area:
-                        # Convert to int for Pillow crop, which expects integer coordinates
                         crop_box = (int(img_left), int(img_top), int(img_right), int(img_bottom))
                         self.shared_state.log(f"[CropDebug] Integer crop_box for Pillow: {crop_box}", "DEBUG")
 
                         # Additional check after int conversion for zero-dimension images
                         if crop_box[0] < crop_box[2] and crop_box[1] < crop_box[3]:
-                            self.shared_state.log(f"[CropDebug] Current_image_pil size BEFORE crop: {self.current_image_pil.size}", "DEBUG")
                             self.current_image_pil = self.current_image_pil.crop(crop_box)
-                            self.shared_state.log(f"[CropDebug] Current_image_pil size AFTER crop: {self.current_image_pil.size}", "DEBUG")
-                            self.shared_state.log(f"Image cropped to box: {crop_box}")
-
-                            # Reset zoom and pan after crop
+                            # 更新原始圖片（可選，讓取消時能回復到裁剪前）
+                            self.original_image = self.current_image_pil.copy()
                             self.zoom_factor = 1.0
                             self.canvas_image_x = 0
                             self.canvas_image_y = 0
                             self.set_status("圖片裁剪成功")
                         else:
                             messagebox.showwarning("裁剪區域無效", "選擇的裁剪區域經轉換後寬度或高度為零。", parent=self.frame)
-                            self.shared_state.log("[CropDebug] Invalid crop area after int conversion (width/height became 0).")
                             self.set_status("裁剪失敗：選擇區域尺寸為零")
                     else:
                         messagebox.showwarning("裁剪區域無效", "選擇的裁剪區域太小或無效。", parent=self.frame)
-                        self.shared_state.log("[CropDebug] Invalid crop area based on L<R and T<B check.")
                         self.set_status("裁剪失敗：選擇區域無效")
                 except Exception as e:
                     messagebox.showerror("裁剪錯誤", f"裁剪圖片時發生錯誤: {e}", parent=self.frame)
-                    self.shared_state.log(f"Error during crop confirmation: {e}", "ERROR")
-
+                    self.set_status("裁剪時發生錯誤")
             self.crop_mode_active = False
             if self.crop_rect_id:
                 self.canvas.delete(self.crop_rect_id)
@@ -400,15 +400,14 @@ class ImageEditorModule(Module):
             self.canvas.unbind("<ButtonPress-1>")
             self.canvas.unbind("<B1-Motion>")
             self.canvas.unbind("<ButtonRelease-1>")
-            self._bind_pan_events() # Rebind pan
-            self._display_image_on_canvas() # This should show the cropped image or original if failed
-            # Status is set inside the try/else block now
-        else: # Entering crop mode
+            self._bind_pan_events()
+            self._display_image_on_canvas()
+        else:
             if not self.current_image_pil:
                 messagebox.showwarning("無圖片", "請先載入圖片才能進行裁剪。", parent=self.frame)
                 return
             self.crop_mode_active = True
-            self._unbind_pan_events() # Unbind pan
+            self._unbind_pan_events()
             self.canvas.bind("<ButtonPress-1>", self._crop_on_press)
             self.canvas.bind("<B1-Motion>", self._crop_on_drag)
             self.canvas.bind("<ButtonRelease-1>", self._crop_on_release)
@@ -675,21 +674,34 @@ class ImageEditorModule(Module):
         self.shared_state.log(f"Crop selection finalized on canvas at ({x0},{y0}) to ({x1},{y1})")
 
     def _on_mouse_wheel(self, event):
-        if not self.current_image_pil: return
+        if not self.current_image_pil:
+            return
 
         zoom_delta = 0.1
+        # 取得滑鼠在canvas上的座標
+        mouse_x, mouse_y = event.x, event.y
+
+        # 計算滑鼠在圖片上的相對座標（未縮放前）
+        img_x_before = (mouse_x - self.canvas_image_x) / self.zoom_factor
+        img_y_before = (mouse_y - self.canvas_image_y) / self.zoom_factor
+
         # Linux uses event.num (4 for up, 5 for down)
         # Windows/macOS use event.delta (positive for up, negative for down)
-        if event.num == 4 or (hasattr(event, 'delta') and event.delta > 0):
-            self.zoom_factor *= (1 + zoom_delta)
-        elif event.num == 5 or (hasattr(event, 'delta') and event.delta < 0):
-            self.zoom_factor /= (1 + zoom_delta)
+        if getattr(event, 'num', None) == 4 or (hasattr(event, 'delta') and event.delta > 0):
+            new_zoom = self.zoom_factor * (1 + zoom_delta)
+        elif getattr(event, 'num', None) == 5 or (hasattr(event, 'delta') and event.delta < 0):
+            new_zoom = self.zoom_factor / (1 + zoom_delta)
+        else:
+            new_zoom = self.zoom_factor
 
         # Zoom limits
-        self.zoom_factor = max(0.1, min(self.zoom_factor, 5.0))
+        new_zoom = max(0.1, min(new_zoom, 5.0))
 
-        # TODO: Implement zoom towards mouse cursor
-        # For now, zoom is centered on the current view
+        # 計算縮放後，讓滑鼠指向的圖片點仍在滑鼠座標下，調整canvas_image_x/y
+        self.canvas_image_x = mouse_x - img_x_before * new_zoom
+        self.canvas_image_y = mouse_y - img_y_before * new_zoom
+        self.zoom_factor = new_zoom
+
         self.shared_state.log(f"Zoom event. New factor: {self.zoom_factor}", "DEBUG")
         self._display_image_on_canvas()
 
@@ -771,5 +783,7 @@ if __name__ == '__main__':
     # To simulate how ModularGUI would handle it, we can pack the module's main frame:
     editor_module.frame.pack(fill=tk.BOTH, expand=True)
 
+    root.title("Image Editor Module Test")
+    root.mainloop()
     root.title("Image Editor Module Test")
     root.mainloop()
