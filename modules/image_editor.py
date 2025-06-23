@@ -337,29 +337,57 @@ class ImageEditorModule(Module):
             if self.crop_rect_id and self.current_image_pil:
                 try:
                     c_coords = self.canvas.coords(self.crop_rect_id)
+                    self.shared_state.log(f"[CropDebug] Raw canvas_coords(crop_rect_id): {c_coords}", "DEBUG")
+
+                    # Ensure correct order: left_can = min(x1_can, x2_can), etc.
                     left_can, top_can, right_can, bottom_can = min(c_coords[0], c_coords[2]), min(c_coords[1], c_coords[3]), max(c_coords[0], c_coords[2]), max(c_coords[1], c_coords[3])
+                    self.shared_state.log(f"[CropDebug] Ordered canvas coords: L:{left_can}, T:{top_can}, R:{right_can}, B:{bottom_can}", "DEBUG")
+                    self.shared_state.log(f"[CropDebug] View state: canvas_image_x:{self.canvas_image_x}, canvas_image_y:{self.canvas_image_y}, zoom_factor:{self.zoom_factor}", "DEBUG")
 
                     img_left = (left_can - self.canvas_image_x) / self.zoom_factor
                     img_top = (top_can - self.canvas_image_y) / self.zoom_factor
                     img_right = (right_can - self.canvas_image_x) / self.zoom_factor
                     img_bottom = (bottom_can - self.canvas_image_y) / self.zoom_factor
+                    self.shared_state.log(f"[CropDebug] Calculated img coords (before clamp): L:{img_left}, T:{img_top}, R:{img_right}, B:{img_bottom}", "DEBUG")
 
                     # Clamp to image boundaries
                     img_w, img_h = self.current_image_pil.size
+                    self.shared_state.log(f"[CropDebug] Original image_pil size: W:{img_w}, H:{img_h}", "DEBUG")
+
                     img_left = max(0, img_left)
                     img_top = max(0, img_top)
                     img_right = min(img_w, img_right)
                     img_bottom = min(img_h, img_bottom)
+                    self.shared_state.log(f"[CropDebug] Clamped img coords: L:{img_left}, T:{img_top}, R:{img_right}, B:{img_bottom}", "DEBUG")
 
-                    if img_left < img_right and img_top < img_bottom:
-                        self.current_image_pil = self.current_image_pil.crop((int(img_left), int(img_top), int(img_right), int(img_bottom)))
-                        self.shared_state.log(f"Image cropped to: ({img_left}, {img_top}, {img_right}, {img_bottom})")
-                        self.zoom_factor = 1.0
-                        self.canvas_image_x = 0
-                        self.canvas_image_y = 0
+                    is_valid_crop_area = img_left < img_right and img_top < img_bottom
+                    self.shared_state.log(f"[CropDebug] Is valid crop area (L<R and T<B): {is_valid_crop_area}", "DEBUG")
+
+                    if is_valid_crop_area:
+                        # Convert to int for Pillow crop, which expects integer coordinates
+                        crop_box = (int(img_left), int(img_top), int(img_right), int(img_bottom))
+                        self.shared_state.log(f"[CropDebug] Integer crop_box for Pillow: {crop_box}", "DEBUG")
+
+                        # Additional check after int conversion for zero-dimension images
+                        if crop_box[0] < crop_box[2] and crop_box[1] < crop_box[3]:
+                            self.shared_state.log(f"[CropDebug] Current_image_pil size BEFORE crop: {self.current_image_pil.size}", "DEBUG")
+                            self.current_image_pil = self.current_image_pil.crop(crop_box)
+                            self.shared_state.log(f"[CropDebug] Current_image_pil size AFTER crop: {self.current_image_pil.size}", "DEBUG")
+                            self.shared_state.log(f"Image cropped to box: {crop_box}")
+
+                            # Reset zoom and pan after crop
+                            self.zoom_factor = 1.0
+                            self.canvas_image_x = 0
+                            self.canvas_image_y = 0
+                            self.set_status("圖片裁剪成功")
+                        else:
+                            messagebox.showwarning("裁剪區域無效", "選擇的裁剪區域經轉換後寬度或高度為零。", parent=self.frame)
+                            self.shared_state.log("[CropDebug] Invalid crop area after int conversion (width/height became 0).")
+                            self.set_status("裁剪失敗：選擇區域尺寸為零")
                     else:
                         messagebox.showwarning("裁剪區域無效", "選擇的裁剪區域太小或無效。", parent=self.frame)
-                        self.shared_state.log("Invalid crop area selected.")
+                        self.shared_state.log("[CropDebug] Invalid crop area based on L<R and T<B check.")
+                        self.set_status("裁剪失敗：選擇區域無效")
                 except Exception as e:
                     messagebox.showerror("裁剪錯誤", f"裁剪圖片時發生錯誤: {e}", parent=self.frame)
                     self.shared_state.log(f"Error during crop confirmation: {e}", "ERROR")
@@ -373,8 +401,8 @@ class ImageEditorModule(Module):
             self.canvas.unbind("<B1-Motion>")
             self.canvas.unbind("<ButtonRelease-1>")
             self._bind_pan_events() # Rebind pan
-            self._display_image_on_canvas()
-            self.set_status("裁剪完成")
+            self._display_image_on_canvas() # This should show the cropped image or original if failed
+            # Status is set inside the try/else block now
         else: # Entering crop mode
             if not self.current_image_pil:
                 messagebox.showwarning("無圖片", "請先載入圖片才能進行裁剪。", parent=self.frame)
