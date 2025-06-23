@@ -44,8 +44,416 @@ class ImageEditorModule(Module):
         self.handle_fill = "blue"
         self.handle_outline = "white"
 
+        # Application Modes
+        self._in_edit_mode = False
+        self._in_crop_mode = False
+
+        # Button and UI element references
+        self.btn_open_image = None
+        self.btn_edit_mode = None
+        self.btn_rotate = None
+        self.btn_crop = None
+        self.btn_save = None
+        self.btn_cancel = None
+
+        self.drawing_tool_buttons = {} # e.g. {"freehand": btn_freehand, ...}
+        self.btn_pen_color = None
+        self.btn_rotate_left = None # Keeping for _update_button_states temporarily, will be removed
+        self.btn_rotate_right = None # Keeping for _update_button_states temporarily, will be removed
+        self.btn_add_text = None
+        self.font_family_combo = None
+        self.font_size_spinbox = None
+        self.btn_select_object = None
+        self.btn_delete_selected = None
+
+        self.status_bar = None
+        self.drawing_toolbar_frame = None # Frame for drawing related tools
+        self.crop_buttons_frame = None # Frame for crop confirmation buttons
+
+
+        # Mode-specific buttons (will be created on demand or visibility toggled)
+        self.btn_confirm_crop = None
+        self.btn_cancel_crop = None
+        # self.btn_save_edit will be self.btn_save with modified text/command
+        # self.btn_cancel_edit will be self.btn_cancel with modified text/command
+
+
         self.create_ui()
+        self._update_button_states() # Set initial state (no image loaded)
         self.shared_state.log("ImageEditorModule initialized.", level=logging.INFO)
+
+    # --- Mode Management Methods ---
+    def is_in_edit_mode(self):
+        return self._in_edit_mode
+
+    def is_in_crop_mode(self):
+        return self._in_crop_mode
+
+    def toggle_edit_mode(self):
+        if not self.original_pil_image:
+            self._show_hint("Please load an image before entering Edit Mode.")
+            return
+        if self.is_in_crop_mode(): # Cannot enter edit mode from crop mode directly
+            self._show_hint("Finalize or cancel cropping before entering Edit Mode.")
+            return
+
+        self._in_edit_mode = not self._in_edit_mode
+        if self._in_edit_mode:
+            self.current_tool = "freehand" # Default tool for edit mode
+            self.drawing_toolbar_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=2)
+        else:
+            # Exiting edit mode, potentially save or discard changes here if needed by spec
+            # For now, just hide toolbar and update states
+            self.drawing_toolbar_frame.pack_forget()
+            if self.selected_object_id: # Clear selection when exiting edit mode
+                self._remove_selection_visual(self.selected_object_id)
+                self.selected_object_id = None
+                self._clear_resize_handles()
+        self._update_button_states(image_loaded=bool(self.original_pil_image),
+                                   in_edit_mode=self._in_edit_mode,
+                                   in_crop_mode=self._in_crop_mode)
+
+    def toggle_crop_mode(self):
+        if not self.original_pil_image:
+            self._show_hint("Please load an image before starting to Crop.")
+            return
+        if self.is_in_edit_mode(): # Cannot enter crop mode from edit mode directly
+            self._show_hint("Finalize or cancel editing before starting to Crop.")
+            return
+
+        self._in_crop_mode = not self._in_crop_mode
+        if self._in_crop_mode:
+            self.select_tool("crop_select") # Set tool for crop area selection
+            # Crop buttons frame is managed by _update_button_states
+        else:
+            # Exiting crop mode
+            self.select_tool("none") # Or a sensible default like "select" if in edit mode
+            if self.temp_shape_id: # Clear temporary crop selection rectangle
+                self.canvas.delete(self.temp_shape_id)
+                self.temp_shape_id = None
+            if self.crop_rect_id: # Clear finalized crop selection rectangle if not confirmed
+                self.canvas.delete(self.crop_rect_id)
+                self.crop_rect_id = None
+            self.crop_area = None
+            self.current_tool = "none" # Reset tool when exiting crop mode
+        self._update_button_states(image_loaded=bool(self.original_pil_image),
+                                   in_edit_mode=self._in_edit_mode,
+                                   in_crop_mode=self._in_crop_mode)
+
+    # --- Action Stubs (to be implemented) ---
+    def rotate_action_menu(self):
+        if not self.original_pil_image:
+            self._show_hint("Please load an image to rotate.")
+            return
+        if self.is_in_edit_mode() or self.is_in_crop_mode():
+            self._show_hint("Please exit Edit or Crop mode before rotating.")
+            return
+
+        self.shared_state.log("Rotate action menu called.", level=logging.INFO)
+
+        rotate_menu = tk.Menu(self.frame, tearoff=0)
+        rotate_menu.add_command(label="Rotate 90° Left (CCW)", command=lambda: self.execute_rotation(Image.ROTATE_90))
+        rotate_menu.add_command(label="Rotate 90° Right (CW)", command=lambda: self.execute_rotation(Image.ROTATE_270))
+        rotate_menu.add_command(label="Rotate 180°", command=lambda: self.execute_rotation(Image.ROTATE_180))
+        # Future: rotate_menu.add_command(label="Custom Angle...", command=self.custom_rotate_action)
+
+        try:
+            if self.btn_rotate and self.btn_rotate.winfo_viewable():
+                 x = self.btn_rotate.winfo_rootx()
+                 y = self.btn_rotate.winfo_rooty() + self.btn_rotate.winfo_height()
+                 rotate_menu.tk_popup(x, y)
+            else:
+                rotate_menu.tk_popup(self.frame.winfo_pointerx(), self.frame.winfo_pointery())
+        except Exception as e:
+            self.shared_state.log(f"Error popping up rotate menu: {e}. Trying pointer.", level=logging.WARNING)
+            try:
+                rotate_menu.tk_popup(self.frame.winfo_pointerx(), self.frame.winfo_pointery())
+            except tk.TclError as te:
+                 self.shared_state.log(f"Failed to popup rotate menu at pointer: {te}", level=logging.ERROR)
+
+
+    def execute_rotation(self, pil_rotation_constant):
+        if not self.original_pil_image:
+            self.shared_state.log("Cannot rotate: No image loaded.", level=logging.WARNING)
+            self._show_hint("No image loaded to rotate.") # User feedback
+            return
+
+        self.shared_state.log(f"Attempting to rotate image with PIL constant: {pil_rotation_constant}", level=logging.INFO)
+        try:
+            # Preserve filepath before clearing state that might hold it indirectly
+            current_filepath = getattr(self.original_pil_image, 'filepath', None)
+
+            self._clear_all_canvas_state()
+
+            rotated_pil_image = self.original_pil_image.transpose(pil_rotation_constant)
+            self.original_pil_image = rotated_pil_image
+            if current_filepath: # Restore filepath to the new PIL image object
+                 self.original_pil_image.filepath = current_filepath
+
+            self.loaded_image_tk = ImageTk.PhotoImage(self.original_pil_image)
+
+            self.canvas.config(width=self.loaded_image_tk.width(), height=self.loaded_image_tk.height())
+            new_image_id = self.canvas.create_image(0, 0, anchor=tk.NW, image=self.loaded_image_tk)
+            # Add the new (rotated) image back to canvas_objects
+            self.canvas_objects.append({'id': new_image_id, 'type': 'image', 'coords': (0,0),
+                                        'image_ref': self.loaded_image_tk,
+                                        'filepath': getattr(self.original_pil_image, 'filepath', None)})
+
+            self.shared_state.log("Image rotated and canvas updated.", level=logging.INFO)
+            self._update_button_states(image_loaded=True)
+            self._show_hint("Image rotated.")
+
+        except Exception as e:
+            self.shared_state.log(f"Error during image rotation: {e}", level=logging.ERROR)
+            self._show_hint(f"Error rotating image: {e}")
+            # Consider attempting to restore previous self.original_pil_image if rotation fails
+            # This would require temporarily storing it before the transpose operation.
+            # For now, if it fails, the state might be inconsistent.
+
+
+    def save_image_action(self):
+        self.shared_state.log("Save image action called.", level=logging.INFO)
+        if not self.original_pil_image:
+            self._show_hint("No image to save.")
+            return
+
+        filepath = filedialog.asksaveasfilename(
+            defaultextension=".png",
+            filetypes=[("PNG files", "*.png"), ("JPEG files", "*.jpg"), ("All files", "*.*")],
+            title="Save Image As",
+            parent=self.frame
+        )
+        if not filepath:
+            self.shared_state.log("Save image cancelled.", level=logging.INFO)
+            return
+
+        try:
+            image_to_save = self.original_pil_image
+
+            has_drawings = any(obj['type'] != 'image' for obj in self.canvas_objects)
+
+            if has_drawings:
+                 self.shared_state.log("Saving image. NOTE: Drawings on canvas are NOT composited onto the saved image in this version.", level=logging.WARNING)
+                 self._show_hint("Note: Drawings are not saved onto the image yet.")
+
+
+            image_to_save.save(filepath)
+            self.shared_state.log(f"Image saved to {filepath}", level=logging.INFO)
+            self._show_hint(f"Image saved to {filepath}")
+        except Exception as e:
+            self.shared_state.log(f"Error saving image: {e}", level=logging.ERROR)
+            self._show_hint(f"Error saving image: {e}")
+
+
+    def cancel_general_action(self):
+        self.shared_state.log("General cancel action called (not in Edit/Crop mode).", level=logging.INFO)
+
+        action_taken = False
+        # If the main image is "selected" (i.e., has resize handles), deselect it.
+        if self.selected_object_id:
+            obj_data = self._get_object_from_canvas_objects(self.selected_object_id)
+            if obj_data and obj_data['type'] == 'image':
+                self.shared_state.log("Clearing image selection (resize handles).", level=logging.DEBUG)
+                self._remove_selection_visual(self.selected_object_id) # This clears handles for image
+                self.selected_object_id = None
+                self._show_hint("Image selection (for resize) cleared.")
+                action_taken = True
+            # No other type of selection should be active if not in edit mode.
+
+        # If no selection was cleared, and an image exists with a known filepath,
+        # offer to revert to the last loaded/saved state of that image.
+        if not action_taken and self.original_pil_image and hasattr(self.original_pil_image, 'filepath') and self.original_pil_image.filepath:
+            # TODO: Potentially add a confirmation dialog here if this revert is too destructive.
+            # For now, direct revert as per simplified undo.
+            self.shared_state.log(f"Reverting to image from filepath: {self.original_pil_image.filepath}", level=logging.INFO)
+            self.load_image_action(filepath=self.original_pil_image.filepath, internal_call=True)
+            # load_image_action will call _update_button_states and show a hint.
+            self._show_hint("Reverted to initially loaded image state.") # Overwrite load_image_action's hint
+            action_taken = True
+
+        if not action_taken:
+            self._show_hint("No specific action to cancel or revert.")
+
+        # Ensure UI state is consistent, though load_image_action also calls it.
+        self._update_button_states(image_loaded=bool(self.original_pil_image),
+                                   in_edit_mode=self._in_edit_mode,
+                                   in_crop_mode=self._in_crop_mode)
+
+
+    def save_edit_action(self):
+        self.shared_state.log("Save edit action called.", level=logging.INFO)
+        # This means user is in edit mode and clicks "Save Edit"
+        # Here, we should "bake" the drawings onto the original_pil_image
+        # This is a complex operation (render canvas items to PIL image).
+        # For now, it will just exit edit mode.
+        self.shared_state.log("Drawings NOT baked onto image in this version. Exiting Edit Mode.", level=logging.WARNING)
+        self._in_edit_mode = False # Exit edit mode
+        # self.drawing_toolbar_frame.pack_forget() # Handled by _update_button_states
+        if self.selected_object_id:
+            self._remove_selection_visual(self.selected_object_id)
+            self.selected_object_id = None
+            self._clear_resize_handles()
+        self._update_button_states(image_loaded=bool(self.original_pil_image),
+                                   in_edit_mode=self._in_edit_mode,
+                                   in_crop_mode=self._in_crop_mode)
+        # Status bar update is handled by _update_button_states based on new mode
+        # self._show_hint("Exited Edit Mode. Drawing changes are visual only.")
+
+
+    def cancel_edit_action(self):
+        self.shared_state.log("Cancel edit action called.", level=logging.INFO)
+        # User is in edit mode and clicks "Cancel Edit"
+        # This should discard any drawings made *in the current edit session*.
+        # For simplicity now, it will clear ALL drawings and exit edit mode.
+        # A more robust solution would track drawings per session.
+        if self.original_pil_image: # Only clear drawings if there's an image context
+            image_item_id = self._find_image_object_id()
+            items_to_delete = [obj['id'] for obj in self.canvas_objects if obj['id'] != image_item_id]
+            for item_id in items_to_delete:
+                try:
+                    self.canvas.delete(item_id)
+                except tk.TclError:
+                    pass # Item might already be gone
+            self.canvas_objects = [obj for obj in self.canvas_objects if obj['id'] == image_item_id]
+            self.shared_state.log("Cleared all drawings from canvas (kept base image).", level=logging.INFO)
+
+        self._in_edit_mode = False # Exit edit mode
+        self.drawing_toolbar_frame.pack_forget()
+        if self.selected_object_id:
+            self._remove_selection_visual(self.selected_object_id)
+            self.selected_object_id = None
+            self._clear_resize_handles()
+        self._update_button_states(image_loaded=bool(self.original_pil_image),
+                                   in_edit_mode=self._in_edit_mode,
+                                   in_crop_mode=self._in_crop_mode)
+        self._show_hint("Drawings cancelled. Exited Edit Mode.")
+
+
+    def confirm_crop_action(self):
+        self.shared_state.log("Confirm crop action called.", level=logging.INFO)
+        if self.crop_area and self.original_pil_image:
+            self.crop_image_action() # Use existing logic to perform the crop
+        else:
+            self._show_hint("No crop area selected or no image loaded.")
+
+        self._in_crop_mode = False # Exit crop mode
+        # crop_buttons_frame hide is handled by _update_button_states
+        self._update_button_states(image_loaded=bool(self.original_pil_image),
+                                   in_edit_mode=self._in_edit_mode,
+                                   in_crop_mode=self._in_crop_mode)
+
+
+    def cancel_crop_action(self):
+        self.shared_state.log("Cancel crop action called.", level=logging.INFO)
+        if self.crop_rect_id: # Visual selection rectangle
+            self.canvas.delete(self.crop_rect_id)
+            self.crop_rect_id = None
+        if self.temp_shape_id: # Temporary interactive selection
+            self.canvas.delete(self.temp_shape_id)
+            self.temp_shape_id = None
+        self.crop_area = None
+
+        self._in_crop_mode = False # Exit crop mode
+        self._update_button_states(image_loaded=bool(self.original_pil_image),
+                                   in_edit_mode=self._in_edit_mode,
+                                   in_crop_mode=self._in_crop_mode)
+        self._show_hint("Crop cancelled.")
+
+    # --- Helper Methods ---
+    def _show_hint(self, message):
+        if self.status_bar:
+            self.status_bar.config(text=message)
+        else:
+            simpledialog.messagebox.showinfo("Hint", message, parent=self.frame)
+
+    def _update_button_states(self, image_loaded=False, in_edit_mode=False, in_crop_mode=False):
+        """Updates the enable/disable state of all relevant UI controls."""
+        no_image = not image_loaded
+        normal_mode = image_loaded and not in_edit_mode and not in_crop_mode
+
+        # Always available
+        if self.btn_open_image: self.btn_open_image.config(state=tk.NORMAL)
+
+        # Available only when an image is loaded and not in a special mode
+        if self.btn_edit_mode: self.btn_edit_mode.config(state=tk.NORMAL if normal_mode else tk.DISABLED)
+        if self.btn_rotate: self.btn_rotate.config(state=tk.NORMAL if normal_mode else tk.DISABLED) # Group for rotate
+        if self.btn_crop: self.btn_crop.config(state=tk.NORMAL if normal_mode else tk.DISABLED)
+
+        # Main Save/Cancel buttons - behavior changes with mode
+        if self.btn_save:
+            self.btn_save.config(state=tk.NORMAL if image_loaded else tk.DISABLED)
+            if in_edit_mode:
+                self.btn_save.config(text="Save Edit", command=self.save_edit_action)
+            elif in_crop_mode: # Crop mode will have its own confirm/cancel
+                self.btn_save.config(state=tk.DISABLED)
+            else: # Normal mode or after an action
+                self.btn_save.config(text="Save File", command=self.save_image_action)
+
+        if self.btn_cancel:
+            self.btn_cancel.config(state=tk.NORMAL if image_loaded else tk.DISABLED)
+            if in_edit_mode:
+                self.btn_cancel.config(text="❌ Cancel Edit", command=self.cancel_edit_action)
+            elif in_crop_mode: # Crop mode will have its own confirm/cancel buttons, main cancel disabled
+                self.btn_cancel.config(state=tk.DISABLED)
+            else: # Normal mode or after an action
+                self.btn_cancel.config(text="❌ Cancel Action", command=self.cancel_general_action)
+
+        # Show/Hide Drawing Toolbar Frame
+        if hasattr(self, 'drawing_toolbar_frame') and self.drawing_toolbar_frame:
+            if in_edit_mode:
+                self.drawing_toolbar_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=2)
+            else:
+                self.drawing_toolbar_frame.pack_forget()
+
+        # Enable/Disable Drawing-related tools (they are on the drawing_toolbar_frame)
+        for tool_btn in self.drawing_tool_buttons.values():
+            if tool_btn: tool_btn.config(state=tk.NORMAL if in_edit_mode else tk.DISABLED) # Already hidden if not in_edit_mode, but good practice
+        if self.btn_pen_color: self.btn_pen_color.config(state=tk.NORMAL if in_edit_mode else tk.DISABLED)
+        if self.btn_add_text: self.btn_add_text.config(state=tk.NORMAL if in_edit_mode else tk.DISABLED)
+        if self.font_family_combo: self.font_family_combo.config(state=tk.NORMAL if in_edit_mode else tk.DISABLED)
+        if self.font_size_spinbox: self.font_size_spinbox.config(state=tk.NORMAL if in_edit_mode else tk.DISABLED)
+        if self.btn_select_object: self.btn_select_object.config(state=tk.NORMAL if in_edit_mode else tk.DISABLED)
+        if self.btn_delete_selected: self.btn_delete_selected.config(state=tk.NORMAL if in_edit_mode and self.selected_object_id else tk.DISABLED)
+
+
+        # Show/Hide Crop Toolbar Frame (crop_buttons_frame)
+        if hasattr(self, 'crop_buttons_frame') and self.crop_buttons_frame:
+            if in_crop_mode:
+                self.crop_buttons_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=2)
+                if self.btn_confirm_crop: self.btn_confirm_crop.config(state=tk.NORMAL)
+                if self.btn_cancel_crop: self.btn_cancel_crop.config(state=tk.NORMAL)
+            else:
+                self.crop_buttons_frame.pack_forget()
+
+        # Legacy buttons (should ideally be removed from class attributes later)
+        if self.btn_rotate_left: self.btn_rotate_left.config(state=tk.DISABLED)
+        if self.btn_rotate_right: self.btn_rotate_right.config(state=tk.DISABLED)
+
+        # Update status bar
+        if self.status_bar:
+            if no_image:
+                self.status_bar.config(text="Please open an image.")
+            elif in_edit_mode:
+                self.status_bar.config(text="Edit Mode (Drawing/Typing)")
+            elif in_crop_mode:
+                self.status_bar.config(text="Crop Mode - Select area, then Confirm/Cancel.")
+            else: # Image is loaded, not in edit or crop mode
+                self.status_bar.config(text="Image loaded. Ready.")
+
+        # Disable canvas interactions if not in an appropriate mode
+        if self.canvas:
+            if not image_loaded or (not in_edit_mode and not in_crop_mode and self.current_tool not in ["select_crop_visual_only"]): # select_crop_visual_only is a placeholder idea
+                # self.canvas.unbind("<Button-1>")
+                # self.canvas.unbind("<B1-Motion>")
+                # self.canvas.unbind("<ButtonRelease-1>")
+                # Instead of unbinding, let the event handlers check the current mode/state
+                pass
+            else: # Rebind if they were unbound, or ensure they are active
+                # self.canvas.bind("<Button-1>", self.start_draw)
+                # self.canvas.bind("<B1-Motion>", self.draw)
+                # self.canvas.bind("<ButtonRelease-1>", self.stop_draw)
+                pass
+
 
     def _clear_all_canvas_state(self):
         """Clears canvas, object tracking, selection, and temporary states."""
@@ -142,134 +550,187 @@ class ImageEditorModule(Module):
         # self.frame.columnconfigure(0, weight=1)
         # self.frame.rowconfigure(1, weight=1) # Remove grid config for self.frame
 
-        # Toolbar frame
-        toolbar_frame = ttk.Frame(self.frame)
-        toolbar_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)  # Use pack instead of grid
+        # --- Main Controls Toolbar ---
+        main_controls_frame = ttk.Frame(self.frame)
+        main_controls_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
 
-        tools = ["Freehand", "Line", "Rectangle", "Circle"]
-        for tool in tools:
-            button = ttk.Button(toolbar_frame, text=tool,
-                                command=lambda t=tool.lower(): self.select_tool(t))
-            button.pack(side=tk.LEFT, padx=2, pady=2)
+        self.btn_open_image = ttk.Button(main_controls_frame, text="Open Image", command=self.load_image_action)
+        self.btn_open_image.pack(side=tk.LEFT, padx=2, pady=2)
 
-        color_button = ttk.Button(toolbar_frame, text="Pen Color", command=self.choose_color)
-        color_button.pack(side=tk.LEFT, padx=2, pady=2)
+        self.btn_edit_mode = ttk.Button(main_controls_frame, text="🔧 Edit Mode", command=self.toggle_edit_mode)
+        self.btn_edit_mode.pack(side=tk.LEFT, padx=2, pady=2)
 
-        load_image_button = ttk.Button(toolbar_frame, text="Load Image", command=self.load_image_action)
-        load_image_button.pack(side=tk.LEFT, padx=2, pady=2)
+        self.btn_rotate = ttk.Button(main_controls_frame, text="🔁 Rotate", command=self.rotate_action_menu) # Placeholder
+        self.btn_rotate.pack(side=tk.LEFT, padx=2, pady=2)
 
-        crop_select_button = ttk.Button(toolbar_frame, text="Select Crop Area", command=lambda: self.select_tool("crop_select"))
-        crop_select_button.pack(side=tk.LEFT, padx=2, pady=2)
+        self.btn_crop = ttk.Button(main_controls_frame, text="✂️ Crop", command=self.toggle_crop_mode) # Placeholder
+        self.btn_crop.pack(side=tk.LEFT, padx=2, pady=2)
 
-        crop_image_button = ttk.Button(toolbar_frame, text="Crop Image", command=self.crop_image_action)
-        crop_image_button.pack(side=tk.LEFT, padx=2, pady=2)
+        # Spacer or align right for Save/Cancel
+        ttk.Label(main_controls_frame).pack(side=tk.LEFT, expand=True, fill=tk.X)
 
-        rotate_left_button = ttk.Button(toolbar_frame, text="Rotate Left 90°", command=lambda: self.rotate_image_action("left"))
-        rotate_left_button.pack(side=tk.LEFT, padx=2, pady=2)
+        self.btn_save = ttk.Button(main_controls_frame, text="💾 Save File", command=self.save_image_action) # Command changes
+        self.btn_save.pack(side=tk.RIGHT, padx=2, pady=2)
 
-        rotate_right_button = ttk.Button(toolbar_frame, text="Rotate Right 90°", command=lambda: self.rotate_image_action("right"))
-        rotate_right_button.pack(side=tk.LEFT, padx=2, pady=2)
+        self.btn_cancel = ttk.Button(main_controls_frame, text="❌ Cancel Action", command=self.cancel_general_action) # Command changes
+        self.btn_cancel.pack(side=tk.RIGHT, padx=2, pady=2)
 
-        add_text_button = ttk.Button(toolbar_frame, text="Add Text", command=lambda: self.select_tool("text"))
-        add_text_button.pack(side=tk.LEFT, padx=2, pady=2)
 
-        # Font selection controls
-        font_label = ttk.Label(toolbar_frame, text="Font:")
+        # --- Drawing Tools Toolbar (Initially hidden or disabled, shown in Edit Mode) ---
+        self.drawing_toolbar_frame = ttk.Frame(self.frame)
+        # Packed/unpacked by _update_button_states or toggle_edit_mode
+        # self.drawing_toolbar_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=2)
+
+        drawing_tools_map = {"Freehand": "freehand", "Line": "line", "Rectangle": "rectangle", "Circle": "circle"}
+        for text, tool_name_val in drawing_tools_map.items():
+            btn = ttk.Button(self.drawing_toolbar_frame, text=text,
+                                command=lambda t=tool_name_val: self.select_tool(t))
+            btn.pack(side=tk.LEFT, padx=2, pady=2)
+            self.drawing_tool_buttons[tool_name_val] = btn
+
+        self.btn_pen_color = ttk.Button(self.drawing_toolbar_frame, text="Pen Color", command=self.choose_color)
+        self.btn_pen_color.pack(side=tk.LEFT, padx=2, pady=2)
+
+        self.btn_add_text = ttk.Button(self.drawing_toolbar_frame, text="Add Text", command=lambda: self.select_tool("text"))
+        self.btn_add_text.pack(side=tk.LEFT, padx=2, pady=2)
+
+        font_label = ttk.Label(self.drawing_toolbar_frame, text="Font:")
         font_label.pack(side=tk.LEFT, padx=(5,2), pady=2)
-        font_family_combo = ttk.Combobox(toolbar_frame, textvariable=self.current_font_family, width=15)
-        font_family_combo['values'] = ["Arial", "Times New Roman", "Courier New", "Verdana", "Helvetica", "Calibri", "Georgia"]
-        font_family_combo.pack(side=tk.LEFT, padx=2, pady=2)
-        font_family_combo.set("Arial") # Default value
+        self.font_family_combo = ttk.Combobox(self.drawing_toolbar_frame, textvariable=self.current_font_family, width=15)
+        self.font_family_combo['values'] = ["Arial", "Times New Roman", "Courier New", "Verdana", "Helvetica", "Calibri", "Georgia"]
+        self.font_family_combo.pack(side=tk.LEFT, padx=2, pady=2)
+        self.font_family_combo.set("Arial")
 
-        size_label = ttk.Label(toolbar_frame, text="Size:")
+        size_label = ttk.Label(self.drawing_toolbar_frame, text="Size:")
         size_label.pack(side=tk.LEFT, padx=(5,2), pady=2)
-        font_size_spinbox = ttk.Spinbox(toolbar_frame, from_=8, to_=72, textvariable=self.current_font_size, width=5)
-        font_size_spinbox.pack(side=tk.LEFT, padx=2, pady=2)
-        self.current_font_size.set(12) # Default value, though __init__ also sets it. Explicit set for spinbox.
+        self.font_size_spinbox = ttk.Spinbox(self.drawing_toolbar_frame, from_=8, to_=72, textvariable=self.current_font_size, width=5)
+        self.font_size_spinbox.pack(side=tk.LEFT, padx=2, pady=2)
+        self.current_font_size.set(12)
 
-        select_button = ttk.Button(toolbar_frame, text="Select", command=lambda: self.select_tool("select"))
-        select_button.pack(side=tk.LEFT, padx=2, pady=2)
+        self.btn_select_object = ttk.Button(self.drawing_toolbar_frame, text="Select Shape", command=lambda: self.select_tool("select"))
+        self.btn_select_object.pack(side=tk.LEFT, padx=2, pady=2)
 
-        delete_button = ttk.Button(toolbar_frame, text="Delete Selected", command=self.delete_selected_object)
-        delete_button.pack(side=tk.LEFT, padx=2, pady=2)
+        self.btn_delete_selected = ttk.Button(self.drawing_toolbar_frame, text="Delete Shape", command=self.delete_selected_object)
+        self.btn_delete_selected.pack(side=tk.LEFT, padx=2, pady=2)
 
-        # Main content frame (renamed from previous content_frame to avoid confusion)
-        # Now, the canvas is directly inside a canvas_container_frame for better structure
+        # --- Crop Confirmation Toolbar (Initially hidden, shown in Crop Mode) ---
+        self.crop_buttons_frame = ttk.Frame(self.frame)
+        # self.crop_buttons_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=2) # Packed by _update_button_states
+
+        self.btn_confirm_crop = ttk.Button(self.crop_buttons_frame, text="✅ Confirm Crop", command=self.confirm_crop_action)
+        self.btn_confirm_crop.pack(side=tk.LEFT, padx=2, pady=2)
+        self.btn_cancel_crop = ttk.Button(self.crop_buttons_frame, text="❌ Cancel Crop", command=self.cancel_crop_action)
+        self.btn_cancel_crop.pack(side=tk.LEFT, padx=2, pady=2)
+
+
+        # --- Canvas ---
         canvas_container_frame = ttk.Frame(self.frame)
-        canvas_container_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=5, pady=(0,5))  # Use pack instead of grid
-        # canvas_container_frame.rowconfigure(0, weight=1)
-        # canvas_container_frame.columnconfigure(0, weight=1)
+        canvas_container_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=5, pady=(0,5))
 
-        # Canvas for image display/editing
         self.canvas = tk.Canvas(canvas_container_frame, bg="white", relief="sunken", borderwidth=1)
-        self.canvas.pack(fill=tk.BOTH, expand=True)  # Use pack for the canvas
+        self.canvas.pack(fill=tk.BOTH, expand=True)
 
         self.canvas.bind("<Button-1>", self.start_draw)
         self.canvas.bind("<B1-Motion>", self.draw)
         self.canvas.bind("<ButtonRelease-1>", self.stop_draw)
 
+        # --- Status Bar ---
+        self.status_bar = ttk.Label(self.frame, text="Please open an image.", relief=tk.SUNKEN, anchor=tk.W)
+        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X, padx=5, pady=(0,5))
+
+
+        # Old buttons that are being phased out or integrated - keep references if needed for now for _update_button_states
+        # These buttons are not created in the new UI structure directly.
+        # Their functionality is being absorbed by the new main buttons or context specific ones.
+        # Example: self.btn_rotate_left, self.btn_rotate_right, self.crop_select_button, self.crop_image_button
+        # For now, we'll let _update_button_states try to disable them if they were to exist.
+        # A cleaner approach would be to remove these attributes and their handling from _update_button_states
+        # once all functionality is migrated. For now, it's safer to keep the disable logic.
+        self.btn_rotate_left = None # Was: ttk.Button(toolbar_frame, text="Rotate Left 90°", command=lambda: self.rotate_image_action("left"))
+        self.btn_rotate_right = None # Was: ttk.Button(toolbar_frame, text="Rotate Right 90°", command=lambda: self.rotate_image_action("right"))
+        # self.crop_select_button = None # Was: ttk.Button(toolbar_frame, text="Select Crop Area", ...)
+        # self.crop_image_button = None # Was: ttk.Button(toolbar_frame, text="Crop Image", ...)
+
+
         self.shared_state.log("ImageEditorModule UI created.", level=logging.INFO)
 
     def select_tool(self, tool_name):
-        # Clean up previous tool's temporary visuals if necessary
-        if self.current_tool == "crop_select" and tool_name != "crop_select":
-            # If switching away from crop_select, and crop_rect_id is not finalized, remove temp shape
-            if self.temp_shape_id:
-                self.canvas.delete(self.temp_shape_id)
-                self.temp_shape_id = None
-            # Keep self.crop_rect_id if area was selected, user might want to crop later or re-select
+        # This method is primarily for drawing tools now, or object selection within edit mode,
+        # or for setting the crop selection tool.
 
-        # Deselect any currently selected object when changing tools (unless new tool is 'select' itself)
-        if self.selected_object_id and tool_name != "select":
+        # Allow "crop_select" tool regardless of edit_mode, as it's set by toggle_crop_mode
+        if tool_name != "crop_select" and not self.is_in_edit_mode() and tool_name != "none":
+            self.shared_state.log(f"Tool selection '{tool_name}' ignored, not in edit mode or not 'crop_select'.", logging.DEBUG)
+            if tool_name == "select":
+                self._show_hint("Enter Edit Mode to select shapes.")
+            return
+
+        # Clean up previous tool's temporary visuals if necessary
+        # (Handled by specific mode toggles or actions now, e.g. exiting crop mode clears crop rect)
+        # if self.current_tool == "crop_select" and tool_name != "crop_select":
+        #     if self.temp_shape_id:
+        #         self.canvas.delete(self.temp_shape_id)
+        #         self.temp_shape_id = None
+
+        # Deselect any currently selected drawing object when changing tools (unless new tool is 'select' itself)
+        if self.is_in_edit_mode() and self.selected_object_id and tool_name != "select":
             self._remove_selection_visual(self.selected_object_id)
-            self._clear_resize_handles() # Clear handles when object is deselected by tool change
+            self._clear_resize_handles()
             self.selected_object_id = None
-            self.shared_state.log("Selection cleared due to tool change.", level=logging.DEBUG)
+            self.shared_state.log("Drawing selection cleared due to tool change in Edit Mode.", level=logging.DEBUG)
 
         self.current_tool = tool_name
         self.shared_state.log(f"Selected tool: {self.current_tool}", level=logging.DEBUG)
 
-        if self.current_tool != "crop_select" and self.current_tool != "select":
-             # If a crop selection rectangle is visible but we are not in crop_select or select mode,
-             # it might be confusing. However, crop_rect_id is handled by crop_image_action or load_image.
-             # For select tool, we might want to keep crop_rect_id if user wants to select it.
-             pass
-
 
     def choose_color(self):
+        if not self.is_in_edit_mode():
+            self._show_hint("Pen color can only be changed in Edit Mode.")
+            return
         color_code = colorchooser.askcolor(title="Choose pen color", initialcolor=self.pen_color, parent=self.frame)
         if color_code and color_code[1]: # color_code[1] is the hex string
             self.pen_color = color_code[1]
             self.shared_state.log(f"Pen color changed to: {self.pen_color}", level=logging.DEBUG)
 
-    def load_image_action(self):
-        filepath = filedialog.askopenfilename(
-            title="Select an Image",
-            filetypes=[("Image Files", "*.png *.jpg *.jpeg *.gif *.bmp"), ("All files", "*.*")]
-        )
-        if not filepath:
-            self.shared_state.log("Image loading cancelled.", level=logging.INFO)
+    def load_image_action(self, filepath=None, internal_call=False):
+        if not internal_call or not filepath: # If not an internal call, always ask for filepath
+            chosen_filepath = filedialog.askopenfilename(
+                title="Select an Image",
+                filetypes=[("Image Files", "*.png *.jpg *.jpeg *.gif *.bmp"), ("All files", "*.*")]
+            )
+            if not chosen_filepath:
+                self.shared_state.log("Image loading cancelled by user.", level=logging.INFO)
+                if not self.original_pil_image: # If still no image after cancellation
+                    self._update_button_states(image_loaded=False)
+                return
+            filepath = chosen_filepath # Use the path chosen by user
+
+        if not filepath: # Should not happen if logic above is correct, but as a safe guard
+            self.shared_state.log("No filepath provided for image loading.", level=logging.WARNING)
+            if not self.original_pil_image:
+                 self._update_button_states(image_loaded=False)
             return
 
         self.shared_state.log(f"Attempting to load image: {filepath}", level=logging.INFO)
         try:
-            # Fully clear canvas and tracking before loading new image
+            # Exit any active modes before loading new image
+            if self.is_in_edit_mode(): self.toggle_edit_mode() # Will call update_button_states
+            if self.is_in_crop_mode(): self.toggle_crop_mode() # Will call update_button_states
+
             self._clear_all_canvas_state()
 
             self.original_pil_image = Image.open(filepath)
-            # Store the filepath with the image object for potential later use (e.g. save, reload original)
-            self.original_pil_image.filepath = filepath
+            self.original_pil_image.filepath = filepath # Store for potential reload/save
             self.loaded_image_tk = ImageTk.PhotoImage(self.original_pil_image)
 
-            # Resize canvas to image size
             self.canvas.config(width=self.loaded_image_tk.width(), height=self.loaded_image_tk.height())
-            # Display image
             item_id = self.canvas.create_image(0, 0, anchor=tk.NW, image=self.loaded_image_tk)
             self.canvas_objects.append({'id': item_id, 'type': 'image', 'coords': (0,0),
                                         'image_ref': self.loaded_image_tk,
-                                        'filepath': filepath}) # Store filepath
+                                        'filepath': filepath})
 
             self.shared_state.log(f"Image '{filepath}' loaded. Canvas cleared and resized.", level=logging.INFO)
+            self._update_button_states(image_loaded=True) # Key update after successful load
 
         except Exception as e:
             self.shared_state.log(f"Error loading image '{filepath}': {e}", level=logging.ERROR)
@@ -567,28 +1028,40 @@ class ImageEditorModule(Module):
             # Freehand is a series of small lines; each segment is not individually tracked here.
             # Could be improved by grouping strokes, but for now, freehand is not a selectable object.
             self.last_x, self.last_y = None, None
-        elif self.current_tool == "crop_select":
-            if not self.original_pil_image: return
+        elif self.current_tool == "crop_select" and self.is_in_crop_mode():
+            if not self.original_pil_image:
+                self.start_x, self.start_y = None, None # Reset drawing state
+                return
 
-            # Finalize crop area. Ensure x1 < x2 and y1 < y2 for PIL crop
-            x1, y1 = min(self.start_x, end_x), min(self.start_y, end_y)
-            x2, y2 = max(self.start_x, end_x), max(self.start_y, end_y)
-            self.crop_area = (x1, y1, x2, y2)
+            min_crop_dim = 10 # Minimum width/height for a crop
+            x1_c, y1_c = min(self.start_x, end_x), min(self.start_y, end_y)
+            x2_c, y2_c = max(self.start_x, end_x), max(self.start_y, end_y)
 
-            # The temp_shape_id is the rectangle drawn during drag. Make it the persistent crop_rect_id.
-            # No need to delete and redraw if style is already correct.
-            # If self.temp_shape_id was used for preview, assign it to self.crop_rect_id
-            if self.temp_shape_id:
-                self.crop_rect_id = self.temp_shape_id
-                self.temp_shape_id = None # Important: don't delete it from canvas yet
-            else: # Should not happen if draw created it
-                self.crop_rect_id = self.canvas.create_rectangle(x1,y1,x2,y2, outline="blue", dash=(4,2), width=1)
+            # Boundary check against canvas dimensions (which should match image)
+            canvas_w = self.canvas.winfo_width()
+            canvas_h = self.canvas.winfo_height()
+            x1_c = max(0, x1_c); y1_c = max(0, y1_c)
+            x2_c = min(canvas_w, x2_c); y2_c = min(canvas_h, y2_c)
 
-            self.shared_state.log(f"Crop area selected: {self.crop_area}", level=logging.INFO)
-            # Don't reset self.start_x, self.start_y here for crop_select, as they form self.crop_area
-            # Reset them when a new crop selection starts or tool changes.
-            self.start_x, self.start_y = None, None
-            return
+            if (x2_c - x1_c) < min_crop_dim or (y2_c - y1_c) < min_crop_dim:
+                self.shared_state.log(f"Crop area too small: {(x1_c,y1_c,x2_c,y2_c)}. Min dim: {min_crop_dim}", level=logging.WARNING)
+                self._show_hint(f"Crop area is too small. Minimum size is {min_crop_dim}x{min_crop_dim} pixels.")
+                self.crop_area = None
+                if self.crop_rect_id: self.canvas.delete(self.crop_rect_id); self.crop_rect_id = None
+                # temp_shape_id was already deleted if it existed
+            else:
+                self.crop_area = (x1_c, y1_c, x2_c, y2_c)
+                if self.crop_rect_id: self.canvas.delete(self.crop_rect_id) # Delete old one if exists
+                # Create the persistent visual selection rectangle
+                self.crop_rect_id = self.canvas.create_rectangle(
+                    x1_c, y1_c, x2_c, y2_c,
+                    outline="blue", dash=(4,2), width=1, tags=("crop_selection_rect",)
+                )
+                self.shared_state.log(f"Crop area selected: {self.crop_area}", level=logging.INFO)
+                self._show_hint(f"Crop area selected. Click 'Confirm Crop' or 'Cancel Crop'.")
+
+            self.start_x, self.start_y = None, None # Reset for next potential selection
+            return # Crop selection doesn't add to canvas_objects in the same way as drawings
 
         if item_id and obj_data:
             self.canvas_objects.append(obj_data)
@@ -647,28 +1120,34 @@ class ImageEditorModule(Module):
 
         # Ensure coordinates are within the image bounds before cropping
         img_width, img_height = self.original_pil_image.size
-        x1_pil = max(0, int(x1))
-        y1_pil = max(0, int(y1))
-        x2_pil = min(img_width, int(x2))
-        y2_pil = min(img_height, int(y2))
 
-        if x1_pil >= x2_pil or y1_pil >= y2_pil:
-            self.shared_state.log(f"Cannot crop: Invalid crop dimensions after clamping. Area: {(x1_pil,y1_pil,x2_pil,y2_pil)}", level=logging.ERROR)
-            if self.crop_rect_id: # Remove invalid visual cue
-                self.canvas.delete(self.crop_rect_id)
-                self.crop_rect_id = None
+        # Crop coords should already be clamped to image dimensions by select_tool/stop_draw
+        # but a final check is good.
+        x1_pil = max(0, int(x1)); y1_pil = max(0, int(y1)) # Ensure positive
+        x2_pil = min(img_width, int(x2)); y2_pil = min(img_height, int(y2)) # Ensure within bounds
+
+
+        min_crop_dim = 10 # Consistent with stop_draw
+        if (x2_pil - x1_pil) < min_crop_dim or (y2_pil - y1_pil) < min_crop_dim:
+            self.shared_state.log(f"Cannot crop: Invalid final crop dimensions. Area: {(x1_pil,y1_pil,x2_pil,y2_pil)} Image: {img_width}x{img_height}", level=logging.ERROR)
+            if self.crop_rect_id and self.canvas:
+                try: self.canvas.delete(self.crop_rect_id)
+                except tk.TclError: pass # item might be gone
+            self.crop_rect_id = None
             self.crop_area = None
+            self._show_hint(f"Crop failed: Area too small (min {min_crop_dim}x{min_crop_dim}).")
             return
 
         try:
-            self.shared_state.log(f"Cropping image with area: {(x1_pil, y1_pil, x2_pil, y2_pil)}", level=logging.INFO)
-            cropped_pil_image = self.original_pil_image.crop((x1_pil, y1_pil, x2_pil, y2_pil))
+            self.shared_state.log(f"Cropping PIL image ({self.original_pil_image.size}) with box: {(x1_pil, y1_pil, x2_pil, y2_pil)}", level=logging.INFO)
 
-            # After crop, previous image object and drawings are gone.
-            self._clear_all_canvas_state() # Clears canvas_objects, selection, etc.
+            cropped_pil_image = self.original_pil_image.crop((x1_pil, y1_pil, x2_pil, y2_pil))
+            original_filepath = getattr(self.original_pil_image, 'filepath', None)
+
+            self._clear_all_canvas_state()
 
             self.original_pil_image = cropped_pil_image
-            self.original_pil_image.filepath = getattr(self.original_pil_image, 'filepath', None) # Preserve filepath
+            if original_filepath: self.original_pil_image.filepath = original_filepath
             self.loaded_image_tk = ImageTk.PhotoImage(self.original_pil_image)
 
             self.canvas.config(width=self.loaded_image_tk.width(), height=self.loaded_image_tk.height())
@@ -681,43 +1160,26 @@ class ImageEditorModule(Module):
 
         except Exception as e:
             self.shared_state.log(f"Error during image cropping: {e}", level=logging.ERROR)
+            self._show_hint(f"Error cropping image: {e}")
+            # Attempt to restore previous state if crop failed badly?
+            # For now, _clear_all_canvas_state might leave a blank canvas if PIL crop fails.
+            # This needs robust error handling if self.original_pil_image is corrupted.
 
-    def rotate_image_action(self, direction):
-        if not self.original_pil_image:
-            self.shared_state.log("Cannot rotate: No image loaded.", level=logging.WARNING)
-            return
 
-        self.shared_state.log(f"Attempting to rotate image {direction}...", level=logging.INFO)
-        try:
-            if direction == "left":
-                rotation_angle = Image.ROTATE_90 # PIL's ROTATE_90 is counter-clockwise
-            elif direction == "right":
-                rotation_angle = Image.ROTATE_270 # PIL's ROTATE_270 is clockwise
-            else:
-                self.shared_state.log(f"Unknown rotation direction: {direction}", level=logging.ERROR)
-                return
+    # def rotate_image_action(self, direction): # This method is effectively replaced by execute_rotation
+    #     # Kept for a moment if any old part of code calls it, but should be removed.
+    #     self.shared_state.log(f"Legacy rotate_image_action called with {direction}. Redirecting...", level=logging.WARNING)
+    #     if direction == "left":
+    #         self.execute_rotation(Image.ROTATE_90)
+    #     elif direction == "right":
+    #         self.execute_rotation(Image.ROTATE_270)
+    #     else:
+    #         self.shared_state.log(f"Unknown direction for legacy rotate: {direction}", level=logging.ERROR)
 
-            rotated_pil_image = self.original_pil_image.transpose(rotation_angle)
-
-            self._clear_all_canvas_state() # Clears canvas_objects, selection, etc.
-
-            self.original_pil_image = rotated_pil_image
-            self.original_pil_image.filepath = getattr(self.original_pil_image, 'filepath', None) # Preserve filepath
-            self.loaded_image_tk = ImageTk.PhotoImage(self.original_pil_image)
-
-            self.canvas.config(width=self.loaded_image_tk.width(), height=self.loaded_image_tk.height())
-            new_image_id = self.canvas.create_image(0, 0, anchor=tk.NW, image=self.loaded_image_tk)
-            self.canvas_objects.append({'id': new_image_id, 'type': 'image', 'coords': (0,0),
-                                        'image_ref': self.loaded_image_tk,
-                                        'filepath': self.original_pil_image.filepath})
-
-            self.shared_state.log(f"Image rotated {direction}. Canvas objects reset.", level=logging.INFO)
-
-        except Exception as e:
-            self.shared_state.log(f"Error during image rotation: {e}", level=logging.ERROR)
 
     def handle_text_add(self, event):
-        if not self.canvas: # Should not happen if UI is created
+        if not self.canvas or not self.is_in_edit_mode():
+            self._show_hint("Text can only be added in Edit Mode.")
             return
 
         x, y = event.x, event.y
