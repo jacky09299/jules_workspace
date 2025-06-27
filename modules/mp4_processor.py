@@ -6,11 +6,15 @@
 # - Tkinter (usually included with Python)
 
 import tkinter as tk
-from tkinter import ttk, filedialog
+from tkinter import filedialog, ttk
+from rembg import remove
+from PIL import Image
 from main import Module
 import os
 import cv2 # For _process_to_frames
 from moviepy.editor import VideoFileClip, AudioFileClip, CompositeAudioClip, CompositeVideoClip, concatenate_videoclips # For audio extraction and splitting
+from rembg import remove # For background removal
+import numpy as np # For background removal
 
 class MP4Processor(Module):
     def __init__(self, parent, shared_state, module_name, gui_manager):
@@ -85,7 +89,7 @@ class MP4Processor(Module):
             raise ValueError(f"Invalid time component in '{time_str}': {e}")
 
 
-    def _process_to_frames(self, video_path, output_dir, target_fps_str):
+    def _process_to_frames(self, video_path, output_dir, target_fps_str, remove_bg):
         self._log_status(f"Starting 'Convert to Frames' for: {video_path}")
         cap = None # Initialize cap outside try for finally block
         try:
@@ -112,6 +116,9 @@ class MP4Processor(Module):
 
             self._log_status(f"Saving 1 frame every {frame_interval} original frames to achieve ~{target_fps} FPS.")
 
+            if remove_bg:
+                self._log_status("Background removal enabled.")
+
             count = 0
             saved_frame_count = 0
             while True:
@@ -119,6 +126,15 @@ class MP4Processor(Module):
                 if not ret:
                     break
                 if count % frame_interval == 0:
+                    if remove_bg:
+                        # Convert frame to PIL Image for rembg
+                        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        pil_img = Image.fromarray(frame_rgb)
+                        # Remove background
+                        output_pil_img = remove(pil_img)
+                        # Convert back to OpenCV format for saving
+                        frame = cv2.cvtColor(np.array(output_pil_img), cv2.COLOR_RGB2BGR)
+
                     frame_filename = os.path.join(frames_output_subdir, f"frame_{saved_frame_count:05d}.png")
                     cv2.imwrite(frame_filename, frame) # Critical CV2 operation
                     saved_frame_count += 1
@@ -189,7 +205,30 @@ class MP4Processor(Module):
             if audio_clip: audio_clip.close()
             if video_clip: video_clip.close()
 
-    def _process_split_mp4(self, video_path, output_dir, split_points_str, segments_to_save_str):
+    def _process_remove_background(self, video_path, output_dir):
+        self._log_status(f"Starting 'Remove Background' for: {video_path}")
+        video_clip = None
+        try:
+            video_filename_no_ext = os.path.splitext(os.path.basename(video_path))[0]
+            output_video_path = os.path.join(output_dir, f"{video_filename_no_ext}_no_bg.mp4")
+
+            video_clip = VideoFileClip(video_path)
+
+            def remove_bg_frame(frame):
+                pil_img = Image.fromarray(frame)
+                output_pil_img = remove(pil_img)
+                return np.array(output_pil_img)
+
+            processed_clip = video_clip.fl_image(remove_bg_frame)
+            processed_clip.write_videofile(output_video_path, codec="libx264", audio_codec="aac")
+
+            self._log_status(f"Successfully removed background and saved to: {output_video_path}")
+            return True
+        except Exception as e:
+            self._log_status(f"Error during background removal: {e}")
+            return False
+        finally:
+            if video_clip: video_clip.close()
         self._log_status(f"Starting 'Split MP4' for: {video_path}")
         main_video_clip = None
         subclip = None # Initialize for finally block
@@ -342,15 +381,14 @@ class MP4Processor(Module):
                 self._log_status(f"--- Processing file: {video_path} ---")
                 current_file_success = False
                 if mode == "Convert to Frames":
-                    current_file_success = self._process_to_frames(video_path, output_dir, self.fps_var.get())
+                    remove_bg = self.remove_bg_var.get()
+                    current_file_success = self._process_to_frames(video_path, output_dir, self.fps_var.get(), remove_bg)
                 elif mode == "Extract to MP3":
                     current_file_success = self._process_to_mp3(video_path, output_dir)
                 elif mode == "Extract to OGG":
                     current_file_success = self._process_to_ogg(video_path, output_dir)
-                elif mode == "Split MP4":
-                    split_points = self.split_points_text.get("1.0", tk.END).strip()
-                    segments_save = self.segments_to_save_var.get()
-                    current_file_success = self._process_split_mp4(video_path, output_dir, split_points, segments_save)
+                elif mode == "Remove Background":
+                    current_file_success = self._process_remove_background(video_path, output_dir)
                 else:
                     self._log_status(f"Error: Unknown processing mode: {mode}")
                     current_file_success = False
@@ -404,7 +442,7 @@ class MP4Processor(Module):
         options_frame.pack(fill=tk.X, padx=5, pady=5)
         processing_mode_label = ttk.Label(options_frame, text="Mode:")
         processing_mode_label.pack(side=tk.LEFT, padx=(0,5), pady=5)
-        processing_options = ["Convert to Frames", "Extract to MP3", "Extract to OGG", "Split MP4"]
+        processing_options = ["Convert to Frames", "Extract to MP3", "Extract to OGG", "Split MP4", "Remove Background"]
         self.processing_mode_combobox = ttk.Combobox(options_frame, textvariable=self.processing_mode_var, values=processing_options, state="readonly")
         self.processing_mode_combobox.pack(fill=tk.X, expand=True, padx=5, pady=5)
         self.processing_mode_combobox.current(0)
@@ -420,6 +458,10 @@ class MP4Processor(Module):
         fps_label.pack(side=tk.LEFT, padx=(0,5))
         self.fps_entry = ttk.Entry(self.frames_options_frame, textvariable=self.fps_var, width=5)
         self.fps_entry.pack(side=tk.LEFT)
+
+        self.remove_bg_var = tk.BooleanVar()
+        self.check_remove_bg = ttk.Checkbutton(self.frames_options_frame, text="去背", variable=self.remove_bg_var)
+        self.check_remove_bg.pack(side=tk.LEFT, padx=5)
 
         # --- Specific Controls for "Split MP4" ---
         self.split_options_frame = ttk.Frame(self.dynamic_options_frame)
