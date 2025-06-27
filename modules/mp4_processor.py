@@ -91,15 +91,26 @@ class MP4Processor(Module):
 
     def _process_to_frames(self, video_path, output_dir, target_fps_str, remove_bg):
         self._log_status(f"Starting 'Convert to Frames' for: {video_path}")
-        cap = None # Initialize cap outside try for finally block
+        cap = None
         try:
-            target_fps = int(target_fps_str)
+            try:
+                target_fps = int(float(target_fps_str))
+            except Exception:
+                self._log_status(f"Invalid FPS value: {target_fps_str}, fallback to 1")
+                target_fps = 1
+
             video_filename = os.path.splitext(os.path.basename(video_path))[0]
             frames_output_subdir = os.path.join(output_dir, f"{video_filename}_frames_fps{target_fps}")
             if not os.path.exists(frames_output_subdir):
                 os.makedirs(frames_output_subdir)
                 self._log_status(f"Created frames output subdirectory: {frames_output_subdir}")
+            # 新增這行，讓你直接複製路徑
+            self._log_status(f"Frame output directory (copy & paste in Explorer): {os.path.abspath(frames_output_subdir)}")
+        except Exception as e:
+            self._log_status(f"Error creating output subdirectory: {e}")
+            return False
 
+        try:
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
                 self._log_status(f"Error: Could not open video file {video_path} with OpenCV.")
@@ -108,11 +119,12 @@ class MP4Processor(Module):
             original_fps = cap.get(cv2.CAP_PROP_FPS)
             self._log_status(f"Original video FPS: {original_fps:.2f}")
 
-            if original_fps <= 0:
-                 self._log_status(f"Warning: Original FPS is {original_fps:.2f}. Cannot reliably target {target_fps} FPS. Will save 1 frame per input frame.")
-                 frame_interval = 1
+            # 修正 frame_interval 計算，確保不為0
+            if original_fps <= 0 or target_fps <= 0:
+                self._log_status(f"Warning: FPS invalid (original: {original_fps}, target: {target_fps}). Will save every frame.")
+                frame_interval = 1
             else:
-                frame_interval = int(round(original_fps / target_fps)) if target_fps < original_fps else 1
+                frame_interval = max(1, int(round(original_fps / target_fps)))
 
             self._log_status(f"Saving 1 frame every {frame_interval} original frames to achieve ~{target_fps} FPS.")
 
@@ -124,27 +136,31 @@ class MP4Processor(Module):
             while True:
                 ret, frame = cap.read()
                 if not ret:
+                    self._log_status(f"End of video or cannot read frame at count {count}.")
                     break
                 if count % frame_interval == 0:
                     if remove_bg:
-                        # Convert frame to PIL Image for rembg
                         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                         pil_img = Image.fromarray(frame_rgb)
-                        # Remove background
                         output_pil_img = remove(pil_img)
-                        # Convert back to OpenCV format for saving
                         frame = cv2.cvtColor(np.array(output_pil_img), cv2.COLOR_RGB2BGR)
 
                     frame_filename = os.path.join(frames_output_subdir, f"frame_{saved_frame_count:05d}.png")
-                    cv2.imwrite(frame_filename, frame) # Critical CV2 operation
+                    success = cv2.imwrite(frame_filename, frame)
+                    if not success:
+                        self._log_status(f"Failed to write frame: {frame_filename}")
                     saved_frame_count += 1
-                    if saved_frame_count % target_fps == 0:
+                    if saved_frame_count % max(1, target_fps) == 0:
                         self._log_status(f"Saved {saved_frame_count} frames...")
                 count += 1
 
             self._log_status(f"Successfully extracted {saved_frame_count} frames to {frames_output_subdir}")
-            return True
-        except cv2.error as e_cv2: # More specific OpenCV errors
+            # 新增這行，列出前5張 frame 路徑
+            if saved_frame_count > 0:
+                sample_files = [os.path.join(frames_output_subdir, f) for f in sorted(os.listdir(frames_output_subdir))[:5]]
+                self._log_status(f"Sample frame files: {sample_files}")
+            return saved_frame_count > 0
+        except cv2.error as e_cv2:
             self._log_status(f"OpenCV Error during frame extraction: {e_cv2}")
             return False
         except Exception as e:
@@ -207,20 +223,44 @@ class MP4Processor(Module):
 
     def _process_remove_background(self, video_path, output_dir):
         self._log_status(f"Starting 'Remove Background' for: {video_path}")
-        video_clip = None
+        cap = None
+        out = None
         try:
             video_filename_no_ext = os.path.splitext(os.path.basename(video_path))[0]
             output_video_path = os.path.join(output_dir, f"{video_filename_no_ext}_no_bg.mp4")
 
-            video_clip = VideoFileClip(video_path)
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                self._log_status(f"Error: Could not open video file {video_path} with OpenCV.")
+                return False
 
-            def remove_bg_frame(frame):
-                pil_img = Image.fromarray(frame)
-                output_pil_img = remove(pil_img)
-                return np.array(output_pil_img)
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            if fps <= 0:
+                fps = 30.0  # fallback
 
-            processed_clip = video_clip.fl_image(remove_bg_frame)
-            processed_clip.write_videofile(output_video_path, codec="libx264", audio_codec="aac")
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            out = cv2.VideoWriter(output_video_path, fourcc, fps, (width, height))
+
+            frame_count = 0
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                result = remove(frame_rgb)
+                # rembg returns RGBA, convert to BGR for saving
+                if result.shape[2] == 4:
+                    result_bgr = cv2.cvtColor(np.array(result), cv2.COLOR_RGBA2BGR)
+                else:
+                    result_bgr = cv2.cvtColor(np.array(result), cv2.COLOR_RGB2BGR)
+                out.write(result_bgr)
+
+                frame_count += 1
+                if frame_count % int(fps) == 0:
+                    self._log_status(f"Processed {frame_count} frames...")
 
             self._log_status(f"Successfully removed background and saved to: {output_video_path}")
             return True
@@ -228,7 +268,9 @@ class MP4Processor(Module):
             self._log_status(f"Error during background removal: {e}")
             return False
         finally:
-            if video_clip: video_clip.close()
+            if cap: cap.release()
+            if out: out.release()
+            cv2.destroyAllWindows()
         self._log_status(f"Starting 'Split MP4' for: {video_path}")
         main_video_clip = None
         subclip = None # Initialize for finally block
