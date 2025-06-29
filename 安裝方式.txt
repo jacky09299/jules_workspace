@@ -1,0 +1,9 @@
+到https://www.anaconda.com/download
+註冊帳號登入
+下載anaconda
+打開anaconda prompt
+輸入「cd 資料路徑」，按enter(例如cd C:\Users\User\Desktop\tools)
+輸入「conda env create -f environment.yml」，按enter
+安裝完成!
+之後要開啟軟體就點兩下"小工具組.bat"
+可以自己建立捷徑到桌面
