@@ -32,7 +32,7 @@ class YoutubeDownloaderModule(Module):
         url_frame = ttk.Frame(content_frame)
         url_frame.pack(fill=tk.X, pady=5)
         
-        url_label = ttk.Label(url_frame, text="YouTube URL:")
+        url_label = ttk.Label(url_frame, text="YouTube playlist URL:")
         url_label.pack(side=tk.LEFT, padx=(0, 5))
 
         self.url_entry = ttk.Entry(url_frame)
@@ -41,7 +41,7 @@ class YoutubeDownloaderModule(Module):
         # 批次下載多行輸入框 + 滾動條 + 載入txt按鈕
         batch_frame = ttk.Frame(content_frame)
         batch_frame.pack(fill=tk.BOTH, pady=5)
-        batch_label = ttk.Label(batch_frame, text="Batch URLs (one per line):")
+        batch_label = ttk.Label(batch_frame, text="YouTube URLs (one per line):")
         batch_label.pack(anchor=tk.W)
         batch_text_frame = ttk.Frame(batch_frame)
         batch_text_frame.pack(fill=tk.BOTH, expand=True)
@@ -224,45 +224,6 @@ class YoutubeDownloaderModule(Module):
                     return
             # 若用戶取消或失敗，繼續下一個
         self.update_status("Status: Download finished.")
-
-    def download_video(self):
-        url = self.url_entry.get().strip()
-        if not url:
-            messagebox.showerror("Error", "Please enter a YouTube URL.", parent=self.frame)
-            return
-        if not self.download_dir:
-            messagebox.showerror("Error", "Please select a download folder.", parent=self.frame)
-            return
-
-        self.update_status("Status: Downloading...")
-        self.progress_bar['value'] = 0
-
-        method = self.download_method.get()
-        
-        # Determine which method to use
-        if method == "Auto":
-            if self.ytdlp_available:
-                success = self.download_with_ytdlp(url)
-                if not success and self.pytube_available:
-                    self.update_status("Status: yt-dlp failed, trying pytube...")
-                    success = self.download_with_pytube(url)
-            elif self.pytube_available:
-                success = self.download_with_pytube(url)
-            else:
-                messagebox.showerror("Error", "No download libraries available.", parent=self.frame)
-                return
-        elif method == "pytube":
-            if self.pytube_available:
-                success = self.download_with_pytube(url)
-            else:
-                messagebox.showerror("Error", "pytube is not available.", parent=self.frame)
-                return
-        elif method == "yt-dlp":
-            if self.ytdlp_available:
-                success = self.download_with_ytdlp(url)
-            else:
-                messagebox.showerror("Error", "yt-dlp is not available.", parent=self.frame)
-                return
 
     def download_with_pytube(self, url):
         """Download using pytube library"""

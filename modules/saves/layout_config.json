@@ -1,14 +1,28 @@
 {
   "modules": [
     {
-      "module_name": "image_editor",
-      "instance_id": "image_editor#2",
-      "relative_width": 0.06912442396313365,
-      "relative_height": 0.051349572086899276
+      "module_name": "video",
+      "instance_id": "video#1",
+      "relative_width": 0.4099616858237548,
+      "relative_height": 0.6411238825031929
+    },
+    {
+      "module_name": "youtube_downloader",
+      "instance_id": "youtube_downloader#1",
+      "relative_width": 0.5197956577266922,
+      "relative_height": 0.6411238825031929
+    },
+    {
+      "module_name": "youtube_downloader",
+      "instance_id": "youtube_downloader#2",
+      "relative_width": 0.7305236270753512,
+      "relative_height": 0.685823754789272
     }
   ],
-  "maximized_module_name": "image_editor#2",
+  "maximized_module_name": null,
   "module_order": [
-    "image_editor#2"
+    "video#1",
+    "youtube_downloader#1",
+    "youtube_downloader#2"
   ]
 }
