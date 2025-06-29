@@ -87,8 +87,8 @@ class YoutubeDownloaderModule(Module):
                                    values=["best", "2160p", "1440p", "1080p", "720p", "480p", "360p", "240p", "144p"], state="readonly", width=15)
         quality_combo.pack(side=tk.LEFT)
 
-        # Download Button
-        download_button = ttk.Button(content_frame, text="Download", command=self.start_download_thread)
+        # Download Button（合併單一與批次下載）
+        download_button = ttk.Button(content_frame, text="Download", command=self.start_combined_download_thread)
         download_button.pack(pady=5)
 
         # 播放清單下載按鈕
@@ -170,11 +170,60 @@ class YoutubeDownloaderModule(Module):
         else:
             self.update_status("Status: Ready (both pytube and yt-dlp available)")
 
-    def start_download_thread(self):
-        """Run the download in a separate thread to keep the GUI responsive"""
-        download_thread = threading.Thread(target=self.download_video)
-        download_thread.daemon = True
-        download_thread.start()
+    def start_combined_download_thread(self):
+        """合併單一與批次下載：自動判斷要下載一個還是多個網址"""
+        thread = threading.Thread(target=self.combined_download)
+        thread.daemon = True
+        thread.start()
+
+    def combined_download(self):
+        # 取得單一網址與批次網址
+        url = self.url_entry.get().strip()
+        batch_urls = self.batch_url_text.get("1.0", tk.END).strip().splitlines()
+        urls = []
+        if url:
+            urls.append(url)
+        urls += [u.strip() for u in batch_urls if u.strip()]
+        # 去除重複
+        urls = list(dict.fromkeys(urls))
+        if not urls:
+            messagebox.showerror("Error", "Please enter at least one YouTube URL.", parent=self.frame)
+            return
+        if not self.download_dir:
+            messagebox.showerror("Error", "Please select a download folder.", parent=self.frame)
+            return
+
+        total = len(urls)
+        for idx, u in enumerate(urls, 1):
+            self.update_status(f"Status: Downloading ({idx}/{total})...")
+            self.progress_bar['value'] = 0
+            method = self.download_method.get()
+            success = False
+            if method == "Auto":
+                if self.ytdlp_available:
+                    success = self.download_with_ytdlp(u)
+                    if not success and self.pytube_available:
+                        self.update_status("Status: yt-dlp failed, trying pytube...")
+                        success = self.download_with_pytube(u)
+                elif self.pytube_available:
+                    success = self.download_with_pytube(u)
+                else:
+                    messagebox.showerror("Error", "No download libraries available.", parent=self.frame)
+                    return
+            elif method == "pytube":
+                if self.pytube_available:
+                    success = self.download_with_pytube(u)
+                else:
+                    messagebox.showerror("Error", "pytube is not available.", parent=self.frame)
+                    return
+            elif method == "yt-dlp":
+                if self.ytdlp_available:
+                    success = self.download_with_ytdlp(u)
+                else:
+                    messagebox.showerror("Error", "yt-dlp is not available.", parent=self.frame)
+                    return
+            # 若用戶取消或失敗，繼續下一個
+        self.update_status("Status: Download finished.")
 
     def download_video(self):
         url = self.url_entry.get().strip()
@@ -373,55 +422,6 @@ class YoutubeDownloaderModule(Module):
         """Clean up when module is destroyed"""
         super().on_destroy()
         self.shared_state.log(f"{self.module_name} instance destroyed.")
-
-    def start_batch_download_thread(self):
-        """批次下載：新開執行緒避免卡UI"""
-        batch_thread = threading.Thread(target=self.batch_download_videos)
-        batch_thread.daemon = True
-        batch_thread.start()
-
-    def batch_download_videos(self):
-        urls = self.batch_url_text.get("1.0", tk.END).strip().splitlines()
-        urls = [u.strip() for u in urls if u.strip()]
-        if not urls:
-            messagebox.showerror("Error", "Please enter at least one YouTube URL in the batch box.", parent=self.frame)
-            return
-        if not self.download_dir:
-            messagebox.showerror("Error", "Please select a download folder.", parent=self.frame)
-            return
-
-        total = len(urls)
-        for idx, url in enumerate(urls, 1):
-            self.update_status(f"Status: Batch downloading ({idx}/{total})...")
-            self.progress_bar['value'] = 0
-            # 單一網址下載流程
-            method = self.download_method.get()
-            success = False
-            if method == "Auto":
-                if self.ytdlp_available:
-                    success = self.download_with_ytdlp(url)
-                    if not success and self.pytube_available:
-                        self.update_status("Status: yt-dlp failed, trying pytube...")
-                        success = self.download_with_pytube(url)
-                elif self.pytube_available:
-                    success = self.download_with_pytube(url)
-                else:
-                    messagebox.showerror("Error", "No download libraries available.", parent=self.frame)
-                    return
-            elif method == "pytube":
-                if self.pytube_available:
-                    success = self.download_with_pytube(url)
-                else:
-                    messagebox.showerror("Error", "pytube is not available.", parent=self.frame)
-                    return
-            elif method == "yt-dlp":
-                if self.ytdlp_available:
-                    success = self.download_with_ytdlp(url)
-                else:
-                    messagebox.showerror("Error", "yt-dlp is not available.", parent=self.frame)
-                    return
-            # 若用戶取消或失敗，繼續下一個
-        self.update_status("Status: Batch download finished。")
 
     def start_playlist_download_thread(self):
         playlist_thread = threading.Thread(target=self.download_playlist)
