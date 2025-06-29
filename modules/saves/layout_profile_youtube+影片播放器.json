@@ -1,0 +1,21 @@
+{
+  "modules": [
+    {
+      "module_name": "video",
+      "instance_id": "video#1",
+      "relative_width": 0.4110756123535676,
+      "relative_height": 0.6421725239616614
+    },
+    {
+      "module_name": "youtube_downloader",
+      "instance_id": "youtube_downloader#1",
+      "relative_width": 0.5207667731629393,
+      "relative_height": 0.6421725239616614
+    }
+  ],
+  "maximized_module_name": null,
+  "module_order": [
+    "video#1",
+    "youtube_downloader#1"
+  ]
+}
