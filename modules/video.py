@@ -262,8 +262,7 @@ class VideoModule(Module):
         ttk.Label(eq_frame, text="等化器:").pack(side=tk.LEFT)
         eq_presets = [
             "無", "音質", "低音增強", "低音減弱", "高音增強", "高音減弱", "響度 (Loudness)", "沙發音樂", "小喇叭",
-            "口語清晰", "聲音增強", "古典", "舞曲", "深沉", "電子", "饒舌", "爵士", "拉丁", "鋼琴", "流行", "R&B", "搖滾",
-            "低音增強等化器", "高音增強等化器"
+            "口語清晰", "聲音增強", "古典", "舞曲", "深沉", "電子", "饒舌", "爵士", "拉丁", "鋼琴", "流行", "R&B", "搖滾"
         ]
         eq_menu = ttk.OptionMenu(
             eq_frame, self.equalizer_mode, "無", *eq_presets, command=self.on_equalizer_changed
@@ -478,8 +477,6 @@ class VideoModule(Module):
             "流行":      [0, 0, 2, 1, 0, 0, 0, 0, 1, 2],
             "R&B":      [4, 3, 2, 1, 0, 0, 0, 0, 2, 3],
             "搖滾":      [1, 1, 1, 2, 3, 3, 2, 1, 2, 0],
-            "低音增強等化器": [6, 6] + [0] * 8,
-            "高音增強等化器": [0] * 8 + [6, 6],
         }
         if eq_mode in eq_presets:
             return eq_presets[eq_mode]
