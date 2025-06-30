@@ -270,6 +270,11 @@ class VideoModule(Module):
         )
         eq_menu.pack(side=tk.LEFT, padx=(5, 0))
 
+        # === 新增: 等化器視覺化圖像顯示區 ===
+        self.eq_bar_label = ttk.Label(content_frame)
+        self.eq_bar_label.pack(fill=tk.X, padx=5, pady=(0, 5))
+        self.draw_equalizer_visualization()  # 初始繪製
+
         self.shared_state.log(f"UI for {self.module_name} created.", level=logging.INFO)
         self.shared_state.set(f"{self.module_name}_ready", True)
 
@@ -481,8 +486,37 @@ class VideoModule(Module):
         else:
             return [0] * 10
 
+    def draw_equalizer_visualization(self):
+        """繪製等化器頻段增益的散點折線圖，顯示於 eq_bar_label"""
+        eq_mode = self.equalizer_mode.get()
+        gains = self.get_equalizer_gains(eq_mode)
+        bands_hz = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
+        plt.clf()
+        fig, ax = plt.subplots(figsize=(4, 1.2), dpi=100)
+        ax.plot(bands_hz, gains, marker='o', color='#0072bd', linewidth=2, markersize=6)
+        ax.scatter(bands_hz, gains, color='#d95319', s=30)
+        ax.set_xscale('log')
+        ax.set_xticks(bands_hz)
+        ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
+        ax.set_xticklabels([str(b) for b in bands_hz], fontsize=8)
+        ax.set_xlabel("頻率 (Hz)", fontsize=9)
+        ax.set_ylabel("dB", fontsize=9)
+        ax.set_ylim(-8, 8)
+        ax.grid(True, axis='y', linestyle='--', alpha=0.4)
+        ax.set_title("等化器頻段增益", fontsize=10)
+        plt.tight_layout(pad=0.5)
+        buf = BytesIO()
+        plt.savefig(buf, format='png')
+        plt.close(fig)
+        buf.seek(0)
+        img = Image.open(buf)
+        self.eq_bar_image = ImageTk.PhotoImage(img)
+        self.eq_bar_label.config(image=self.eq_bar_image)
+        self.eq_bar_label.image = self.eq_bar_image
+
     def on_equalizer_changed(self, value):
         # 切換等化器時，重新載入當前影片（如有）
+        self.draw_equalizer_visualization()  # 新增：更新等化器圖
         if self.video_loaded and self.video_filepath:
             self.load_video_file(self.video_filepath)
 
