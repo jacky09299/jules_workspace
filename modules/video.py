@@ -16,6 +16,17 @@ from moviepy.editor import VideoFileClip
 import pygame
 import tempfile
 
+# === 新增: 等化器相關 ===
+import numpy as np
+from scipy.io import wavfile
+from scipy.signal import butter, lfilter
+
+# === 新增: 匯入 matplotlib 用於等化器視覺化 ===
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from io import BytesIO
+
 class PlaylistOrderWindow:
     def __init__(self, parent, playlist, callback):
         self.parent = parent
@@ -147,6 +158,11 @@ class VideoModule(Module):
 
         self.folder_video_files = []  # 新增：記錄資料夾所有影片檔案
 
+        self.equalizer_mode = tk.StringVar(value="none")  # 新增: 等化器模式
+        # === 新增: 等化器視覺化圖像 ===
+        self.eq_bar_image = None
+        self.eq_bar_label = None
+
         self.create_ui()
 
     def create_ui(self):
@@ -239,6 +255,20 @@ class VideoModule(Module):
             variable=self.volume_var, command=self.on_volume_changed
         )
         self.volume_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
+
+        # === 新增: 等化器選單 ===
+        eq_frame = ttk.Frame(content_frame)
+        eq_frame.pack(fill=tk.X, padx=5, pady=(0, 5))
+        ttk.Label(eq_frame, text="等化器:").pack(side=tk.LEFT)
+        eq_presets = [
+            "無", "音質", "低音增強", "低音減弱", "高音增強", "高音減弱", "響度 (Loudness)", "沙發音樂", "小喇叭",
+            "口語清晰", "聲音增強", "古典", "舞曲", "深沉", "電子", "饒舌", "爵士", "拉丁", "鋼琴", "流行", "R&B", "搖滾",
+            "低音增強等化器", "高音增強等化器"
+        ]
+        eq_menu = ttk.OptionMenu(
+            eq_frame, self.equalizer_mode, "無", *eq_presets, command=self.on_equalizer_changed
+        )
+        eq_menu.pack(side=tk.LEFT, padx=(5, 0))
 
         self.shared_state.log(f"UI for {self.module_name} created.", level=logging.INFO)
         self.shared_state.set(f"{self.module_name}_ready", True)
@@ -416,6 +446,98 @@ class VideoModule(Module):
             vol = float(value) / 100.0
             pygame.mixer.music.set_volume(vol)
 
+    def get_equalizer_gains(self, eq_mode):
+        """
+        根據等化器模式名稱回傳 10 段等化器的 gains (dB)。
+        可擴充多種模式。
+        """
+        eq_presets = {
+            "音質":      [2, 1, 1, 0, 0, 0, 0, 0, 1, 2],
+            "低音增強":  [6, 5, 4, 2, 0, 0, 0, 0, 0, 0],
+            "低音減弱":  [-6, -5, -4, -2, 0, 0, 0, 0, 0, 0],
+            "高音增強":  [0, 0, 0, 0, 0, 0, 0, 0, 2, 4],
+            "高音減弱":  [0, 0, 0, 0, 0, 0, 0, 0, -2, -4],
+            "響度 (Loudness)": [5, 4, 3, 0, 0, 0, 0, 0, 3, 4],
+            "沙發音樂":  [2, 1, 1, -1, -2, 0, 0, 0, 1, 2],
+            "小喇叭":    [4, 3, 2, 0, 0, 0, 0, 0, 2, 3],
+            "口語清晰":  [0, 0, 0, 1, 2, 3, 4, 3, 2, 0],
+            "聲音增強":  [0, 0, 0, 2, 3, 4, 3, 2, 0, 0],
+            "古典":      [0, 0, 2, 1, 0, 0, 0, 0, 1, 2],
+            "舞曲":      [4, 3, 2, 1, 0, 0, 0, 0, 3, 4],
+            "深沉":      [4, 3, 2, 0, 0, 0, 0, 0, -2, -4],
+            "電子":      [5, 4, 3, -2, -3, -3, -2, 0, 2, 3],
+            "饒舌":      [6, 5, 4, -1, -1, 0, 0, 0, 2, 3],
+            "爵士":      [0, 2, 2, 0, 1, 1, 2, 0, 1, 0],
+            "拉丁":      [0, 1, 2, 1, 1, 0, 1, 0, 2, 1],
+            "鋼琴":      [0, -1, -1, 1, 2, 2, 1, 0, 1, 1],
+            "流行":      [0, 0, 2, 1, 0, 0, 0, 0, 1, 2],
+            "R&B":      [4, 3, 2, 1, 0, 0, 0, 0, 2, 3],
+            "搖滾":      [1, 1, 1, 2, 3, 3, 2, 1, 2, 0],
+            "低音增強等化器": [6, 6] + [0] * 8,
+            "高音增強等化器": [0] * 8 + [6, 6],
+        }
+        if eq_mode in eq_presets:
+            return eq_presets[eq_mode]
+        else:
+            return [0] * 10
+
+    def on_equalizer_changed(self, value):
+        # 切換等化器時，重新載入當前影片（如有）
+        if self.video_loaded and self.video_filepath:
+            self.load_video_file(self.video_filepath)
+
+    # === 新增: 五段等化器 ===
+    def apply_equalizer(self, wav_path, out_path, gains=None):
+        """
+        gains: list of 10 floats, dB gain for each band
+        """
+        try:
+            if gains is None:
+                gains = [0] * 10
+            rate, data = wavfile.read(wav_path)
+            orig_dtype = data.dtype
+            data = data.astype(np.float32)
+            if data.ndim == 2:
+                for ch in range(data.shape[1]):
+                    data[:, ch] = self._ten_band_eq(data[:, ch], rate, gains)
+            else:
+                data = self._ten_band_eq(data, rate, gains)
+            data = np.clip(data, -32768, 32767).astype(orig_dtype)
+            wavfile.write(out_path, rate, data)
+        except Exception as e:
+            self.shared_state.log(f"等化器處理失敗: {e}", logging.ERROR)
+            import shutil
+            shutil.copy(wav_path, out_path)
+
+    def _ten_band_eq(self, data, rate, gains):
+        # 改為 10 段等化器
+        # 頻段定義 (Hz) - 常見 10-band EQ 頻率
+        bands = [
+            (20, 32),      # 1
+            (32, 63),      # 2
+            (63, 125),     # 3
+            (125, 250),    # 4
+            (250, 500),    # 5
+            (500, 1000),   # 6
+            (1000, 2000),  # 7
+            (2000, 4000),  # 8
+            (4000, 8000),  # 9
+            (8000, 16000)  # 10
+        ]
+        out = np.zeros_like(data, dtype=np.float32)
+        for i, (low, high) in enumerate(bands):
+            # 避免高頻超過 Nyquist 頻率
+            high = min(high, rate // 2 - 1)
+            if high <= low or high <= 0:
+                continue
+            b, a = butter(2, [low/(rate/2), high/(rate/2)], btype='band')
+            band = lfilter(b, a, data)
+            gain = 10 ** (gains[i] / 20.0)
+            out += band * gain
+        # 保留原始訊號的能量，避免過度失真
+        out = out / max(np.max(np.abs(out)), 1) * max(np.max(np.abs(data)), 1)
+        return out
+
     def load_video_file(self, filepath):
         """載入指定的影片檔案 (OpenCV/PIL 版本)"""
         self.stop_video_playback()  # 停止前一部影片
@@ -435,7 +557,7 @@ class VideoModule(Module):
                 pass
             self.audio_tempfile = None
         self.audio_loaded = False
-        
+
         # 重置音訊播放狀態
         self.reset_audio_state()
         
@@ -456,7 +578,17 @@ class VideoModule(Module):
                 temp_fd, temp_path = tempfile.mkstemp(suffix='.wav')
                 os.close(temp_fd)
                 clip.audio.write_audiofile(temp_path, logger=None)
-                self.audio_tempfile = temp_path
+                # === 取得等化器 gains 並處理 ===
+                eq_mode = self.equalizer_mode.get()
+                gains = self.get_equalizer_gains(eq_mode)
+                if any(g != 0 for g in gains):
+                    eq_fd, eq_path = tempfile.mkstemp(suffix='.wav')
+                    os.close(eq_fd)
+                    self.apply_equalizer(temp_path, eq_path, gains)
+                    os.remove(temp_path)
+                    self.audio_tempfile = eq_path
+                else:
+                    self.audio_tempfile = temp_path
                 pygame.mixer.music.load(self.audio_tempfile)
                 self.audio_loaded = True
                 # === 設定音量 ===
