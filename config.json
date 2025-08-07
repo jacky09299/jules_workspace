@@ -1,0 +1,20 @@
+[
+    {
+        "name": "Nature",
+        "rss_url": "http://www.nature.com/nature/current_issue/rss",
+        "download_method": "request",
+        "enabled": true
+    },
+    {
+        "name": "Science",
+        "rss_url": "https://www.sciencemag.org/rss/current.xml",
+        "download_method": "direct",
+        "enabled": true
+    },
+    {
+        "name": "Cell",
+        "rss_url": "https://www.cell.com/rss/current.xml",
+        "download_method": "print",
+        "enabled": false
+    }
+]
