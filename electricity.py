@@ -1105,15 +1105,22 @@ class App(tk.Tk):
         appearance_params = self._get_current_appearance_params()
         self.arc_renderer = ArcRenderer(self.canvas, appearance_params)
         self.animation_frame_index = 0
+        self.last_preview_frame_index = -1
         self.play_simulation_animation()
 
     def play_simulation_animation(self):
         if self.animation_frame_index < len(self.animation_frame_map):
             original_frame_index = self.animation_frame_map[self.animation_frame_index]
-            if original_frame_index < len(self.last_simulation_data):
-                 frame_data = self.last_simulation_data[original_frame_index]
-                 self.arc_renderer.render_frame_data(frame_data)
-                 self.raise_top_images()
+
+            frames_to_render = range(self.last_preview_frame_index + 1, original_frame_index + 1)
+            for frame_idx_to_draw in frames_to_render:
+                if frame_idx_to_draw < len(self.last_simulation_data):
+                     frame_data = self.last_simulation_data[frame_idx_to_draw]
+                     self.arc_renderer.render_frame_data(frame_data)
+
+            self.last_preview_frame_index = original_frame_index
+            self.raise_top_images()
+
             self.animation_frame_index += 1
             self.animation_job = self.after(15, self.play_simulation_animation)
         else:
