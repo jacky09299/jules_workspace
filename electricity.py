@@ -733,7 +733,7 @@ class Simulator:
             self.canvas.create_polygon(p1a, p2a, p2b, p1b, fill=color, outline="", tags="arc")
 
         # --- 4. 核心 ---
-        self.canvas.create_line(*p1, *p2, fill=segment_color, width=core_thickness, tags="arc", capstyle=tk.BUTT)
+        self.canvas.create_line(*p1, *p2, fill=segment_color, width=core_thickness, tags="arc", capstyle=tk.ROUND)
 
 
     def _get_next_point(self, current_point, current_direction):
