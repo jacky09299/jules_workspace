@@ -397,7 +397,7 @@ class ArbitraryShape(Shape):
 
 # --- 新增: 可裝飾的圖片物件 ---
 class DecorativeImage:
-    def __init__(self, canvas, x, y, pil_image):
+    def __init__(self, canvas, x, y, pil_image, app):
         self.canvas = canvas
         self.pil_image_original = pil_image.convert("RGBA")
         self.x, self.y = x, y
@@ -408,6 +408,7 @@ class DecorativeImage:
         self.outline_id = None
         self.handles = {}  # {'scale': id, 'rotate': id}
         self.shape_type = "Image"
+        self.app = app # 儲存 App 實例的引用
         self.draw()
 
     def draw(self):
@@ -545,9 +546,11 @@ class DecorativeImage:
         if layer == 'front':
             self.canvas.tag_raise(self.id)
             self.canvas.tag_raise("selection") # 同時提高選取框和控制點
+            self.app.top_images.add(self)
         elif layer == 'back':
             self.canvas.tag_lower(self.id)
-            # 選取框和控制點已經在圖片上層，所以不用動
+            if self in self.app.top_images:
+                self.app.top_images.remove(self)
 
 # --- 模擬器 (V8.0 - 動態消散模型) ---
 class Simulator:
@@ -760,6 +763,7 @@ class Simulator:
 
         self.active_arcs = next_active_arcs
         if self.active_arcs:
+            self.master.raise_top_images()
             self.master.after(10, self.step)
         else:
             self.stop()
@@ -776,6 +780,7 @@ class App(tk.Tk):
         self.selected_item = None
         self.simulator = None
         self.drag_data = {}
+        self.top_images = set() # 用於存放需要保持在最上層的圖片
 
         self.add_shape_mode = None
         self.is_creating_rod = False
@@ -922,11 +927,15 @@ class App(tk.Tk):
             # 將圖片放在畫布中央
             x = self.canvas.winfo_width() / 2
             y = self.canvas.winfo_height() / 2
-            image_obj = DecorativeImage(self.canvas, x, y, pil_image)
+            image_obj = DecorativeImage(self.canvas, x, y, pil_image, self)
             self.images.append(image_obj)
             self.select_item(image_obj)
         except Exception as e:
             messagebox.showerror("圖片載入失敗", f"無法載入圖片檔案：\n{e}")
+
+    def raise_top_images(self):
+        for img in self.top_images:
+            img.set_layer('front')
 
     def on_canvas_press(self, event):
         # 處理多邊形建立
@@ -1067,6 +1076,8 @@ class App(tk.Tk):
             self.shapes.remove(item)
         elif item in self.images:
             self.images.remove(item)
+            if item in self.top_images:
+                self.top_images.remove(item)
 
         self.select_item(None)
 
