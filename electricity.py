@@ -699,31 +699,41 @@ class Simulator:
         life_factor = max(0, min(1, life / self.arc_max_life))
 
         # --- 1. 粗細漸變 ---
-        # 越接近生命終點的電弧越細
         core_thickness = thickness * (0.2 + life_factor * 0.8)
         if core_thickness < 0.2: return
 
         # --- 2. 顏色漸變 ---
-        # 越年輕(life高)的電弧越趨近白色(核心)，越老(life低)的越趨近使用者設定的顏色
-        # life_factor = 1 -> core_color, life_factor = 0 -> base_color
         core_color = "#FFFFFF"
         segment_color = self._interpolate_color(color, core_color, life_factor)
 
-        # --- 3. 光暈效果 ---
-        # 光暈強度為0時，不繪製光暈
-        if self.arc_glow_strength > 0:
-            # 外圈光暈: 最粗，顏色為基底色與背景色的混合，模擬半透明效果
-            glow_color_outer = self._interpolate_color(BACKGROUND_COLOR, color, 0.3) # 30% 的基底色
-            glow_width_outer = core_thickness * (1 + self.arc_glow_strength * 2.5)
-            self.canvas.create_line(*p1, *p2, fill=glow_color_outer, width=glow_width_outer, tags="arc", capstyle=tk.ROUND)
+        # --- 3. 光暈效果 (多邊形) ---
+        dx, dy = p2[0] - p1[0], p2[1] - p1[1]
+        length = math.hypot(dx, dy)
+        if length < 1e-6: return # 避免除以零
 
-            # 內圈光暈: 較粗，顏色為基底色
-            glow_width_inner = core_thickness * (1 + self.arc_glow_strength * 1.2)
-            self.canvas.create_line(*p1, *p2, fill=color, width=glow_width_inner, tags="arc", capstyle=tk.ROUND)
+        # 正規化的垂直向量
+        nx, ny = -dy / length, dx / length
+
+        if self.arc_glow_strength > 0:
+            # 外圈光暈
+            glow_width_outer = core_thickness * (1 + self.arc_glow_strength * 2.5) / 2
+            p1a = (p1[0] + nx * glow_width_outer, p1[1] + ny * glow_width_outer)
+            p2a = (p2[0] + nx * glow_width_outer, p2[1] + ny * glow_width_outer)
+            p2b = (p2[0] - nx * glow_width_outer, p2[1] - ny * glow_width_outer)
+            p1b = (p1[0] - nx * glow_width_outer, p1[1] - ny * glow_width_outer)
+            glow_color_outer = self._interpolate_color(BACKGROUND_COLOR, color, 0.3)
+            self.canvas.create_polygon(p1a, p2a, p2b, p1b, fill=glow_color_outer, outline="", tags="arc")
+
+            # 內圈光暈
+            glow_width_inner = core_thickness * (1 + self.arc_glow_strength * 1.2) / 2
+            p1a = (p1[0] + nx * glow_width_inner, p1[1] + ny * glow_width_inner)
+            p2a = (p2[0] + nx * glow_width_inner, p2[1] + ny * glow_width_inner)
+            p2b = (p2[0] - nx * glow_width_inner, p2[1] - ny * glow_width_inner)
+            p1b = (p1[0] - nx * glow_width_inner, p1[1] - ny * glow_width_inner)
+            self.canvas.create_polygon(p1a, p2a, p2b, p1b, fill=color, outline="", tags="arc")
 
         # --- 4. 核心 ---
-        # 最細，顏色最亮
-        self.canvas.create_line(*p1, *p2, fill=segment_color, width=core_thickness, tags="arc", capstyle=tk.ROUND)
+        self.canvas.create_line(*p1, *p2, fill=segment_color, width=core_thickness, tags="arc", capstyle=tk.BUTT)
 
 
     def _get_next_point(self, current_point, current_direction):
