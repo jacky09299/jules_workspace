@@ -903,8 +903,8 @@ class App(tk.Tk):
             'field_exponent': 2.5,
             'final_jump_distance': 30.0,
             'arc_color': ARC_COLOR, # 電弧基礎顏色
-            'arc_max_thickness': 4.0, # 電弧最大粗細
-            'arc_glow_strength': 1.5, # 光暈強度 (乘數)
+            'arc_max_thickness': 2.0, # 電弧最大粗細
+            'arc_glow_strength': 0.4, # 光暈強度 (乘數)
             'arc_max_life': 200, # 電弧最大生命週期 (步數)
         }
 
