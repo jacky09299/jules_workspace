@@ -1377,7 +1377,8 @@ class App(tk.Tk):
                 for frame_idx_to_draw in frames_to_render:
                     if frame_idx_to_draw < len(self.last_simulation_data):
                         frame_data = self.last_simulation_data[frame_idx_to_draw]
-                        self._draw_arcs_on_pil(draw, frame_data, appearance_params, img)
+                        # The new function returns the modified image. `draw` is no longer used directly here.
+                        img = self._draw_arcs_on_pil(draw, frame_data, appearance_params, img)
 
                 last_original_frame_index = original_frame_index
 
@@ -1452,11 +1453,13 @@ class App(tk.Tk):
                     return p1[1] + ((dist - p1[0]) / r) * (p2[1] - p1[1]) if r != 0 else p1[1]
             return points[-1][1]
 
-        # 確保 background_img 是 PIL Image 且為 RGBA（方便處理 alpha）
+        # Ensure background_img is RGBA for compositing
         if background_img.mode != 'RGBA':
             background_img = background_img.convert('RGBA')
-            # 注意：若外面還有其他地方持有原圖的引用，視情況你可能要回傳這個 new image
-            # 不過通常 paste() 會就在原圖上修改（若不轉換則會直接修改）
+
+        # Create an overlay for core lines so they are drawn on top of all glows
+        core_line_overlay = Image.new('RGBA', background_img.size, (0,0,0,0))
+        core_draw = ImageDraw.Draw(core_line_overlay)
 
         for segment in frame_data:
             p1, p2, thickness, life = segment['p1'], segment['p2'], segment['thickness'], segment['life']
@@ -1473,36 +1476,48 @@ class App(tk.Tk):
                 continue
             nx, ny = -dy / length, dx / length
 
+            # --- Glow Effect ---
             if params['arc_glow_strength'] > 0:
                 max_glow_radius = core_thickness / 2 * (1 + params['arc_glow_strength'] * 3.0)
                 glow_points = params['glow_falloff_points']
+                glow_color_rgb = tuple(int(params['arc_color'].lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
+
                 for i in range(15, 0, -1):
                     dist = i / 15
                     alpha = _get_glow_alpha(dist, glow_points)
                     if alpha <= 0.01:
                         continue
-                    layer_color_str = _interpolate_color(BACKGROUND_COLOR, params['arc_color'], alpha)
-                    layer_color_rgb = (int(layer_color_str[1:3], 16),
-                                    int(layer_color_str[3:5], 16),
-                                    int(layer_color_str[5:7], 16))
+
                     layer_width = max_glow_radius * dist * 2
                     p1a = (p1[0] + nx * layer_width/2, p1[1] + ny * layer_width/2)
                     p2a = (p2[0] + nx * layer_width/2, p2[1] + ny * layer_width/2)
                     p2b = (p2[0] - nx * layer_width/2, p2[1] - ny * layer_width/2)
                     p1b = (p1[0] - nx * layer_width/2, p1[1] - ny * layer_width/2)
 
-                    # 用 background_img.size 來建立同尺寸的 poly_img
+                    # Create a temporary image for this glow layer to composite it correctly
                     poly_img = Image.new('RGBA', background_img.size, (0,0,0,0))
                     poly_draw = ImageDraw.Draw(poly_img)
-                    poly_draw.polygon([p1a, p2a, p2b, p1b], fill=layer_color_rgb + (int(alpha*255*0.5),))
 
-                    # === 這裡改用 Image.paste (在 PIL 層) 而不是 draw.im.paste ===
-                    background_img.paste(poly_img, (0, 0), poly_img)
-                    # 如果你想用 alpha_composite（速度/品質差異），可以改成：
-                    # background_img = Image.alpha_composite(background_img, poly_img)
+                    # Use pure glow color with alpha for correct blending.
+                    # Removed the 0.5 multiplier which may have made it too faint.
+                    poly_draw.polygon([p1a, p2a, p2b, p1b], fill=glow_color_rgb + (int(alpha*255),))
 
-            # 最後再用 draw 畫核心線（draw 是基於原圖的 ImageDraw）
-            draw.line([p1[0], p1[1], p2[0], p2[1]], fill=segment_color, width=int(core_thickness))
+                    # Use alpha_composite for proper additive blending of glow layers
+                    background_img = Image.alpha_composite(background_img, poly_img)
+
+            # --- Core Arc ---
+            # Draw the core line for this segment onto the separate core line overlay
+            # To fix the "rectangle" issue, we draw a circle at the end of each segment
+            # to simulate a round cap, creating a continuous line.
+            core_draw.line([p1[0], p1[1], p2[0], p2[1]], fill=segment_color, width=int(core_thickness))
+            r = core_thickness / 2
+            if r > 0:
+                 core_draw.ellipse([p2[0]-r, p2[1]-r, p2[0]+r, p2[1]+r], fill=segment_color)
+
+
+        # After all segments, composite the core lines on top of the glows
+        background_img = Image.alpha_composite(background_img, core_line_overlay)
+        return background_img
 
 
 class VideoExportDialog(simpledialog.Dialog):
