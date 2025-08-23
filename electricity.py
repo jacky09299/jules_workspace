@@ -1175,19 +1175,39 @@ class App(tk.Tk):
         bg_color = settings['bg_color']
         img_mode = 'RGBA' if settings['format'] == 'gif' and settings['transparent_bg'] else 'RGB'
         bg = (0,0,0,0) if img_mode == 'RGBA' else bg_color
-        img = Image.new(img_mode, (self.canvas.winfo_width(), self.canvas.winfo_height()), bg)
+
+        w, h = self.canvas.winfo_width(), self.canvas.winfo_height()
+        img = Image.new(img_mode, (w, h), bg)
         draw = ImageDraw.Draw(img, 'RGBA')
 
         if settings['include_conductors']: self._draw_conductors_on_pil(draw)
         if settings['include_images']: self._draw_images_on_pil(img)
 
+        last_original_frame_index = -1
+
         try:
             for i, original_frame_index in enumerate(frame_map):
-                frame_data = self.last_simulation_data[original_frame_index]
+                frames_to_render = range(last_original_frame_index + 1, original_frame_index + 1)
+                for frame_idx_to_draw in frames_to_render:
+                    if frame_idx_to_draw < len(self.last_simulation_data):
+                        frame_data = self.last_simulation_data[frame_idx_to_draw]
+                        self._draw_arcs_on_pil(draw, frame_data, appearance_params, img)
 
-                self._draw_arcs_on_pil(draw, frame_data, appearance_params, img)
+                last_original_frame_index = original_frame_index
 
-                final_frame = np.array(img.convert('RGB') if img_mode == 'RGB' else img)
+                final_frame_pil = img.convert('RGB') if img_mode == 'RGB' else img
+
+                if settings['format'] == 'mp4':
+                    fw, fh = final_frame_pil.size
+                    macro_block_size = 16
+                    if fw % macro_block_size != 0 or fh % macro_block_size != 0:
+                        new_w = (fw + macro_block_size - 1) // macro_block_size * macro_block_size
+                        new_h = (fh + macro_block_size - 1) // macro_block_size * macro_block_size
+                        padded_img = Image.new(final_frame_pil.mode, (new_w, new_h), (0,0,0))
+                        padded_img.paste(final_frame_pil, (0,0))
+                        final_frame_pil = padded_img
+
+                final_frame = np.array(final_frame_pil)
                 writer.append_data(final_frame)
 
                 progress = (i + 1) / total_new_frames * 100
