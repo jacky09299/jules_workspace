@@ -1355,7 +1355,7 @@ class App(tk.Tk):
             status_label.config(text="錯誤: 速率設定問題")
             return
 
-        writer = imageio.get_writer(filepath, fps=60, format=settings['format'], codec='libx264' if settings['format'] == 'mp4' else None, quality=10)
+        writer = imageio.get_writer(filepath, fps=60, format=settings['format'], codec='libx264' if settings['format'] == 'mp4' else None)
         appearance_params = self._get_current_appearance_params()
 
         bg_color = settings['bg_color']
