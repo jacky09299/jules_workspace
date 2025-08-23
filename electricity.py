@@ -767,7 +767,7 @@ class Simulator:
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("進階放電模擬系統 V10.0 (影片匯出)")
+        self.title("進階放電模擬系統 V10.1 (即時速率預覽)")
         self.geometry("1200x800")
 
         self.shapes, self.images = [], []
@@ -786,6 +786,18 @@ class App(tk.Tk):
         self.animation_job = None
         self.animation_frame_index = 0
         self.arc_renderer = None
+
+        # --- 新增: 分段速率控制的狀態 ---
+        self.speed_segments = []
+        self.animation_frame_map = []
+        self.total_frames = 0
+
+        # --- 新增: 分段速率UI的變數 ---
+        self.speed_control_frame = None
+        self.segment_listbox = None
+        self.start_frame_var = None
+        self.end_frame_var = None
+        self.speed_var = None
 
         self.sim_params = {
             'fork_chance': 0.015, 'path_interruption_chance': 0.005, 'step_length': 5,
@@ -830,7 +842,7 @@ class App(tk.Tk):
                 if 'arc' in key or 'glow' in key:
                     # To avoid stuttering, schedule the preview
                     if hasattr(self, '_preview_job'):
-                        self.after_cancel(self, self._preview_job)
+                        self.after_cancel(self._preview_job)
                     self._preview_job = self.after(50, self.preview_simulation)
             # A bit of a hack to make the label update on creation for float values
             if isinstance(resolution, float):
@@ -866,6 +878,12 @@ class App(tk.Tk):
         tk.Button(sim_frame, text="清除所有", command=self.clear_all).pack(fill=tk.X, pady=3)
         ttk.Separator(sim_frame).pack(fill='x', pady=5)
         tk.Button(sim_frame, text="儲存動畫...", command=self.open_export_dialog).pack(fill=tk.X, pady=3)
+
+        # --- 新增: 分段速率UI ---
+        self.speed_control_frame = ttk.LabelFrame(control_panel, text="分段速率控制")
+        self.speed_control_frame.pack(fill=tk.X, padx=10, pady=10)
+        self._create_speed_control_widgets(self.speed_control_frame)
+        self._set_speed_controls_state(tk.DISABLED) # 初始為禁用
 
         tk.Button(control_panel, text="刪除選取", command=self.delete_selected).pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=10)
         
@@ -1024,39 +1042,68 @@ class App(tk.Tk):
             simulator = Simulator(self.shapes, self.sim_params)
             canvas_size = (self.canvas.winfo_width(), self.canvas.winfo_height())
             self.last_simulation_data = simulator.run_simulation(arc_jobs, canvas_size)
-            if self.last_simulation_data: self.preview_simulation()
-        else: messagebox.showinfo("模擬資訊", "在目前的佈局和電壓設定下，沒有物體之間的電位梯度超過觸發閾值。")
+
+            if self.last_simulation_data:
+                self.total_frames = len(self.last_simulation_data)
+                self._set_speed_controls_state(tk.NORMAL)
+                self._reset_speed_segments() # This will also trigger a preview
+            else:
+                self.total_frames = 0
+                self._set_speed_controls_state(tk.DISABLED)
+                self._reset_speed_segments()
+
+        else:
+            messagebox.showinfo("模擬資訊", "在目前的佈局和電壓設定下，沒有物體之間的電位梯度超過觸發閾值。")
+            self.total_frames = 0
+            self._set_speed_controls_state(tk.DISABLED)
+            self._reset_speed_segments()
+
     def preview_simulation(self):
-        if not self.last_simulation_data: return
+        if not self.last_simulation_data:
+            self.clear_simulation()
+            return
+
         self.clear_simulation()
+        self.animation_frame_map = self._build_frame_map(self.speed_segments, self.total_frames)
+        if not self.animation_frame_map:
+            return
+
         appearance_params = self._get_current_appearance_params()
         self.arc_renderer = ArcRenderer(self.canvas, appearance_params)
-        self.animation_frame_index = 0; self.play_simulation_animation()
+        self.animation_frame_index = 0
+        self.play_simulation_animation()
+
     def play_simulation_animation(self):
-        if self.animation_frame_index < len(self.last_simulation_data):
-            # Per user request, arcs are intentionally not cleared to create an accumulating effect.
-            # self.canvas.delete("arc")
-            frame_data = self.last_simulation_data[self.animation_frame_index]
-            self.arc_renderer.render_frame_data(frame_data)
-            self.raise_top_images()
+        if self.animation_frame_index < len(self.animation_frame_map):
+            original_frame_index = self.animation_frame_map[self.animation_frame_index]
+            if original_frame_index < len(self.last_simulation_data):
+                 frame_data = self.last_simulation_data[original_frame_index]
+                 self.arc_renderer.render_frame_data(frame_data)
+                 self.raise_top_images()
             self.animation_frame_index += 1
             self.animation_job = self.after(15, self.play_simulation_animation)
-        else: self.animation_job = None
+        else:
+            self.animation_job = None
+
     def clear_simulation(self):
         if self.animation_job: self.after_cancel(self.animation_job); self.animation_job = None
         self.canvas.delete("arc")
+
     def clear_all(self):
         self.clear_simulation(); self.last_simulation_data = None; self.select_item(None)
         for item in self.shapes + self.images: item.deselect(); self.canvas.delete(item.id)
         self.shapes.clear(); self.images.clear()
+
+        self.total_frames = 0
+        self._set_speed_controls_state(tk.DISABLED)
+        self._reset_speed_segments()
 
     # --- 【新增】影片匯出功能 ---
     def open_export_dialog(self):
         if not self.last_simulation_data:
             messagebox.showerror("錯誤", "沒有可以匯出的模擬數據。\n請先『執行新模擬』。")
             return
-        # 傳入總畫格數以初始化分段速率UI
-        VideoExportDialog(self, "匯出動畫", self, len(self.last_simulation_data))
+        VideoExportDialog(self, "匯出動畫", self)
 
     def _build_frame_map(self, segments, total_original_frames):
         """根據分段速率定義，建立最終的畫格對應列表"""
@@ -1172,7 +1219,7 @@ class App(tk.Tk):
                     dist = i / 15; alpha = _get_glow_alpha(dist, glow_points)
                     if alpha <= 0.01: continue
                     layer_color_str = _interpolate_color(BACKGROUND_COLOR, params['arc_color'], alpha)
-                    layer_color_rgb = tuple(int(layer_color_str[1:3], 16), int(layer_color_str[3:5], 16), int(layer_color_str[5:7], 16))
+                    layer_color_rgb = (int(layer_color_str[1:3], 16), int(layer_color_str[3:5], 16), int(layer_color_str[5:7], 16))
                     layer_width = max_glow_radius * dist * 2
                     p1a = (p1[0] + nx * layer_width/2, p1[1] + ny * layer_width/2); p2a = (p2[0] + nx * layer_width/2, p2[1] + ny * layer_width/2)
                     p2b = (p2[0] - nx * layer_width/2, p2[1] - ny * layer_width/2); p1b = (p1[0] - nx * layer_width/2, p1[1] - ny * layer_width/2)
@@ -1181,16 +1228,138 @@ class App(tk.Tk):
                     draw.im.paste(poly_img, (0,0), poly_img)
             draw.line([p1, p2], fill=segment_color, width=int(core_thickness), joint=None)
 
+    # --- 【新增】分段速率控制相關方法 ---
+    def _create_speed_control_widgets(self, parent_frame):
+        """在指定的父框架中建立速率控制UI"""
+        list_frame = tk.Frame(parent_frame, bg=CONTROL_PANEL_BG); list_frame.pack(fill=tk.X, pady=2, padx=5)
+        self.segment_listbox = tk.Listbox(list_frame, height=3, bg=BACKGROUND_COLOR, fg="white", selectbackground="#0074D9");
+        self.segment_listbox.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.segment_listbox.bind('<<ListboxSelect>>', self._on_segment_select)
+
+        edit_frame = tk.Frame(parent_frame, bg=CONTROL_PANEL_BG); edit_frame.pack(fill=tk.X, pady=3, padx=5)
+        tk.Label(edit_frame, text="從:", bg=CONTROL_PANEL_BG).pack(side=tk.LEFT); self.start_frame_var = tk.StringVar(); tk.Entry(edit_frame, textvariable=self.start_frame_var, width=6).pack(side=tk.LEFT, padx=(0,5))
+        tk.Label(edit_frame, text="到:", bg=CONTROL_PANEL_BG).pack(side=tk.LEFT); self.end_frame_var = tk.StringVar(); tk.Entry(edit_frame, textvariable=self.end_frame_var, width=6).pack(side=tk.LEFT, padx=(0,5))
+        tk.Label(edit_frame, text="速率:", bg=CONTROL_PANEL_BG).pack(side=tk.LEFT); self.speed_var = tk.StringVar(); tk.Entry(edit_frame, textvariable=self.speed_var, width=5).pack(side=tk.LEFT)
+
+        btn_frame = tk.Frame(parent_frame, bg=CONTROL_PANEL_BG); btn_frame.pack(fill=tk.X, padx=5)
+        tk.Button(btn_frame, text="更新", command=self._update_segment).pack(side=tk.LEFT, padx=2)
+        tk.Button(btn_frame, text="新增片段", command=self._add_segment).pack(side=tk.LEFT, padx=2)
+        tk.Button(btn_frame, text="移除片段", command=self._remove_segment).pack(side=tk.LEFT, padx=2)
+
+    def _set_speed_controls_state(self, state):
+        """啟用或禁用速率控制UI的所有子元件"""
+        # Recursively set state for all children of the frame
+        for widget in self.speed_control_frame.winfo_children():
+            # Check for specific widget types to configure
+            if isinstance(widget, (tk.Frame, tk.LabelFrame)):
+                 for sub_widget in widget.winfo_children():
+                    if isinstance(sub_widget, (tk.Button, tk.Entry, tk.Listbox)):
+                        sub_widget.config(state=state)
+            elif isinstance(widget, (tk.Button, tk.Entry, tk.Listbox)):
+                widget.config(state=state)
+
+        # Special handling for Listbox background color to indicate disabled state
+        if self.segment_listbox:
+            self.segment_listbox.config(bg=BACKGROUND_COLOR if state == tk.NORMAL else "#333333")
+
+    def _reset_speed_segments(self):
+        """重置分段速率為預設值 (單一段落涵蓋所有畫格)"""
+        if self.total_frames > 0:
+            self.speed_segments = [{'start': 1, 'end': self.total_frames, 'speed': 1.0}]
+        else:
+            self.speed_segments = []
+        self._refresh_segment_list()
+
+    def _refresh_segment_list(self):
+        if not self.segment_listbox: return
+        self.segment_listbox.delete(0, tk.END)
+        self.speed_segments.sort(key=lambda s: s['start'])
+
+        # 填補空白區域
+        filled_segments = []
+        last_end = 0
+        for seg in self.speed_segments:
+            if seg['start'] > last_end + 1:
+                filled_segments.append({'start': last_end + 1, 'end': seg['start'] - 1, 'speed': 1.0})
+            filled_segments.append(seg)
+            last_end = seg['end']
+        if self.total_frames > 0 and last_end < self.total_frames:
+            filled_segments.append({'start': last_end + 1, 'end': self.total_frames, 'speed': 1.0})
+        self.speed_segments = filled_segments
+
+        for seg in self.speed_segments:
+            self.segment_listbox.insert(tk.END, f"畫格 {seg['start']}-{seg['end']} @ {seg['speed']:.1f}x")
+
+        # 自動觸發預覽更新
+        if self.last_simulation_data:
+            if hasattr(self, '_preview_job'): self.after_cancel(self._preview_job)
+            self._preview_job = self.after(50, self.preview_simulation)
+
+    def _on_segment_select(self, event):
+        selection = event.widget.curselection()
+        if not selection: return
+        idx = selection[0]
+        try:
+            seg = self.speed_segments[idx]
+            self.start_frame_var.set(str(seg['start']))
+            self.end_frame_var.set(str(seg['end']))
+            self.speed_var.set(f"{seg['speed']:.1f}")
+        except IndexError:
+            # This can happen if the listbox is updated while a selection event is pending
+            pass
+
+    def _validate_speed_inputs(self):
+        try:
+            start, end = int(self.start_frame_var.get()), int(self.end_frame_var.get())
+            speed = float(self.speed_var.get())
+            if not (1 <= start and start <= end and end <= self.total_frames and 0.1 <= speed <= 10.0):
+                 raise ValueError("輸入值超出範圍")
+            return start, end, speed
+        except (ValueError, TypeError):
+            messagebox.showerror("輸入錯誤", f"請檢查輸入。\n畫格範圍必須在 [1, {self.total_frames}] 內。\n速率必須是 0.1 到 10.0 之間的數字。")
+            return None, None, None
+
+    def _add_segment(self):
+        start, end, speed = self._validate_speed_inputs()
+        if start is None: return
+
+        # 移除任何與新片段重疊的舊片段
+        self.speed_segments = [s for s in self.speed_segments if s['end'] < start or s['start'] > end]
+        self.speed_segments.append({'start': start, 'end': end, 'speed': speed})
+        self._refresh_segment_list()
+
+    def _update_segment(self):
+        selection = self.segment_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("操作無效", "請先從列表中選擇一個片段進行更新。");
+            return
+
+        selected_idx = selection[0]
+        start, end, speed = self._validate_speed_inputs()
+        if start is None: return
+
+        # 移除舊片段，新增更新後的片段
+        self.speed_segments.pop(selected_idx)
+        self.speed_segments = [s for s in self.speed_segments if s['end'] < start or s['start'] > end]
+        self.speed_segments.append({'start': start, 'end': end, 'speed': speed})
+        self._refresh_segment_list()
+
+    def _remove_segment(self):
+        selection = self.segment_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("操作無效", "請先從列表中選擇一個片段進行移除。");
+            return
+        self.speed_segments.pop(selection[0])
+        self._refresh_segment_list()
+
+
 class VideoExportDialog(simpledialog.Dialog):
-    def __init__(self, parent, title, app_ref, total_frames):
+    def __init__(self, parent, title, app_ref):
         self.app = app_ref
-        self.total_frames = total_frames
-        self.speed_segments = [{'start': 1, 'end': total_frames, 'speed': 1.0}]
         super().__init__(parent, title)
 
     def body(self, master):
         master.pack_configure(padx=10, pady=10)
-        # ... Other frames for path, content, etc. are the same and omitted for brevity ...
         path_frame = ttk.LabelFrame(master, text="儲存位置與格式"); path_frame.pack(fill=tk.X, pady=5); path_frame.columnconfigure(1, weight=1)
         self.path_var = tk.StringVar(); tk.Entry(path_frame, textvariable=self.path_var).grid(row=0, column=1, sticky="ew", padx=5, pady=5)
         tk.Button(path_frame, text="瀏覽...", command=self._browse_file).grid(row=0, column=2, padx=5)
@@ -1204,81 +1373,10 @@ class VideoExportDialog(simpledialog.Dialog):
         self.bg_preview = tk.Frame(content_frame, width=24, height=24, bg=self.bg_color_var.get(), relief=tk.SUNKEN, borderwidth=1); self.bg_preview.pack(side=tk.LEFT)
         self.transparent_bg = tk.BooleanVar(value=False); self.transparent_check = tk.Checkbutton(content_frame, text="透明背景 (GIF)", variable=self.transparent_bg, state=tk.DISABLED); self.transparent_check.pack(side=tk.LEFT, padx=5)
 
-        # --- 分段速率UI ---
-        speed_frame = ttk.LabelFrame(master, text=f"分段速率 (總畫格: {self.total_frames})")
-        speed_frame.pack(fill=tk.X, pady=5)
-
-        list_frame = tk.Frame(speed_frame); list_frame.pack(fill=tk.X, pady=5)
-        self.segment_listbox = tk.Listbox(list_frame, height=4); self.segment_listbox.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        self.segment_listbox.bind('<<ListboxSelect>>', self._on_segment_select)
-
-        edit_frame = tk.Frame(speed_frame); edit_frame.pack(fill=tk.X, pady=5)
-        tk.Label(edit_frame, text="從:").pack(side=tk.LEFT); self.start_frame_var = tk.StringVar(); tk.Entry(edit_frame, textvariable=self.start_frame_var, width=6).pack(side=tk.LEFT)
-        tk.Label(edit_frame, text="到:").pack(side=tk.LEFT); self.end_frame_var = tk.StringVar(); tk.Entry(edit_frame, textvariable=self.end_frame_var, width=6).pack(side=tk.LEFT)
-        tk.Label(edit_frame, text="速率:").pack(side=tk.LEFT); self.speed_var = tk.StringVar(); tk.Entry(edit_frame, textvariable=self.speed_var, width=5).pack(side=tk.LEFT)
-
-        btn_frame = tk.Frame(speed_frame); btn_frame.pack(fill=tk.X)
-        tk.Button(btn_frame, text="新增", command=self._add_segment).pack(side=tk.LEFT, padx=2)
-        tk.Button(btn_frame, text="更新", command=self._update_segment).pack(side=tk.LEFT, padx=2)
-        tk.Button(btn_frame, text="移除", command=self._remove_segment).pack(side=tk.LEFT, padx=2)
-
-        self._refresh_segment_list()
-
         progress_frame = ttk.LabelFrame(master, text="進度"); progress_frame.pack(fill=tk.X, pady=10)
         self.status_label = tk.Label(progress_frame, text="準備就緒"); self.status_label.pack(fill=tk.X, padx=5, pady=2)
         self.progress_var = tk.DoubleVar(); progress_bar = ttk.Progressbar(progress_frame, variable=self.progress_var, maximum=100); progress_bar.pack(fill=tk.X, padx=5, pady=5)
         return None
-
-    def _refresh_segment_list(self):
-        self.segment_listbox.delete(0, tk.END)
-        self.speed_segments.sort(key=lambda s: s['start'])
-        for seg in self.speed_segments:
-            self.segment_listbox.insert(tk.END, f"畫格 {seg['start']}-{seg['end']} @ {seg['speed']:.1f}x")
-
-    def _on_segment_select(self, event):
-        selection = event.widget.curselection()
-        if not selection: return
-        idx = selection[0]
-        seg = self.speed_segments[idx]
-        self.start_frame_var.set(str(seg['start']))
-        self.end_frame_var.set(str(seg['end']))
-        self.speed_var.set(f"{seg['speed']:.1f}")
-
-    def _validate_inputs(self):
-        try:
-            start, end = int(self.start_frame_var.get()), int(self.end_frame_var.get())
-            speed = float(self.speed_var.get())
-            if not (1 <= start <= end <= self.total_frames and 0.1 <= speed <= 10.0): raise ValueError
-            return start, end, speed
-        except ValueError:
-            messagebox.showerror("輸入錯誤", "請檢查輸入。\n畫格範圍必須在 [1, 總畫格數] 內。\n速率必須是 0.1 到 10.0 之間的數字。")
-            return None, None, None
-
-    def _add_segment(self):
-        start, end, speed = self._validate_inputs()
-        if start is None: return
-        # 簡單的重疊檢查: 移除任何與新片段重疊的舊片段
-        self.speed_segments = [s for s in self.speed_segments if s['end'] < start or s['start'] > end]
-        self.speed_segments.append({'start': start, 'end': end, 'speed': speed})
-        self._refresh_segment_list()
-
-    def _update_segment(self):
-        selection = self.segment_listbox.curselection()
-        if not selection: messagebox.showwarning("操作無效", "請先從列表中選擇一個片段進行更新。"); return
-        idx = selection[0]
-        start, end, speed = self._validate_inputs()
-        if start is None: return
-        # 移除舊片段，新增更新後的片段
-        self.speed_segments.pop(idx)
-        self.speed_segments = [s for s in self.speed_segments if s['end'] < start or s['start'] > end]
-        self.speed_segments.append({'start': start, 'end': end, 'speed': speed})
-        self._refresh_segment_list()
-
-    def _remove_segment(self):
-        selection = self.segment_listbox.curselection()
-        if not selection: messagebox.showwarning("操作無效", "請先從列表中選擇一個片段進行移除。"); return
-        self.speed_segments.pop(selection[0])
-        self._refresh_segment_list()
 
     def buttonbox(self):
         box = tk.Frame(self)
@@ -1301,22 +1399,13 @@ class VideoExportDialog(simpledialog.Dialog):
         if self.format_var.get() != 'gif': self.transparent_bg.set(False)
 
     def ok_pressed(self):
-        # 確保片段列表是完整的，填補空白
-        self.speed_segments.sort(key=lambda s: s['start'])
-        filled_segments = []
-        last_end = 0
-        for seg in self.speed_segments:
-            if seg['start'] > last_end + 1: filled_segments.append({'start': last_end + 1, 'end': seg['start'] - 1, 'speed': 1.0})
-            filled_segments.append(seg)
-            last_end = seg['end']
-        if last_end < self.total_frames: filled_segments.append({'start': last_end + 1, 'end': self.total_frames, 'speed': 1.0})
-        self.speed_segments = filled_segments
-
+        # The app now manages the speed segments. The dialog just uses them.
+        # The app's refresh logic already fills gaps, so we can use the segments directly.
         self.settings = {
             'filepath': self.path_var.get(), 'format': self.format_var.get(),
             'include_conductors': self.include_conductors.get(), 'include_images': self.include_images.get(),
             'bg_color': self.bg_color_var.get(), 'transparent_bg': self.transparent_bg.get(),
-            'speed_segments': self.speed_segments
+            'speed_segments': self.app.speed_segments
         }
         self.ok_button.config(state=tk.DISABLED)
         self.app.export_video(self.settings, self.progress_var, self.status_label)
