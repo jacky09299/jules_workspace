@@ -563,7 +563,12 @@ class Simulator:
                  probe_angle=120,
                  field_exponent=2.0,
                  final_jump_distance=30.0,
-                 arc_threshold=150.0): # --- 【修改】 --- 新增 arc_threshold
+                 arc_threshold=150.0,
+                 # --- 【新增】 --- 外觀參數
+                 arc_color="#7FDBFF",
+                 arc_max_thickness=4.0,
+                 arc_max_life=200,
+                 arc_glow_strength=1.5):
         self.master = master
         self.canvas = canvas
         self.all_shapes = all_shapes
@@ -573,6 +578,7 @@ class Simulator:
         self.active_arcs = []
         self.is_running = False
 
+        # --- 模擬參數 ---
         self.fork_chance = fork_chance
         self.path_interruption_chance = path_interruption_chance
         self.step_length = step_length
@@ -580,7 +586,13 @@ class Simulator:
         self.probe_angle_rad = math.radians(probe_angle)
         self.field_exponent = field_exponent
         self.final_jump_distance = final_jump_distance
-        self.arc_threshold = arc_threshold # --- 【新增】 ---
+        self.arc_threshold = arc_threshold
+
+        # --- 【新增】--- 外觀參數 ---
+        self.arc_color = arc_color
+        self.arc_max_thickness = arc_max_thickness
+        self.arc_max_life = arc_max_life
+        self.arc_glow_strength = arc_glow_strength
 
     def _calculate_electric_field_at(self, p_x, p_y):
         total_ex, total_ey = 0.0, 0.0
@@ -644,9 +656,12 @@ class Simulator:
                 ex, ey = self._calculate_electric_field_at(*best_start_point)
                 mag = math.hypot(ex, ey)
                 initial_direction = (ex/mag, ey/mag) if mag > 1e-9 else (1, 0)
+                # --- 【修改】 --- 使用新的資料結構
                 self.active_arcs.append({
                     'current': best_start_point, 
-                    'direction': initial_direction
+                    'direction': initial_direction,
+                    'thickness': self.arc_max_thickness,
+                    'life': self.arc_max_life
                 })
 
         if not self.active_arcs:
@@ -658,6 +673,58 @@ class Simulator:
 
     def stop(self):
         self.is_running = False
+
+    def _interpolate_color(self, color1, color2, factor):
+        """在兩個十六進位顏色之間進行線性內插"""
+        try:
+            # 將 #RRGGBB 轉為 (r, g, b)
+            r1, g1, b1 = int(color1[1:3], 16), int(color1[3:5], 16), int(color1[5:7], 16)
+            r2, g2, b2 = int(color2[1:3], 16), int(color2[3:5], 16), int(color2[5:7], 16)
+
+            # 內插
+            r = int(r1 + (r2 - r1) * factor)
+            g = int(g1 + (g2 - g1) * factor)
+            b = int(b1 + (b2 - b1) * factor)
+
+            # 轉回 #RRGGBB 格式
+            return f"#{r:02x}{g:02x}{b:02x}"
+        except (ValueError, IndexError):
+            # 如果顏色格式錯誤，返回一個預設顏色
+            return color1
+
+    def _draw_arc_segment(self, p1, p2, thickness, life, color):
+        """繪製具有光暈、顏色和粗細漸變的單一段電弧"""
+        if thickness < 0.2: return
+
+        life_factor = max(0, min(1, life / self.arc_max_life))
+
+        # --- 1. 粗細漸變 ---
+        # 越接近生命終點的電弧越細
+        core_thickness = thickness * (0.2 + life_factor * 0.8)
+        if core_thickness < 0.2: return
+
+        # --- 2. 顏色漸變 ---
+        # 越年輕(life高)的電弧越趨近白色(核心)，越老(life低)的越趨近使用者設定的顏色
+        # life_factor = 1 -> core_color, life_factor = 0 -> base_color
+        core_color = "#FFFFFF"
+        segment_color = self._interpolate_color(color, core_color, life_factor)
+
+        # --- 3. 光暈效果 ---
+        # 光暈強度為0時，不繪製光暈
+        if self.arc_glow_strength > 0:
+            # 外圈光暈: 最粗，顏色為基底色與背景色的混合，模擬半透明效果
+            glow_color_outer = self._interpolate_color(BACKGROUND_COLOR, color, 0.3) # 30% 的基底色
+            glow_width_outer = core_thickness * (1 + self.arc_glow_strength * 2.5)
+            self.canvas.create_line(*p1, *p2, fill=glow_color_outer, width=glow_width_outer, tags="arc", capstyle=tk.ROUND)
+
+            # 內圈光暈: 較粗，顏色為基底色
+            glow_width_inner = core_thickness * (1 + self.arc_glow_strength * 1.2)
+            self.canvas.create_line(*p1, *p2, fill=color, width=glow_width_inner, tags="arc", capstyle=tk.ROUND)
+
+        # --- 4. 核心 ---
+        # 最細，顏色最亮
+        self.canvas.create_line(*p1, *p2, fill=segment_color, width=core_thickness, tags="arc", capstyle=tk.ROUND)
+
 
     def _get_next_point(self, current_point, current_direction):
         base_angle = math.atan2(current_direction[1], current_direction[0])
@@ -696,8 +763,15 @@ class Simulator:
 
         next_active_arcs = []
         for arc_data in self.active_arcs:
+            # --- 【修改】 --- 解構新的資料
             current_point = arc_data['current']
             current_direction = arc_data['direction']
+            thickness = arc_data['thickness']
+            life = arc_data['life']
+
+            # 生命為0或厚度太小的電弧直接消散
+            if life <= 0 or thickness < 0.5:
+                continue
             
             # --- 【修改】 --- 根據電場強度動態計算中斷機率
             # 電場越弱，電弧越容易在空氣中消散
@@ -732,7 +806,8 @@ class Simulator:
                 
                 if closest_point:
                     # 找到了一個在跳躍距離內的點，直接連接並終止此電弧
-                    self.canvas.create_line(*current_point, *closest_point, fill=ARC_COLOR, width=3, tags="arc")
+                    # --- 【修改】 --- 使用動態粗細和顏色, 並傳入 life
+                    self._draw_arc_segment(current_point, closest_point, thickness * 1.5, life, self.arc_color)
                     jump_occurred = True
             
             if jump_occurred:
@@ -751,15 +826,31 @@ class Simulator:
             if next_point is None:
                 continue
 
-            self.canvas.create_line(*current_point, *next_point, fill=ARC_COLOR, width=2, tags="arc")
-            next_active_arcs.append({'current': next_point, 'direction': next_direction})
+            # --- 【修改】 --- 使用動態粗細和顏色, 並傳入 life
+            segment_thickness = thickness
+            self._draw_arc_segment(current_point, next_point, segment_thickness, life, self.arc_color)
+            # --- 【修改】 --- 傳遞新的資料結構
+            next_active_arcs.append({
+                'current': next_point,
+                'direction': next_direction,
+                'thickness': thickness, # 主幹粗細不變
+                'life': life - 1
+            })
 
             # 隨機分岔
             if random.random() < self.fork_chance:
                 fork_point, fork_direction = self._get_next_point(current_point, current_direction)
                 if fork_point:
-                    self.canvas.create_line(*current_point, *fork_point, fill=ARC_COLOR, width=1, tags="arc")
-                    next_active_arcs.append({'current': fork_point, 'direction': fork_direction})
+                    # --- 【修改】 --- 使用動態粗細和顏色, 並傳入 life
+                    fork_thickness = thickness * 0.7
+                    self._draw_arc_segment(current_point, fork_point, fork_thickness, life, self.arc_color)
+                    # --- 【修改】 --- 分岔後粗細和生命週期會衰減
+                    next_active_arcs.append({
+                        'current': fork_point,
+                        'direction': fork_direction,
+                        'thickness': fork_thickness, # 分岔變細
+                        'life': life - 1
+                    })
 
         self.active_arcs = next_active_arcs
         if self.active_arcs:
@@ -791,6 +882,7 @@ class App(tk.Tk):
         self.closing_line_id = None
         
         # --- 【修改】 --- 新增 final_jump_distance 參數
+        # --- 【修改】 --- 新增電弧外觀參數
         self.sim_params = {
             'fork_chance': 0.015,
             'path_interruption_chance': 0.005,
@@ -798,8 +890,12 @@ class App(tk.Tk):
             'arc_threshold_v_pixel': 150.0,
             'probe_count': 15,
             'probe_angle': 120,
-            'field_exponent': 2.5, # 稍微提高預設值以增強導向性
-            'final_jump_distance': 30.0 # --- 【新增】 ---
+            'field_exponent': 2.5,
+            'final_jump_distance': 30.0,
+            'arc_color': ARC_COLOR, # 電弧基礎顏色
+            'arc_max_thickness': 4.0, # 電弧最大粗細
+            'arc_glow_strength': 1.5, # 光暈強度 (乘數)
+            'arc_max_life': 200, # 電弧最大生命週期 (步數)
         }
 
         self.create_widgets()
@@ -851,6 +947,21 @@ class App(tk.Tk):
         # --- 【新增】 --- 新增UI滑桿
         add_bar("最終跳躍(px)", 'final_jump_distance', param_frame, 0, 100, 1, "{:.0f}", 7)
 
+        # --- 【新增】 --- 電弧外觀控制
+        appearance_frame = tk.LabelFrame(control_panel, text="電弧外觀", padx=10, pady=10, bg=CONTROL_PANEL_BG)
+        appearance_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        # 顏色選擇
+        color_frame = tk.Frame(appearance_frame, bg=CONTROL_PANEL_BG)
+        color_frame.pack(fill=tk.X, pady=2)
+        tk.Button(color_frame, text="電弧顏色", command=self._choose_arc_color).pack(side=tk.LEFT, expand=True, fill=tk.X)
+        self.arc_color_preview = tk.Frame(color_frame, width=24, height=24, bg=self.sim_params['arc_color'], relief=tk.SUNKEN, borderwidth=1)
+        self.arc_color_preview.pack(side=tk.RIGHT, padx=(5,0))
+
+        # 粗細和光暈
+        add_bar("電弧粗細", 'arc_max_thickness', appearance_frame, 1, 20, 0.5, "{:.1f}", 8)
+        add_bar("光暈強度", 'arc_glow_strength', appearance_frame, 0.0, 5.0, 0.1, "{:.1f}", 9)
+
 
         sim_frame = tk.LabelFrame(control_panel, text="模擬控制", padx=10, pady=10, bg=CONTROL_PANEL_BG)
         sim_frame.pack(fill=tk.X, padx=10, pady=10)
@@ -867,6 +978,13 @@ class App(tk.Tk):
         self.canvas.bind("<Motion>", self.on_canvas_motion)
         self.canvas.bind("<Button-3>", self.on_canvas_right_click)
         self.bind("<Escape>", self.cancel_creation_mode)
+
+    def _choose_arc_color(self):
+        from tkinter import colorchooser
+        color_code = colorchooser.askcolor(title="選擇電弧顏色", initialcolor=self.sim_params['arc_color'])
+        if color_code and color_code[1]:
+            self.sim_params['arc_color'] = color_code[1]
+            self.arc_color_preview.config(bg=color_code[1])
 
     def on_canvas_right_click(self, event):
         # 如果正在建立任意形狀，右鍵是取消
@@ -1114,7 +1232,12 @@ class App(tk.Tk):
                 probe_angle=self.sim_params['probe_angle'],
                 field_exponent=self.sim_params['field_exponent'],
                 final_jump_distance=self.sim_params['final_jump_distance'],
-                arc_threshold=self.sim_params['arc_threshold_v_pixel']
+                arc_threshold=self.sim_params['arc_threshold_v_pixel'],
+                # --- 【新增】 --- 傳入外觀參數
+                arc_color=self.sim_params['arc_color'],
+                arc_max_thickness=self.sim_params['arc_max_thickness'],
+                arc_max_life=int(self.sim_params['arc_max_life']),
+                arc_glow_strength=self.sim_params['arc_glow_strength']
             )
             self.simulator.start(arc_jobs)
         else:
