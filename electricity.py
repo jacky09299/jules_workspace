@@ -1,9 +1,11 @@
 import tkinter as tk
-from tkinter import ttk, simpledialog, messagebox, filedialog
-from PIL import Image, ImageTk
+from tkinter import ttk, simpledialog, messagebox, filedialog, colorchooser
+from PIL import Image, ImageTk, ImageDraw
 import math
 import random
 import itertools
+import imageio
+import numpy as np
 
 # --- 常數設定 ---
 HV_COLOR = "#FF4136"  # 高壓顏色 (紅色)
@@ -552,115 +554,144 @@ class DecorativeImage:
             if self in self.app.top_images:
                 self.app.top_images.remove(self)
 
-# --- 模擬器 (V8.0 - 動態消散模型) ---
-class Simulator:
-    # --- 【修改】 --- 新增 final_jump_distance 參數
-    def __init__(self, master, canvas, all_shapes,
-                 fork_chance=0.015,
-                 path_interruption_chance=0.005,
-                 step_length=5,
-                 probe_count=15,
-                 probe_angle=120,
-                 field_exponent=2.0,
-                 final_jump_distance=30.0,
-                 arc_threshold=150.0,
-                 # --- 【新增】 --- 外觀參數
-                 arc_color="#7FDBFF",
-                 arc_max_thickness=4.0,
-                 arc_max_life=200,
-                 arc_glow_strength=1.5,
-                 # --- 【新增】 --- 光暈輪廓參數
-                 glow_falloff_1=0.7,
-                 glow_falloff_2=0.3,
-                 glow_falloff_3=0.1,
-                 glow_falloff_4=0.0):
-        self.master = master
+# --- 【新增】電弧彩現器 ---
+class ArcRenderer:
+    def __init__(self, canvas, appearance_params):
         self.canvas = canvas
+        self.params = appearance_params
+
+    def _interpolate_color(self, color1, color2, factor):
+        try:
+            r1, g1, b1 = int(color1[1:3], 16), int(color1[3:5], 16), int(color1[5:7], 16)
+            r2, g2, b2 = int(color2[1:3], 16), int(color2[3:5], 16), int(color2[5:7], 16)
+            r = int(r1 + (r2 - r1) * factor)
+            g = int(g1 + (g2 - g1) * factor)
+            b = int(b1 + (b2 - b1) * factor)
+            return f"#{r:02x}{g:02x}{b:02x}"
+        except (ValueError, IndexError):
+            return color1
+
+    def _get_glow_alpha_from_profile(self, normalized_dist, glow_falloff_points):
+        normalized_dist = max(0, min(1, normalized_dist))
+        for i in range(len(glow_falloff_points) - 1):
+            p1, p2 = glow_falloff_points[i], glow_falloff_points[i+1]
+            if p1[0] <= normalized_dist <= p2[0]:
+                dist_range = p2[0] - p1[0]
+                if dist_range == 0: return p1[1]
+                local_factor = (normalized_dist - p1[0]) / dist_range
+                return p1[1] + local_factor * (p2[1] - p1[1])
+        return glow_falloff_points[-1][1]
+
+    def _draw_arc_segment(self, segment_data):
+        p1, p2 = segment_data['p1'], segment_data['p2']
+        thickness, life = segment_data['thickness'], segment_data['life']
+
+        if thickness < 0.2: return
+
+        life_factor = max(0, min(1, life / self.params['arc_max_life']))
+        core_thickness = thickness * (0.2 + life_factor * 0.8)
+        if core_thickness < 0.2: return
+
+        segment_color = self._interpolate_color(self.params['arc_color'], "#FFFFFF", life_factor)
+
+        dx, dy = p2[0] - p1[0], p2[1] - p1[1]
+        length = math.hypot(dx, dy)
+        if length < 1e-6: return
+        nx, ny = -dy / length, dx / length
+
+        if self.params['arc_glow_strength'] > 0:
+            num_glow_layers = 15
+            max_glow_radius = core_thickness / 2 * (1 + self.params['arc_glow_strength'] * 3.0)
+            glow_falloff_points = self.params['glow_falloff_points']
+
+            for i in range(num_glow_layers, 0, -1):
+                normalized_dist = i / num_glow_layers
+                alpha = self._get_glow_alpha_from_profile(normalized_dist, glow_falloff_points)
+                if alpha <= 0.01: continue
+
+                layer_color = self._interpolate_color(BACKGROUND_COLOR, self.params['arc_color'], alpha)
+                layer_width = max_glow_radius * normalized_dist * 2
+
+                p1a = (p1[0] + nx * layer_width/2, p1[1] + ny * layer_width/2)
+                p2a = (p2[0] + nx * layer_width/2, p2[1] + ny * layer_width/2)
+                p2b = (p2[0] - nx * layer_width/2, p2[1] - ny * layer_width/2)
+                p1b = (p1[0] - nx * layer_width/2, p1[1] - ny * layer_width/2)
+                self.canvas.create_polygon(p1a, p2a, p2b, p1b, fill=layer_color, outline="", tags="arc")
+
+        self.canvas.create_line(*p1, *p2, fill=segment_color, width=core_thickness, tags="arc", capstyle=tk.ROUND)
+
+    def render_frame_data(self, frame_data):
+        for segment in frame_data:
+            self._draw_arc_segment(segment)
+
+# --- 模擬器 (V9.0 - 資料導向模型) ---
+class Simulator:
+    def __init__(self, all_shapes, sim_params):
         self.all_shapes = all_shapes
+        self.params = sim_params
         self.target_shapes = []
-        self.target_points = {} # --- 【新增】 --- 用於緩存目標點位，提高效率
-        
+        self.target_points = {}
         self.active_arcs = []
-        self.is_running = False
-
-        # --- 模擬參數 ---
-        self.fork_chance = fork_chance
-        self.path_interruption_chance = path_interruption_chance
-        self.step_length = step_length
-        self.probe_count = probe_count
-        self.probe_angle_rad = math.radians(probe_angle)
-        self.field_exponent = field_exponent
-        self.final_jump_distance = final_jump_distance
-        self.arc_threshold = arc_threshold
-
-        # --- 【新增】--- 外觀參數 ---
-        self.arc_color = arc_color
-        self.arc_max_thickness = arc_max_thickness
-        self.arc_max_life = arc_max_life
-        self.arc_glow_strength = arc_glow_strength
-        # --- 【新增】 --- 儲存光暈輪廓點
-        self.glow_falloff_points = [
-            (0.0, 1.0), # 核心是不透明的
-            (0.25, glow_falloff_1),
-            (0.5, glow_falloff_2),
-            (0.75, glow_falloff_3),
-            (1.0, glow_falloff_4)
-        ]
+        self.simulation_data = [] # 儲存每一幀的電弧線段
 
     def _calculate_electric_field_at(self, p_x, p_y):
         total_ex, total_ey = 0.0, 0.0
-        
         for shape in self.all_shapes:
-            # 使用一個簡化的點電荷模型
             charge_points = shape.get_emission_points()
-
             if not charge_points: continue
-            
-            # 簡化處理：將總電壓均分給每個點
             point_voltage = shape.voltage / len(charge_points)
-
             for (cx, cy) in charge_points:
                 dx, dy = p_x - cx, p_y - cy
                 dist_sq = dx*dx + dy*dy
-                
-                if dist_sq < 1.0: continue # 避免在點內部計算導致無窮大
-                
+                if dist_sq < 1.0: continue
                 inv_dist_cubed = dist_sq**(-1.5)
                 ex = point_voltage * dx * inv_dist_cubed
                 ey = point_voltage * dy * inv_dist_cubed
-                
                 total_ex += ex
                 total_ey += ey
-                
         return total_ex, total_ey
 
-    def start(self, arc_jobs):
+    def _get_next_point(self, current_point, current_direction):
+        base_angle = math.atan2(current_direction[1], current_direction[0])
+        probes, weights = [], []
+        probe_angle_rad = math.radians(self.params['probe_angle'])
+        
+        for i in range(int(self.params['probe_count'])):
+            angle_offset = (i / (self.params['probe_count'] - 1) - 0.5) * probe_angle_rad if self.params['probe_count'] > 1 else 0
+            angle = base_angle + angle_offset
+            probe_x = current_point[0] + self.params['step_length'] * math.cos(angle)
+            probe_y = current_point[1] + self.params['step_length'] * math.sin(angle)
+            ex, ey = self._calculate_electric_field_at(probe_x, probe_y)
+            field_projection = ex * math.cos(angle) + ey * math.sin(angle)
+            if field_projection > 0:
+                probes.append(((probe_x, probe_y), (math.cos(angle), math.sin(angle))))
+                weights.append(field_projection ** self.params['field_exponent'])
+        
+        if not weights or sum(weights) == 0: return None, None
+        return random.choices(probes, weights=weights, k=1)[0]
+
+    def run_simulation(self, arc_jobs, canvas_size):
         if not arc_jobs:
             print("警告：沒有符合放電條件的物體配對。")
-            return
-        
+            return []
+
         self.target_shapes = list(set(job['target'] for job in arc_jobs))
         self.active_arcs = []
-        
-        # --- 【新增】 --- 預先計算所有目標的表面點，避免在迴圈中重複計算
+        self.simulation_data = []
+
         self.target_points.clear()
         for shape in self.target_shapes:
             self.target_points[shape] = shape.get_emission_points()
-        # --- 【新增結束】 ---
 
         for job in arc_jobs:
             source = job['source']
             possible_starts = source.get_emission_points()
-            best_start_point = None
-            max_field_strength_sq = -1
-
             if not possible_starts: continue
 
-            # 從電場最強的點開始放電
+            best_start_point, max_field_strength_sq = None, -1
             for start_point in possible_starts:
                 ex, ey = self._calculate_electric_field_at(*start_point)
                 field_strength_sq = ex*ex + ey*ey
-                
                 if field_strength_sq > max_field_strength_sq:
                     max_field_strength_sq = field_strength_sq
                     best_start_point = start_point
@@ -669,304 +700,112 @@ class Simulator:
                 ex, ey = self._calculate_electric_field_at(*best_start_point)
                 mag = math.hypot(ex, ey)
                 initial_direction = (ex/mag, ey/mag) if mag > 1e-9 else (1, 0)
-                # --- 【修改】 --- 使用新的資料結構
                 self.active_arcs.append({
-                    'current': best_start_point, 
-                    'direction': initial_direction,
-                    'thickness': self.arc_max_thickness,
-                    'life': self.arc_max_life
+                    'current': best_start_point, 'direction': initial_direction,
+                    'thickness': self.params['arc_max_thickness'], 'life': self.params['arc_max_life']
                 })
 
         if not self.active_arcs:
             messagebox.showwarning("模擬錯誤", "找不到任何有效的放電起始點。")
-            return
-            
-        self.is_running = True
-        self.step()
+            return []
 
-    def stop(self):
-        self.is_running = False
+        # --- 主模擬迴圈 (取代 step() 和 after()) ---
+        while self.active_arcs:
+            current_frame_segments = []
+            next_active_arcs = []
 
-    def _interpolate_color(self, color1, color2, factor):
-        """在兩個十六進位顏色之間進行線性內插"""
-        try:
-            # 將 #RRGGBB 轉為 (r, g, b)
-            r1, g1, b1 = int(color1[1:3], 16), int(color1[3:5], 16), int(color1[5:7], 16)
-            r2, g2, b2 = int(color2[1:3], 16), int(color2[3:5], 16), int(color2[5:7], 16)
+            for arc_data in self.active_arcs:
+                current_point, current_direction = arc_data['current'], arc_data['direction']
+                thickness, life = arc_data['thickness'], arc_data['life']
 
-            # 內插
-            r = int(r1 + (r2 - r1) * factor)
-            g = int(g1 + (g2 - g1) * factor)
-            b = int(b1 + (b2 - b1) * factor)
+                if life <= 0 or thickness < 0.5: continue
 
-            # 轉回 #RRGGBB 格式
-            return f"#{r:02x}{g:02x}{b:02x}"
-        except (ValueError, IndexError):
-            # 如果顏色格式錯誤，返回一個預設顏色
-            return color1
+                ex, ey = self._calculate_electric_field_at(*current_point)
+                field_strength = math.hypot(ex, ey)
+                decay_factor = self.params['arc_threshold_v_pixel'] * 0.3
+                dynamic_interruption_chance = self.params['path_interruption_chance'] * math.exp(-field_strength / decay_factor) if decay_factor > 1e-6 else 1.0
+                if random.random() < dynamic_interruption_chance: continue
 
-    def _get_glow_alpha_from_profile(self, normalized_dist):
-        """根據輪廓點計算在特定標準化距離下的透明度(混合因子)"""
-        # 確保距離在 [0, 1] 範圍內
-        normalized_dist = max(0, min(1, normalized_dist))
+                jump_occurred = False
+                if self.params['final_jump_distance'] > 0:
+                    min_dist_sq = self.params['final_jump_distance'] ** 2
+                    closest_point = None
+                    for shape in self.target_shapes:
+                        for p in self.target_points.get(shape, []):
+                            dist_sq = (current_point[0] - p[0])**2 + (current_point[1] - p[1])**2
+                            if dist_sq < min_dist_sq:
+                                min_dist_sq, closest_point = dist_sq, p
+                    if closest_point:
+                        current_frame_segments.append({'p1': current_point, 'p2': closest_point, 'thickness': thickness * 1.5, 'life': life})
+                        jump_occurred = True
+                
+                if jump_occurred: continue
 
-        # 找到對應的區間
-        for i in range(len(self.glow_falloff_points) - 1):
-            p1 = self.glow_falloff_points[i]
-            p2 = self.glow_falloff_points[i+1]
-
-            if p1[0] <= normalized_dist <= p2[0]:
-                # 在此區間內進行線性內插
-                dist_range = p2[0] - p1[0]
-                if dist_range == 0:
-                    return p1[1]
-
-                local_factor = (normalized_dist - p1[0]) / dist_range
-                alpha = p1[1] + local_factor * (p2[1] - p1[1])
-                return alpha
-
-        return self.glow_falloff_points[-1][1] # Fallback
-
-    def _draw_arc_segment(self, p1, p2, thickness, life, color):
-        """繪製具有光暈、顏色和粗細漸變的單一段電弧"""
-        if thickness < 0.2: return
-
-        life_factor = max(0, min(1, life / self.arc_max_life))
-
-        # --- 1. 粗細漸變 ---
-        core_thickness = thickness * (0.2 + life_factor * 0.8)
-        if core_thickness < 0.2: return
-
-        # --- 2. 顏色漸變 ---
-        core_color = "#FFFFFF"
-        segment_color = self._interpolate_color(color, core_color, life_factor)
-
-        # --- 3. 光暈效果 (多邊形) ---
-        dx, dy = p2[0] - p1[0], p2[1] - p1[1]
-        length = math.hypot(dx, dy)
-        if length < 1e-6: return # 避免除以零
-
-        # 正規化的垂直向量
-        nx, ny = -dy / length, dx / length
-
-        if self.arc_glow_strength > 0:
-            num_glow_layers = 15 # 漸層的層數，越高越平滑但效能越低
-            max_glow_radius = core_thickness / 2 * (1 + self.arc_glow_strength * 3.0)
-
-            for i in range(num_glow_layers, 0, -1):
-                # 從外層畫到內層
-                normalized_dist = i / num_glow_layers
-
-                # 根據輪廓計算透明度 (混合比例)
-                alpha = self._get_glow_alpha_from_profile(normalized_dist)
-                if alpha <= 0.01:
+                if any(t.contains(*current_point) for t in self.target_shapes) or \
+                   not (0 < current_point[0] < canvas_size[0] and 0 < current_point[1] < canvas_size[1]):
                     continue
 
-                # 計算該層的顏色和寬度
-                layer_color = self._interpolate_color(BACKGROUND_COLOR, color, alpha)
-                layer_width = max_glow_radius * normalized_dist * 2
+                next_point, next_direction = self._get_next_point(current_point, current_direction)
+                if next_point is None: continue
 
-                # 繪製多邊形來模擬該層的光暈
-                p1a = (p1[0] + nx * layer_width/2, p1[1] + ny * layer_width/2)
-                p2a = (p2[0] + nx * layer_width/2, p2[1] + ny * layer_width/2)
-                p2b = (p2[0] - nx * layer_width/2, p2[1] - ny * layer_width/2)
-                p1b = (p1[0] - nx * layer_width/2, p1[1] - ny * layer_width/2)
-                self.canvas.create_polygon(p1a, p2a, p2b, p1b, fill=layer_color, outline="", tags="arc")
+                current_frame_segments.append({'p1': current_point, 'p2': next_point, 'thickness': thickness, 'life': life})
+                next_active_arcs.append({'current': next_point, 'direction': next_direction, 'thickness': thickness, 'life': life - 1})
 
-        # --- 4. 核心 ---
-        self.canvas.create_line(*p1, *p2, fill=segment_color, width=core_thickness, tags="arc", capstyle=tk.ROUND)
+                if random.random() < self.params['fork_chance']:
+                    fork_point, fork_direction = self._get_next_point(current_point, current_direction)
+                    if fork_point:
+                        fork_thickness = thickness * 0.7
+                        current_frame_segments.append({'p1': current_point, 'p2': fork_point, 'thickness': fork_thickness, 'life': life})
+                        next_active_arcs.append({'current': fork_point, 'direction': fork_direction, 'thickness': fork_thickness, 'life': life - 1})
 
+            self.active_arcs = next_active_arcs
+            self.simulation_data.append(current_frame_segments)
 
-    def _get_next_point(self, current_point, current_direction):
-        base_angle = math.atan2(current_direction[1], current_direction[0])
-        
-        probes = []
-        weights = []
+        return self.simulation_data
 
-        for i in range(self.probe_count):
-            angle_offset = (i / (self.probe_count - 1) - 0.5) * self.probe_angle_rad if self.probe_count > 1 else 0
-            angle = base_angle + angle_offset
-            
-            probe_x = current_point[0] + self.step_length * math.cos(angle)
-            probe_y = current_point[1] + self.step_length * math.sin(angle)
-            
-            ex, ey = self._calculate_electric_field_at(probe_x, probe_y)
-            
-            # 投影電場到探測方向上，作為權重
-            field_projection = ex * math.cos(angle) + ey * math.sin(angle)
-            
-            if field_projection > 0:
-                probes.append(((probe_x, probe_y), (math.cos(angle), math.sin(angle))))
-                weights.append(field_projection ** self.field_exponent)
-        
-        if not weights or sum(weights) == 0:
-            return None, None # 沒有找到前進方向
-
-        # 加權隨機選擇下一步
-        chosen_probe, chosen_direction = random.choices(probes, weights=weights, k=1)[0]
-        
-        return chosen_probe, chosen_direction
-
-    def step(self):
-        if not self.is_running or not self.active_arcs:
-            self.stop()
-            return
-
-        next_active_arcs = []
-        for arc_data in self.active_arcs:
-            # --- 【修改】 --- 解構新的資料
-            current_point = arc_data['current']
-            current_direction = arc_data['direction']
-            thickness = arc_data['thickness']
-            life = arc_data['life']
-
-            # 生命為0或厚度太小的電弧直接消散
-            if life <= 0 or thickness < 0.5:
-                continue
-            
-            # --- 【修改】 --- 根據電場強度動態計算中斷機率
-            # 電場越弱，電弧越容易在空氣中消散
-            ex, ey = self._calculate_electric_field_at(*current_point)
-            field_strength = math.hypot(ex, ey)
-            
-            # 當電場強度為0時，消散機率為 path_interruption_chance
-            # 當電場強度增加時，消散機率以指數方式下降
-            # 調整分母中的常數可以控制衰減速度 (0.3 是一個經驗值)
-            decay_factor = self.arc_threshold * 0.3
-            # 避免 arc_threshold 為 0 或過小導致除以零
-            if decay_factor < 1e-6:
-                dynamic_interruption_chance = 1.0 if field_strength < 1e-6 else 0.0
-            else:
-                dynamic_interruption_chance = self.path_interruption_chance * math.exp(-field_strength / decay_factor)
-
-            if random.random() < dynamic_interruption_chance:
-                continue
-            
-            # --- 【新增】 --- 最終跳躍邏輯
-            jump_occurred = False
-            if self.final_jump_distance > 0:
-                min_dist_sq = self.final_jump_distance ** 2
-                closest_point = None
-
-                for shape in self.target_shapes:
-                    for p in self.target_points.get(shape, []): # 使用快取的點
-                        dist_sq = (current_point[0] - p[0])**2 + (current_point[1] - p[1])**2
-                        if dist_sq < min_dist_sq:
-                            min_dist_sq = dist_sq
-                            closest_point = p
-                
-                if closest_point:
-                    # 找到了一個在跳躍距離內的點，直接連接並終止此電弧
-                    # --- 【修改】 --- 使用動態粗細和顏色, 並傳入 life
-                    self._draw_arc_segment(current_point, closest_point, thickness * 1.5, life, self.arc_color)
-                    jump_occurred = True
-            
-            if jump_occurred:
-                continue # 此電弧已完成，處理下一個
-            # --- 【新增結束】 ---
-
-            # 如果已經到達目標或超出邊界，則停止
-            if any(t.contains(*current_point) for t in self.target_shapes) or \
-               not (0 < current_point[0] < self.canvas.winfo_width() and \
-                    0 < current_point[1] < self.canvas.winfo_height()):
-                continue
-
-            # 正常前進一步
-            next_point, next_direction = self._get_next_point(current_point, current_direction)
-            
-            if next_point is None:
-                continue
-
-            # --- 【修改】 --- 使用動態粗細和顏色, 並傳入 life
-            segment_thickness = thickness
-            self._draw_arc_segment(current_point, next_point, segment_thickness, life, self.arc_color)
-            # --- 【修改】 --- 傳遞新的資料結構
-            next_active_arcs.append({
-                'current': next_point,
-                'direction': next_direction,
-                'thickness': thickness, # 主幹粗細不變
-                'life': life - 1
-            })
-
-            # 隨機分岔
-            if random.random() < self.fork_chance:
-                fork_point, fork_direction = self._get_next_point(current_point, current_direction)
-                if fork_point:
-                    # --- 【修改】 --- 使用動態粗細和顏色, 並傳入 life
-                    fork_thickness = thickness * 0.7
-                    self._draw_arc_segment(current_point, fork_point, fork_thickness, life, self.arc_color)
-                    # --- 【修改】 --- 分岔後粗細和生命週期會衰減
-                    next_active_arcs.append({
-                        'current': fork_point,
-                        'direction': fork_direction,
-                        'thickness': fork_thickness, # 分岔變細
-                        'life': life - 1
-                    })
-
-        self.active_arcs = next_active_arcs
-        if self.active_arcs:
-            self.master.raise_top_images()
-            self.master.after(10, self.step)
-        else:
-            self.stop()
-
-# --- 主應用程式 GUI ---
+# --- 主應用程式 GUI (V10.0 - 影片匯出) ---
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        # --- 【修改】 --- 更新標題
-        self.title("進階放電模擬系統 V8.0 (動態消散模型)")
+        self.title("進階放電模擬系統 V10.0 (影片匯出)")
         self.geometry("1200x800")
 
         self.shapes, self.images = [], []
         self.selected_item = None
-        self.simulator = None
         self.drag_data = {}
-        self.top_images = set() # 用於存放需要保持在最上層的圖片
+        self.top_images = set()
 
         self.add_shape_mode = None
         self.is_creating_rod = False
         self.is_creating_arbitrary_shape = False
         self.current_polygon_points = []
         self.temp_drawing_artifacts = []
-        self.rubber_band_line_id = None
-        self.closing_line_id = None
+        self.rubber_band_line_id, self.closing_line_id = None, None
         
-        # --- 【修改】 --- 新增 final_jump_distance 參數
-        # --- 【修改】 --- 新增電弧外觀參數
-        self.sim_params = {
-            'fork_chance': 0.015,
-            'path_interruption_chance': 0.005,
-            'step_length': 5,
-            'arc_threshold_v_pixel': 150.0,
-            'probe_count': 15,
-            'probe_angle': 120,
-            'field_exponent': 2.5,
-            'final_jump_distance': 30.0,
-            'arc_color': ARC_COLOR, # 電弧基礎顏色
-            'arc_max_thickness': 2.0, # 電弧最大粗細
-            'arc_glow_strength': 0.4, # 光暈強度 (乘數)
-            'arc_max_life': 200, # 電弧最大生命週期 (步數)
-            # --- 【新增】 --- 光暈輪廓控制點 (0=全透明, 1=不透明)
-            'glow_falloff_1': 0.7, # 25% 半徑處的不透明度
-            'glow_falloff_2': 0.3, # 50% 半徑處的不透明度
-            'glow_falloff_3': 0.1, # 75% 半徑處的不透明度
-            'glow_falloff_4': 0.0, # 100% 半徑處的不透明度
-        }
+        self.last_simulation_data = None
+        self.animation_job = None
+        self.animation_frame_index = 0
+        self.arc_renderer = None
 
+        self.sim_params = {
+            'fork_chance': 0.015, 'path_interruption_chance': 0.005, 'step_length': 5,
+            'arc_threshold_v_pixel': 150.0, 'probe_count': 15, 'probe_angle': 120,
+            'field_exponent': 2.5, 'final_jump_distance': 30.0, 'arc_color': ARC_COLOR,
+            'arc_max_thickness': 2.0, 'arc_glow_strength': 0.4, 'arc_max_life': 200,
+            'glow_falloff_1': 0.7, 'glow_falloff_2': 0.3, 'glow_falloff_3': 0.1, 'glow_falloff_4': 0.0,
+        }
         self.create_widgets()
 
     def create_widgets(self):
         main_frame = tk.Frame(self)
         main_frame.pack(fill=tk.BOTH, expand=True)
-
         control_panel = tk.Frame(main_frame, width=250, bg=CONTROL_PANEL_BG, relief=tk.RIDGE, borderwidth=2)
         control_panel.pack(side=tk.LEFT, fill=tk.Y, padx=5, pady=5)
         control_panel.pack_propagate(False)
-
         self.canvas = tk.Canvas(main_frame, bg=BACKGROUND_COLOR, highlightthickness=0)
         self.canvas.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
+        # ... (Add/Param/Appearance frames are unchanged, so they are omitted for brevity)
         add_frame = tk.LabelFrame(control_panel, text="新增物體", padx=10, pady=10, bg=CONTROL_PANEL_BG)
         add_frame.pack(fill=tk.X, padx=10, pady=10)
         tk.Button(add_frame, text="針頭", command=lambda: self.set_add_mode("Needle")).pack(fill=tk.X)
@@ -975,24 +814,17 @@ class App(tk.Tk):
         tk.Button(add_frame, text="任意形狀", command=lambda: self.set_add_mode("Arbitrary")).pack(fill=tk.X)
         ttk.Separator(add_frame, orient='horizontal').pack(fill='x', pady=5)
         tk.Button(add_frame, text="新增圖片", command=self.add_image).pack(fill=tk.X)
-
-
         param_frame = tk.LabelFrame(control_panel, text="模擬參數", padx=10, pady=10, bg=CONTROL_PANEL_BG)
         param_frame.pack(fill=tk.X, padx=10, pady=10)
-
         def add_bar(label, key, frm, from_, to_, resolution, fmt, row):
             tk.Label(frm, text=label, bg=CONTROL_PANEL_BG).grid(row=row, column=0, sticky="w")
             var = tk.DoubleVar(value=self.sim_params[key])
-            scale = tk.Scale(frm, variable=var, from_=from_, to=to_, resolution=resolution, orient=tk.HORIZONTAL,
-                             length=120, showvalue=0, bg=CONTROL_PANEL_BG)
+            scale = tk.Scale(frm, variable=var, from_=from_, to=to_, resolution=resolution, orient=tk.HORIZONTAL, length=120, showvalue=0, bg=CONTROL_PANEL_BG)
             scale.grid(row=row, column=1)
             val_label = tk.Label(frm, text=fmt.format(self.sim_params[key]), bg=CONTROL_PANEL_BG, width=6, anchor='w')
             val_label.grid(row=row, column=2)
-            def on_change(val):
-                self.sim_params[key] = float(val)
-                val_label.config(text=fmt.format(float(val)))
+            def on_change(val): self.sim_params[key] = float(val); val_label.config(text=fmt.format(float(val)))
             scale.config(command=on_change)
-        
         add_bar("觸發閾(V/px)", 'arc_threshold_v_pixel', param_frame, 1, 500, 1, "{:.0f}", 0)
         add_bar("分岔機率", 'fork_chance', param_frame, 0, 0.05, 0.001, "{:.3f}", 1)
         add_bar("消散機率", 'path_interruption_chance', param_frame, 0, 0.05, 0.001, "{:.3f}", 2)
@@ -1000,332 +832,483 @@ class App(tk.Tk):
         add_bar("探測點數量", 'probe_count', param_frame, 3, 40, 1, "{:.0f}", 4)
         add_bar("探測角度(°)", 'probe_angle', param_frame, 30, 180, 5, "{:.0f}", 5)
         add_bar("電場指數", 'field_exponent', param_frame, 1.0, 5.0, 0.1, "{:.1f}", 6)
-        # --- 【新增】 --- 新增UI滑桿
         add_bar("最終跳躍(px)", 'final_jump_distance', param_frame, 0, 100, 1, "{:.0f}", 7)
-
-        # --- 【新增】 --- 電弧外觀控制
-        appearance_frame = tk.LabelFrame(control_panel, text="電弧外觀", padx=10, pady=10, bg=CONTROL_PANEL_BG)
+        appearance_frame = tk.LabelFrame(control_panel, text="電弧外觀 (可即時預覽)", padx=10, pady=10, bg=CONTROL_PANEL_BG)
         appearance_frame.pack(fill=tk.X, padx=10, pady=10)
-        appearance_frame.columnconfigure(1, weight=1) # 讓第二列(滑桿)可以伸展
-
-        # 顏色選擇 (使用 grid)
+        appearance_frame.columnconfigure(1, weight=1)
         tk.Button(appearance_frame, text="電弧顏色", command=self._choose_arc_color).grid(row=0, column=0, columnspan=2, sticky="ew", pady=2)
         self.arc_color_preview = tk.Frame(appearance_frame, width=24, height=24, bg=self.sim_params['arc_color'], relief=tk.SUNKEN, borderwidth=1)
         self.arc_color_preview.grid(row=0, column=2, padx=(5,0), pady=2)
-
-        # 粗細和光暈 (使用 grid，並修正 row index)
         add_bar("電弧粗細", 'arc_max_thickness', appearance_frame, 1, 20, 0.5, "{:.1f}", 1)
         add_bar("光暈強度", 'arc_glow_strength', appearance_frame, 0.0, 5.0, 0.1, "{:.1f}", 2)
-
-        # --- 【新增】 --- 光暈輪廓控制滑桿
         ttk.Separator(appearance_frame).grid(row=3, columnspan=3, sticky='ew', pady=5)
         add_bar("輪廓 (25%)", 'glow_falloff_1', appearance_frame, 0.0, 1.0, 0.05, "{:.2f}", 4)
         add_bar("輪廓 (50%)", 'glow_falloff_2', appearance_frame, 0.0, 1.0, 0.05, "{:.2f}", 5)
         add_bar("輪廓 (75%)", 'glow_falloff_3', appearance_frame, 0.0, 1.0, 0.05, "{:.2f}", 6)
         add_bar("輪廓 (100%)", 'glow_falloff_4', appearance_frame, 0.0, 1.0, 0.05, "{:.2f}", 7)
 
-
         sim_frame = tk.LabelFrame(control_panel, text="模擬控制", padx=10, pady=10, bg=CONTROL_PANEL_BG)
         sim_frame.pack(fill=tk.X, padx=10, pady=10)
-        tk.Button(sim_frame, text="開始模擬", command=self.start_simulation).pack(fill=tk.X, pady=5)
-        tk.Button(sim_frame, text="清除電弧", command=self.clear_simulation).pack(fill=tk.X, pady=5)
-        tk.Button(sim_frame, text="清除所有", command=self.clear_all).pack(fill=tk.X, pady=5)
+        tk.Button(sim_frame, text="執行新模擬", command=self.start_new_simulation).pack(fill=tk.X, pady=3)
+        tk.Button(sim_frame, text="預覽上次模擬", command=self.preview_simulation).pack(fill=tk.X, pady=3)
+        tk.Button(sim_frame, text="清除電弧", command=self.clear_simulation).pack(fill=tk.X, pady=3)
+        tk.Button(sim_frame, text="清除所有", command=self.clear_all).pack(fill=tk.X, pady=3)
+        ttk.Separator(sim_frame).pack(fill='x', pady=5)
+        tk.Button(sim_frame, text="儲存動畫...", command=self.open_export_dialog).pack(fill=tk.X, pady=3)
 
         tk.Button(control_panel, text="刪除選取", command=self.delete_selected).pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=10)
         
-        self.canvas.bind("<ButtonPress-1>", self.on_canvas_press)
-        self.canvas.bind("<B1-Motion>", self.on_canvas_drag)
-        self.canvas.bind("<ButtonRelease-1>", self.on_canvas_release)
-        self.canvas.bind("<Double-1>", self.on_canvas_double_click)
-        self.canvas.bind("<Motion>", self.on_canvas_motion)
-        self.canvas.bind("<Button-3>", self.on_canvas_right_click)
+        self.canvas.bind("<ButtonPress-1>", self.on_canvas_press); self.canvas.bind("<B1-Motion>", self.on_canvas_drag)
+        self.canvas.bind("<ButtonRelease-1>", self.on_canvas_release); self.canvas.bind("<Double-1>", self.on_canvas_double_click)
+        self.canvas.bind("<Motion>", self.on_canvas_motion); self.canvas.bind("<Button-3>", self.on_canvas_right_click)
         self.bind("<Escape>", self.cancel_creation_mode)
 
+    # Most methods from V9.0 are unchanged and omitted for brevity...
     def _choose_arc_color(self):
-        from tkinter import colorchooser
         color_code = colorchooser.askcolor(title="選擇電弧顏色", initialcolor=self.sim_params['arc_color'])
         if color_code and color_code[1]:
             self.sim_params['arc_color'] = color_code[1]
             self.arc_color_preview.config(bg=color_code[1])
-
+            self.preview_simulation()
     def on_canvas_right_click(self, event):
-        # 如果正在建立任意形狀，右鍵是取消
-        if self.is_creating_arbitrary_shape:
-            self.cancel_creation_mode(event)
-            return
-
+        if self.is_creating_arbitrary_shape: self.cancel_creation_mode(event); return
         item_found = next((item for item in reversed(self.images) if item.contains(event.x, event.y)), None)
-
         if item_found:
             self.select_item(item_found)
             menu = tk.Menu(self, tearoff=0)
             menu.add_command(label="移到最上層", command=lambda: item_found.set_layer('front'))
             menu.add_command(label="移到最下層", command=lambda: item_found.set_layer('back'))
             menu.post(event.x_root, event.y_root)
-        else:
-            # 如果沒點到圖片，右鍵預設行為是取消建立模式
-            self.cancel_creation_mode(event)
-
+        else: self.cancel_creation_mode(event)
     def cancel_creation_mode(self, event=None):
-        self.canvas.config(cursor="")
-        self.add_shape_mode = None
-        self.is_creating_rod = False
-        self.drag_data.clear()
-        self.select_item(None) # 取消選取
-
+        self.canvas.config(cursor=""); self.add_shape_mode = None; self.is_creating_rod = False
+        self.drag_data.clear(); self.select_item(None)
         if self.is_creating_arbitrary_shape:
             self.is_creating_arbitrary_shape = False
             for item in self.temp_drawing_artifacts: self.canvas.delete(item)
             if self.rubber_band_line_id: self.canvas.delete(self.rubber_band_line_id)
             if self.closing_line_id: self.canvas.delete(self.closing_line_id)
-            self.temp_drawing_artifacts.clear()
-            self.current_polygon_points.clear()
-            self.rubber_band_line_id = None
-            self.closing_line_id = None
+            self.temp_drawing_artifacts.clear(); self.current_polygon_points.clear()
+            self.rubber_band_line_id, self.closing_line_id = None, None
         return "break"
-
     def set_add_mode(self, shape_type):
-        self.cancel_creation_mode() 
-        self.add_shape_mode = shape_type
+        self.cancel_creation_mode(); self.add_shape_mode = shape_type
         self.is_creating_rod = (shape_type == "Rod")
         if shape_type == "Arbitrary":
             self.is_creating_arbitrary_shape = True
             messagebox.showinfo("繪製提示", "請在畫布上點擊以放置頂點。\n點擊第一個頂點或按兩下來完成形狀。\n按右鍵或 Esc 鍵取消。")
-        self.select_item(None)
-        self.canvas.config(cursor="crosshair")
-        
+        self.select_item(None); self.canvas.config(cursor="crosshair")
     def add_image(self):
         self.cancel_creation_mode()
-        filepath = filedialog.askopenfilename(
-            title="選擇圖片",
-            filetypes=[("Image files", "*.png *.jpg *.jpeg *.gif *.bmp"), ("All files", "*.*")]
-        )
-        if not filepath:
-            return
+        filepath = filedialog.askopenfilename(title="選擇圖片", filetypes=[("Image files", "*.png *.jpg *.jpeg *.gif *.bmp"), ("All files", "*.*")])
+        if not filepath: return
         try:
             pil_image = Image.open(filepath)
-            # 將圖片放在畫布中央
-            x = self.canvas.winfo_width() / 2
-            y = self.canvas.winfo_height() / 2
+            x, y = self.canvas.winfo_width() / 2, self.canvas.winfo_height() / 2
             image_obj = DecorativeImage(self.canvas, x, y, pil_image, self)
-            self.images.append(image_obj)
-            self.select_item(image_obj)
-        except Exception as e:
-            messagebox.showerror("圖片載入失敗", f"無法載入圖片檔案：\n{e}")
-
+            self.images.append(image_obj); self.select_item(image_obj)
+        except Exception as e: messagebox.showerror("圖片載入失敗", f"無法載入圖片檔案：\n{e}")
     def raise_top_images(self):
-        for img in self.top_images:
-            img.set_layer('front')
-
+        for img in self.top_images: img.set_layer('front')
     def on_canvas_press(self, event):
-        # 處理多邊形建立
         if self.is_creating_arbitrary_shape:
-            # ... (此部分邏輯不變)
             x, y = event.x, event.y
-            if self.current_polygon_points and \
-               math.hypot(x - self.current_polygon_points[0][0], y - self.current_polygon_points[0][1]) < HANDLE_RADIUS * 2:
-                self.finalize_arbitrary_shape()
-                return
+            if self.current_polygon_points and math.hypot(x - self.current_polygon_points[0][0], y - self.current_polygon_points[0][1]) < HANDLE_RADIUS * 2:
+                self.finalize_arbitrary_shape(); return
             if self.current_polygon_points:
                 px, py = self.current_polygon_points[-1]
-                l_id = self.canvas.create_line(px, py, x, y, fill=SELECTED_OUTLINE_COLOR, width=2)
-                self.temp_drawing_artifacts.append(l_id)
+                self.temp_drawing_artifacts.append(self.canvas.create_line(px, py, x, y, fill=SELECTED_OUTLINE_COLOR, width=2))
             self.current_polygon_points.append((x, y))
-            p_id = self.canvas.create_oval(x-3, y-3, x+3, y+3, fill=HANDLE_COLOR)
-            self.temp_drawing_artifacts.append(p_id)
+            self.temp_drawing_artifacts.append(self.canvas.create_oval(x-3, y-3, x+3, y+3, fill=HANDLE_COLOR))
             return
-        
-        # 處理物件新增模式
         if self.add_shape_mode:
-            if self.is_creating_rod:
-                self.drag_data = {'x1': event.x, 'y1': event.y, 'line_id': None}
+            if self.is_creating_rod: self.drag_data = {'x1': event.x, 'y1': event.y, 'line_id': None}
             return
-
-        # 處理已選取物件的控制點
         if self.selected_item:
             handle_index = self.selected_item.get_handle_at(event.x, event.y)
             if handle_index is not None:
-                self.drag_data = {'item': self.selected_item, 'type': 'handle', 'index': handle_index}
-                return
-
-        # 尋找並選取物件 (圖片優先)
+                self.drag_data = {'item': self.selected_item, 'type': 'handle', 'index': handle_index}; return
         all_items = self.images + self.shapes
         item_found = next((item for item in reversed(all_items) if item.contains(event.x, event.y)), None)
-
         self.select_item(item_found)
-
-        if item_found:
-            self.drag_data = {'item': item_found, 'type': 'body', 'x': event.x, 'y': event.y}
-
+        if item_found: self.drag_data = {'item': item_found, 'type': 'body', 'x': event.x, 'y': event.y}
     def on_canvas_motion(self, event):
         if not self.is_creating_arbitrary_shape or not self.current_polygon_points: return
-        
         if self.rubber_band_line_id: self.canvas.delete(self.rubber_band_line_id)
         px, py = self.current_polygon_points[-1]
         self.rubber_band_line_id = self.canvas.create_line(px, py, event.x, event.y, fill=SELECTED_OUTLINE_COLOR, dash=(4,4))
-
         if self.closing_line_id: self.canvas.delete(self.closing_line_id)
         if len(self.current_polygon_points) > 1:
             sx, sy = self.current_polygon_points[0]
             self.closing_line_id = self.canvas.create_line(event.x, event.y, sx, sy, fill=SELECTED_OUTLINE_COLOR, dash=(4,4))
-
     def on_canvas_drag(self, event):
         if self.is_creating_rod and 'x1' in self.drag_data:
             if self.drag_data['line_id']: self.canvas.delete(self.drag_data['line_id'])
-            self.drag_data['line_id'] = self.canvas.create_line(
-                self.drag_data['x1'], self.drag_data['y1'], event.x, event.y, 
-                fill=SELECTED_OUTLINE_COLOR, width=3, dash=(4,4))
+            self.drag_data['line_id'] = self.canvas.create_line(self.drag_data['x1'], self.drag_data['y1'], event.x, event.y, fill=SELECTED_OUTLINE_COLOR, width=3, dash=(4,4))
             return
-            
         if 'item' in self.drag_data:
             item = self.drag_data['item']
             if self.drag_data['type'] == 'body':
                 dx, dy = event.x - self.drag_data['x'], event.y - self.drag_data['y']
                 item.move(dx, dy)
                 self.drag_data['x'], self.drag_data['y'] = event.x, event.y
-            elif self.drag_data['type'] == 'handle':
-                item.move_handle(self.drag_data['index'], event.x, event.y)
-
-
+            elif self.drag_data['type'] == 'handle': item.move_handle(self.drag_data['index'], event.x, event.y)
     def on_canvas_release(self, event):
         if self.is_creating_arbitrary_shape: return
-
         self.canvas.config(cursor="")
         if self.add_shape_mode:
             shape = None
-            if self.add_shape_mode == "Needle":
-                shape = Needle(self.canvas, event.x, event.y)
-            elif self.add_shape_mode == "Plate":
-                shape = Plate(self.canvas, event.x, event.y)
+            if self.add_shape_mode == "Needle": shape = Needle(self.canvas, event.x, event.y)
+            elif self.add_shape_mode == "Plate": shape = Plate(self.canvas, event.x, event.y)
             elif self.is_creating_rod:
                 if self.drag_data.get('line_id'): self.canvas.delete(self.drag_data['line_id'])
                 x1, y1 = self.drag_data['x1'], self.drag_data['y1']
-                if math.hypot(event.x - x1, event.y - y1) > 10:
-                    shape = Rod(self.canvas, x1, y1, event.x, event.y)
-            
-            if shape:
-                self.shapes.append(shape)
-                self.select_item(shape)
-            self.add_shape_mode = None
-            self.is_creating_rod = False
-
+                if math.hypot(event.x - x1, event.y - y1) > 10: shape = Rod(self.canvas, x1, y1, event.x, event.y)
+            if shape: self.shapes.append(shape); self.select_item(shape)
+            self.add_shape_mode, self.is_creating_rod = None, False
         self.drag_data.clear()
-
     def on_canvas_double_click(self, event):
-        if self.is_creating_arbitrary_shape:
-            self.finalize_arbitrary_shape()
-            return
-
+        if self.is_creating_arbitrary_shape: self.finalize_arbitrary_shape(); return
         item_found = next((s for s in reversed(self.shapes) if s.contains(event.x, event.y)), None)
-        if item_found:
+        if item_found and hasattr(item_found, 'voltage'):
             self.select_item(item_found)
-            # 確保只有 Shape 物件能開啟參數對話框
-            if hasattr(item_found, 'voltage'):
-                ParameterDialog(self, f"設定 {item_found.shape_type} 參數", item_found)
-            
+            ParameterDialog(self, f"設定 {item_found.shape_type} 參數", item_found)
     def finalize_arbitrary_shape(self):
         if not self.is_creating_arbitrary_shape or len(self.current_polygon_points) < 3:
-            messagebox.showwarning("創建錯誤", "一個有效的封閉導體至少需要3個頂點。")
-            self.cancel_creation_mode()
-            return
-
+            messagebox.showwarning("創建錯誤", "一個有效的封閉導體至少需要3個頂點。"); self.cancel_creation_mode(); return
         shape = ArbitraryShape(self.canvas, self.current_polygon_points.copy())
-        self.shapes.append(shape)
-        
-        self.cancel_creation_mode() 
-        self.select_item(shape)
-
+        self.shapes.append(shape); self.cancel_creation_mode(); self.select_item(shape)
     def select_item(self, item):
-        if self.selected_item and self.selected_item != item:
-            self.selected_item.deselect()
-
-        if item and self.selected_item != item:
-            item.select()
-            self.selected_item = item
-        elif not item:
-            self.selected_item = None
-
+        if self.selected_item and self.selected_item != item: self.selected_item.deselect()
+        if item and self.selected_item != item: item.select(); self.selected_item = item
+        elif not item: self.selected_item = None
     def delete_selected(self):
         if not self.selected_item: return
-
-        item = self.selected_item
-        item.deselect()
-        self.canvas.delete(item.id)
-
-        if item in self.shapes:
-            self.shapes.remove(item)
+        item = self.selected_item; item.deselect(); self.canvas.delete(item.id)
+        if item in self.shapes: self.shapes.remove(item)
         elif item in self.images:
             self.images.remove(item)
-            if item in self.top_images:
-                self.top_images.remove(item)
-
+            if item in self.top_images: self.top_images.remove(item)
         self.select_item(None)
-
-    def start_simulation(self):
+    def _get_current_appearance_params(self):
+        params = {k: v for k, v in self.sim_params.items() if 'arc' in k or 'glow' in k}
+        params['glow_falloff_points'] = [
+            (0.0, 1.0), (0.25, self.sim_params['glow_falloff_1']),
+            (0.5, self.sim_params['glow_falloff_2']), (0.75, self.sim_params['glow_falloff_3']),
+            (1.0, self.sim_params['glow_falloff_4'])]
+        return params
+    def start_new_simulation(self):
         self.clear_simulation()
-        
-        if len(self.shapes) < 2:
-            messagebox.showwarning("模擬錯誤", "需要至少兩個物體才能進行模擬。")
-            return
-
+        if len(self.shapes) < 2: messagebox.showwarning("模擬錯誤", "需要至少兩個物體才能進行模擬。"); return
         arc_jobs = []
         threshold = self.sim_params['arc_threshold_v_pixel']
-
         for shape_a, shape_b in itertools.combinations(self.shapes, 2):
             delta_v = abs(shape_a.voltage - shape_b.voltage)
-            center_a = shape_a.get_center()
-            center_b = shape_b.get_center()
+            center_a, center_b = shape_a.get_center(), shape_b.get_center()
             distance = math.hypot(center_a[0] - center_b[0], center_a[1] - center_b[1])
-
-            if distance < 1.0: continue
-            potential_gradient = delta_v / distance
-            
-            if potential_gradient > threshold:
+            if distance > 1.0 and delta_v / distance > threshold:
                 source, target = (shape_a, shape_b) if shape_a.voltage > shape_b.voltage else (shape_b, shape_a)
                 arc_jobs.append({'source': source, 'target': target})
-
         if arc_jobs:
-            self.simulator = Simulator(
-                self, self.canvas, self.shapes,
-                fork_chance=self.sim_params['fork_chance'],
-                path_interruption_chance=self.sim_params['path_interruption_chance'],
-                step_length=int(self.sim_params['step_length']),
-                probe_count=int(self.sim_params['probe_count']),
-                probe_angle=self.sim_params['probe_angle'],
-                field_exponent=self.sim_params['field_exponent'],
-                final_jump_distance=self.sim_params['final_jump_distance'],
-                arc_threshold=self.sim_params['arc_threshold_v_pixel'],
-                # --- 【新增】 --- 傳入外觀參數
-                arc_color=self.sim_params['arc_color'],
-                arc_max_thickness=self.sim_params['arc_max_thickness'],
-                arc_max_life=int(self.sim_params['arc_max_life']),
-                arc_glow_strength=self.sim_params['arc_glow_strength'],
-                # --- 【新增】 --- 傳入光暈輪廓參數
-                glow_falloff_1=self.sim_params['glow_falloff_1'],
-                glow_falloff_2=self.sim_params['glow_falloff_2'],
-                glow_falloff_3=self.sim_params['glow_falloff_3'],
-                glow_falloff_4=self.sim_params['glow_falloff_4']
-            )
-            self.simulator.start(arc_jobs)
-        else:
-            messagebox.showinfo("模擬資訊", "在目前的佈局和電壓設定下，沒有物體之間的電位梯度超過觸發閾值。")
-
-
-    def clear_simulation(self):
-        if self.simulator: self.simulator.stop()
-        self.simulator = None
-        self.canvas.delete("arc")
-
-    def clear_all(self):
+            simulator = Simulator(self.shapes, self.sim_params)
+            canvas_size = (self.canvas.winfo_width(), self.canvas.winfo_height())
+            self.last_simulation_data = simulator.run_simulation(arc_jobs, canvas_size)
+            if self.last_simulation_data: self.preview_simulation()
+        else: messagebox.showinfo("模擬資訊", "在目前的佈局和電壓設定下，沒有物體之間的電位梯度超過觸發閾值。")
+    def preview_simulation(self):
+        if not self.last_simulation_data: return
         self.clear_simulation()
-        self.select_item(None)
+        appearance_params = self._get_current_appearance_params()
+        self.arc_renderer = ArcRenderer(self.canvas, appearance_params)
+        self.animation_frame_index = 0; self.play_simulation_animation()
+    def play_simulation_animation(self):
+        if self.animation_frame_index < len(self.last_simulation_data):
+            self.canvas.delete("arc")
+            frame_data = self.last_simulation_data[self.animation_frame_index]
+            self.arc_renderer.render_frame_data(frame_data)
+            self.raise_top_images()
+            self.animation_frame_index += 1
+            self.animation_job = self.after(15, self.play_simulation_animation)
+        else: self.animation_job = None
+    def clear_simulation(self):
+        if self.animation_job: self.after_cancel(self.animation_job); self.animation_job = None
+        self.canvas.delete("arc")
+    def clear_all(self):
+        self.clear_simulation(); self.last_simulation_data = None; self.select_item(None)
+        for item in self.shapes + self.images: item.deselect(); self.canvas.delete(item.id)
+        self.shapes.clear(); self.images.clear()
 
-        for item in self.shapes + self.images:
-            item.deselect()
-            self.canvas.delete(item.id)
+    # --- 【新增】影片匯出功能 ---
+    def open_export_dialog(self):
+        if not self.last_simulation_data:
+            messagebox.showerror("錯誤", "沒有可以匯出的模擬數據。\n請先『執行新模擬』。")
+            return
+        # 傳入總畫格數以初始化分段速率UI
+        VideoExportDialog(self, "匯出動畫", self, len(self.last_simulation_data))
 
-        self.shapes.clear()
-        self.images.clear()
+    def _build_frame_map(self, segments, total_original_frames):
+        """根據分段速率定義，建立最終的畫格對應列表"""
+        frame_map = []
+        # 將片段轉換為以0為基底的索引
+        processed_segments = [{'start': s['start']-1, 'end': s['end']-1, 'speed': s['speed']} for s in segments]
+
+        for seg in processed_segments:
+            num_original_frames = seg['end'] - seg['start'] + 1
+            num_new_frames = int(num_original_frames / seg['speed'])
+            for i in range(num_new_frames):
+                original_index = seg['start'] + int(i * seg['speed'])
+                if original_index < total_original_frames:
+                    frame_map.append(original_index)
+        return frame_map
+
+    def export_video(self, settings, progress_var, status_label):
+        filepath = settings['filepath']
+        if not filepath:
+            messagebox.showerror("錯誤", "未指定檔案路徑。")
+            status_label.config(text="錯誤: 未指定路徑")
+            return
+
+        frame_map = self._build_frame_map(settings['speed_segments'], len(self.last_simulation_data))
+        total_new_frames = len(frame_map)
+
+        if total_new_frames == 0:
+            messagebox.showerror("錯誤", "根據目前的分段速率設定，沒有足夠的畫格可以匯出。")
+            status_label.config(text="錯誤: 速率設定問題")
+            return
+
+        writer = imageio.get_writer(filepath, fps=60, format=settings['format'], codec='libx264' if settings['format'] == 'mp4' else None)
+        appearance_params = self._get_current_appearance_params()
+
+        try:
+            for i, original_frame_index in enumerate(frame_map):
+                frame_data = self.last_simulation_data[original_frame_index]
+                bg_color = settings['bg_color']
+                img_mode = 'RGBA' if settings['format'] == 'gif' and settings['transparent_bg'] else 'RGB'
+                bg = (0,0,0,0) if img_mode == 'RGBA' else bg_color
+                img = Image.new(img_mode, (self.canvas.winfo_width(), self.canvas.winfo_height()), bg)
+                draw = ImageDraw.Draw(img, 'RGBA')
+
+                if settings['include_conductors']: self._draw_conductors_on_pil(draw)
+                if settings['include_images']: self._draw_images_on_pil(img)
+                self._draw_arcs_on_pil(draw, frame_data, appearance_params, img.copy())
+
+                final_frame = np.array(img.convert('RGB') if img_mode == 'RGB' else img)
+                writer.append_data(final_frame)
+
+                progress = (i + 1) / total_new_frames * 100
+                progress_var.set(progress)
+                status_label.config(text=f"正在匯出... {i+1}/{total_new_frames}")
+                self.update_idletasks()
+
+            messagebox.showinfo("完成", f"動畫已成功儲存至:\n{filepath}")
+            status_label.config(text="匯出完成！")
+        except Exception as e:
+            messagebox.showerror("匯出失敗", f"匯出過程中發生錯誤:\n{e}")
+            status_label.config(text="匯出失敗！")
+        finally:
+            writer.close()
+
+    def _draw_conductors_on_pil(self, draw):
+        for shape in self.shapes:
+            color = HV_COLOR if shape.voltage >= 0 else GND_COLOR
+            if shape.shape_type == "Needle":
+                coords = (shape.x - shape.radius, shape.y - shape.radius, shape.x + shape.radius, shape.y + shape.radius)
+                draw.ellipse(coords, fill=color, outline="white", width=1)
+            elif shape.shape_type == "Rod":
+                draw.line((shape.x1, shape.y1, shape.x2, shape.y2), fill=color, width=shape.thickness)
+            elif shape.shape_type in ["Plate", "Arbitrary"]:
+                draw.polygon(shape.points, fill=color, outline="white", width=1)
+
+    def _draw_images_on_pil(self, base_image):
+        sorted_images = sorted(self.images, key=lambda i: self.canvas.winfo_children().index(i.id) if i.id in self.canvas.winfo_children() else -1)
+        for img_obj in sorted_images:
+            if not hasattr(img_obj, 'pil_image_original'): continue
+            rotated_img = img_obj.pil_image_original.rotate(img_obj.angle, resample=Image.Resampling.BICUBIC, expand=True)
+            w, h = rotated_img.size
+            new_size = (int(w * img_obj.scale), int(h * img_obj.scale))
+            if new_size[0] < 1 or new_size[1] < 1: continue
+            scaled_img = rotated_img.resize(new_size, Image.Resampling.LANCZOS)
+            paste_x, paste_y = int(img_obj.x - new_size[0] / 2), int(img_obj.y - new_size[1] / 2)
+            if scaled_img.mode == 'RGBA': base_image.paste(scaled_img, (paste_x, paste_y), scaled_img)
+            else: base_image.paste(scaled_img, (paste_x, paste_y))
+
+    def _draw_arcs_on_pil(self, draw, frame_data, params, background_img):
+        def _interpolate_color(c1, c2, f):
+            try:
+                c1_rgb = tuple(int(c1.lstrip('#')[i:i+2], 16) for i in (0, 2, 4)); c2_rgb = tuple(int(c2.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
+                rgb = [int(c1_rgb[i] + (c2_rgb[i] - c1_rgb[i]) * f) for i in range(3)]; return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
+            except: return c1
+        def _get_glow_alpha(dist, points):
+            dist = max(0, min(1, dist))
+            for i in range(len(points) - 1):
+                p1, p2 = points[i], points[i+1]
+                if p1[0] <= dist <= p2[0]:
+                    r = p2[0] - p1[0]; return p1[1] + ((dist - p1[0]) / r) * (p2[1] - p1[1]) if r != 0 else p1[1]
+            return points[-1][1]
+        for segment in frame_data:
+            p1, p2, thickness, life = segment['p1'], segment['p2'], segment['thickness'], segment['life']
+            if thickness < 0.2: continue
+            life_factor = max(0, min(1, life / params['arc_max_life'])); core_thickness = thickness * (0.2 + life_factor * 0.8)
+            if core_thickness < 0.5: continue
+            segment_color = _interpolate_color(params['arc_color'], "#FFFFFF", life_factor)
+            dx, dy = p2[0] - p1[0], p2[1] - p1[1]; length = math.hypot(dx, dy)
+            if length < 1e-6: continue
+            nx, ny = -dy / length, dx / length
+            if params['arc_glow_strength'] > 0:
+                max_glow_radius = core_thickness / 2 * (1 + params['arc_glow_strength'] * 3.0); glow_points = params['glow_falloff_points']
+                for i in range(15, 0, -1):
+                    dist = i / 15; alpha = _get_glow_alpha(dist, glow_points)
+                    if alpha <= 0.01: continue
+                    layer_color_str = _interpolate_color(BACKGROUND_COLOR, params['arc_color'], alpha)
+                    layer_color_rgb = tuple(int(layer_color_str[1:3], 16), int(layer_color_str[3:5], 16), int(layer_color_str[5:7], 16))
+                    layer_width = max_glow_radius * dist * 2
+                    p1a = (p1[0] + nx * layer_width/2, p1[1] + ny * layer_width/2); p2a = (p2[0] + nx * layer_width/2, p2[1] + ny * layer_width/2)
+                    p2b = (p2[0] - nx * layer_width/2, p2[1] - ny * layer_width/2); p1b = (p1[0] - nx * layer_width/2, p1[1] - ny * layer_width/2)
+                    poly_img = Image.new('RGBA', draw.im.size, (0,0,0,0)); poly_draw = ImageDraw.Draw(poly_img)
+                    poly_draw.polygon([p1a, p2a, p2b, p1b], fill=layer_color_rgb + (int(alpha*255*0.5),))
+                    draw.im.paste(poly_img, (0,0), poly_img)
+            draw.line([p1, p2], fill=segment_color, width=int(core_thickness), joint=None)
+
+class VideoExportDialog(simpledialog.Dialog):
+    def __init__(self, parent, title, app_ref, total_frames):
+        self.app = app_ref
+        self.total_frames = total_frames
+        self.speed_segments = [{'start': 1, 'end': total_frames, 'speed': 1.0}]
+        super().__init__(parent, title)
+
+    def body(self, master):
+        master.pack_configure(padx=10, pady=10)
+        # ... Other frames for path, content, etc. are the same and omitted for brevity ...
+        path_frame = ttk.LabelFrame(master, text="儲存位置與格式"); path_frame.pack(fill=tk.X, pady=5); path_frame.columnconfigure(1, weight=1)
+        self.path_var = tk.StringVar(); tk.Entry(path_frame, textvariable=self.path_var).grid(row=0, column=1, sticky="ew", padx=5, pady=5)
+        tk.Button(path_frame, text="瀏覽...", command=self._browse_file).grid(row=0, column=2, padx=5)
+        self.format_var = tk.StringVar(value="mp4"); tk.Radiobutton(path_frame, text="MP4", variable=self.format_var, value="mp4", command=self._on_format_change).grid(row=1, column=1, sticky='w', padx=5)
+        tk.Radiobutton(path_frame, text="GIF", variable=self.format_var, value="gif", command=self._on_format_change).grid(row=1, column=2, sticky='w', padx=5)
+        content_frame = ttk.LabelFrame(master, text="內容與背景"); content_frame.pack(fill=tk.X, pady=5)
+        self.include_conductors = tk.BooleanVar(value=True); self.include_images = tk.BooleanVar(value=True)
+        tk.Checkbutton(content_frame, text="包含導體", variable=self.include_conductors).pack(side=tk.LEFT, padx=5)
+        tk.Checkbutton(content_frame, text="包含圖片", variable=self.include_images).pack(side=tk.LEFT, padx=5)
+        self.bg_color_var = tk.StringVar(value=BACKGROUND_COLOR); tk.Button(content_frame, text="背景顏色", command=self._choose_bg_color).pack(side=tk.LEFT, padx=10)
+        self.bg_preview = tk.Frame(content_frame, width=24, height=24, bg=self.bg_color_var.get(), relief=tk.SUNKEN, borderwidth=1); self.bg_preview.pack(side=tk.LEFT)
+        self.transparent_bg = tk.BooleanVar(value=False); self.transparent_check = tk.Checkbutton(content_frame, text="透明背景 (GIF)", variable=self.transparent_bg, state=tk.DISABLED); self.transparent_check.pack(side=tk.LEFT, padx=5)
+
+        # --- 分段速率UI ---
+        speed_frame = ttk.LabelFrame(master, text=f"分段速率 (總畫格: {self.total_frames})")
+        speed_frame.pack(fill=tk.X, pady=5)
+
+        list_frame = tk.Frame(speed_frame); list_frame.pack(fill=tk.X, pady=5)
+        self.segment_listbox = tk.Listbox(list_frame, height=4); self.segment_listbox.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.segment_listbox.bind('<<ListboxSelect>>', self._on_segment_select)
+
+        edit_frame = tk.Frame(speed_frame); edit_frame.pack(fill=tk.X, pady=5)
+        tk.Label(edit_frame, text="從:").pack(side=tk.LEFT); self.start_frame_var = tk.StringVar(); tk.Entry(edit_frame, textvariable=self.start_frame_var, width=6).pack(side=tk.LEFT)
+        tk.Label(edit_frame, text="到:").pack(side=tk.LEFT); self.end_frame_var = tk.StringVar(); tk.Entry(edit_frame, textvariable=self.end_frame_var, width=6).pack(side=tk.LEFT)
+        tk.Label(edit_frame, text="速率:").pack(side=tk.LEFT); self.speed_var = tk.StringVar(); tk.Entry(edit_frame, textvariable=self.speed_var, width=5).pack(side=tk.LEFT)
+
+        btn_frame = tk.Frame(speed_frame); btn_frame.pack(fill=tk.X)
+        tk.Button(btn_frame, text="新增", command=self._add_segment).pack(side=tk.LEFT, padx=2)
+        tk.Button(btn_frame, text="更新", command=self._update_segment).pack(side=tk.LEFT, padx=2)
+        tk.Button(btn_frame, text="移除", command=self._remove_segment).pack(side=tk.LEFT, padx=2)
+
+        self._refresh_segment_list()
+
+        progress_frame = ttk.LabelFrame(master, text="進度"); progress_frame.pack(fill=tk.X, pady=10)
+        self.status_label = tk.Label(progress_frame, text="準備就緒"); self.status_label.pack(fill=tk.X, padx=5, pady=2)
+        self.progress_var = tk.DoubleVar(); progress_bar = ttk.Progressbar(progress_frame, variable=self.progress_var, maximum=100); progress_bar.pack(fill=tk.X, padx=5, pady=5)
+        return None
+
+    def _refresh_segment_list(self):
+        self.segment_listbox.delete(0, tk.END)
+        self.speed_segments.sort(key=lambda s: s['start'])
+        for seg in self.speed_segments:
+            self.segment_listbox.insert(tk.END, f"畫格 {seg['start']}-{seg['end']} @ {seg['speed']:.1f}x")
+
+    def _on_segment_select(self, event):
+        selection = event.widget.curselection()
+        if not selection: return
+        idx = selection[0]
+        seg = self.speed_segments[idx]
+        self.start_frame_var.set(str(seg['start']))
+        self.end_frame_var.set(str(seg['end']))
+        self.speed_var.set(f"{seg['speed']:.1f}")
+
+    def _validate_inputs(self):
+        try:
+            start, end = int(self.start_frame_var.get()), int(self.end_frame_var.get())
+            speed = float(self.speed_var.get())
+            if not (1 <= start <= end <= self.total_frames and 0.1 <= speed <= 10.0): raise ValueError
+            return start, end, speed
+        except ValueError:
+            messagebox.showerror("輸入錯誤", "請檢查輸入。\n畫格範圍必須在 [1, 總畫格數] 內。\n速率必須是 0.1 到 10.0 之間的數字。")
+            return None, None, None
+
+    def _add_segment(self):
+        start, end, speed = self._validate_inputs()
+        if start is None: return
+        # 簡單的重疊檢查: 移除任何與新片段重疊的舊片段
+        self.speed_segments = [s for s in self.speed_segments if s['end'] < start or s['start'] > end]
+        self.speed_segments.append({'start': start, 'end': end, 'speed': speed})
+        self._refresh_segment_list()
+
+    def _update_segment(self):
+        selection = self.segment_listbox.curselection()
+        if not selection: messagebox.showwarning("操作無效", "請先從列表中選擇一個片段進行更新。"); return
+        idx = selection[0]
+        start, end, speed = self._validate_inputs()
+        if start is None: return
+        # 移除舊片段，新增更新後的片段
+        self.speed_segments.pop(idx)
+        self.speed_segments = [s for s in self.speed_segments if s['end'] < start or s['start'] > end]
+        self.speed_segments.append({'start': start, 'end': end, 'speed': speed})
+        self._refresh_segment_list()
+
+    def _remove_segment(self):
+        selection = self.segment_listbox.curselection()
+        if not selection: messagebox.showwarning("操作無效", "請先從列表中選擇一個片段進行移除。"); return
+        self.speed_segments.pop(selection[0])
+        self._refresh_segment_list()
+
+    def buttonbox(self):
+        box = tk.Frame(self)
+        self.ok_button = tk.Button(box, text="開始匯出", width=10, command=self.ok_pressed, default=tk.ACTIVE)
+        self.ok_button.pack(side=tk.LEFT, padx=5, pady=5)
+        cancel_button = tk.Button(box, text="關閉", width=10, command=self.cancel)
+        cancel_button.pack(side=tk.LEFT, padx=5, pady=5)
+        self.bind("<Return>", lambda e: self.ok_pressed())
+        box.pack()
+
+    def _browse_file(self):
+        fmt = self.format_var.get(); filetypes = [("MP4 video", "*.mp4"), ("GIF animation", "*.gif"), ("All files", "*.*")]; defaultextension = f".{fmt}"
+        filepath = filedialog.asksaveasfilename(parent=self, title="儲存為", defaultextension=defaultextension, filetypes=filetypes)
+        if filepath: self.path_var.set(filepath)
+    def _choose_bg_color(self):
+        color_code = colorchooser.askcolor(title="選擇背景顏色", initialcolor=self.bg_color_var.get())
+        if color_code and color_code[1]: self.bg_color_var.set(color_code[1]); self.bg_preview.config(bg=color_code[1])
+    def _on_format_change(self):
+        self.transparent_check.config(state=tk.NORMAL if self.format_var.get() == 'gif' else tk.DISABLED)
+        if self.format_var.get() != 'gif': self.transparent_bg.set(False)
+
+    def ok_pressed(self):
+        # 確保片段列表是完整的，填補空白
+        self.speed_segments.sort(key=lambda s: s['start'])
+        filled_segments = []
+        last_end = 0
+        for seg in self.speed_segments:
+            if seg['start'] > last_end + 1: filled_segments.append({'start': last_end + 1, 'end': seg['start'] - 1, 'speed': 1.0})
+            filled_segments.append(seg)
+            last_end = seg['end']
+        if last_end < self.total_frames: filled_segments.append({'start': last_end + 1, 'end': self.total_frames, 'speed': 1.0})
+        self.speed_segments = filled_segments
+
+        self.settings = {
+            'filepath': self.path_var.get(), 'format': self.format_var.get(),
+            'include_conductors': self.include_conductors.get(), 'include_images': self.include_images.get(),
+            'bg_color': self.bg_color_var.get(), 'transparent_bg': self.transparent_bg.get(),
+            'speed_segments': self.speed_segments
+        }
+        self.ok_button.config(state=tk.DISABLED)
+        self.app.export_video(self.settings, self.progress_var, self.status_label)
+        self.ok_button.config(state=tk.NORMAL)
 
 if __name__ == "__main__":
     app = App()
