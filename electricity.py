@@ -568,7 +568,12 @@ class Simulator:
                  arc_color="#7FDBFF",
                  arc_max_thickness=4.0,
                  arc_max_life=200,
-                 arc_glow_strength=1.5):
+                 arc_glow_strength=1.5,
+                 # --- 【新增】 --- 光暈輪廓參數
+                 glow_falloff_1=0.7,
+                 glow_falloff_2=0.3,
+                 glow_falloff_3=0.1,
+                 glow_falloff_4=0.0):
         self.master = master
         self.canvas = canvas
         self.all_shapes = all_shapes
@@ -593,6 +598,14 @@ class Simulator:
         self.arc_max_thickness = arc_max_thickness
         self.arc_max_life = arc_max_life
         self.arc_glow_strength = arc_glow_strength
+        # --- 【新增】 --- 儲存光暈輪廓點
+        self.glow_falloff_points = [
+            (0.0, 1.0), # 核心是不透明的
+            (0.25, glow_falloff_1),
+            (0.5, glow_falloff_2),
+            (0.75, glow_falloff_3),
+            (1.0, glow_falloff_4)
+        ]
 
     def _calculate_electric_field_at(self, p_x, p_y):
         total_ex, total_ey = 0.0, 0.0
@@ -692,6 +705,28 @@ class Simulator:
             # 如果顏色格式錯誤，返回一個預設顏色
             return color1
 
+    def _get_glow_alpha_from_profile(self, normalized_dist):
+        """根據輪廓點計算在特定標準化距離下的透明度(混合因子)"""
+        # 確保距離在 [0, 1] 範圍內
+        normalized_dist = max(0, min(1, normalized_dist))
+
+        # 找到對應的區間
+        for i in range(len(self.glow_falloff_points) - 1):
+            p1 = self.glow_falloff_points[i]
+            p2 = self.glow_falloff_points[i+1]
+
+            if p1[0] <= normalized_dist <= p2[0]:
+                # 在此區間內進行線性內插
+                dist_range = p2[0] - p1[0]
+                if dist_range == 0:
+                    return p1[1]
+
+                local_factor = (normalized_dist - p1[0]) / dist_range
+                alpha = p1[1] + local_factor * (p2[1] - p1[1])
+                return alpha
+
+        return self.glow_falloff_points[-1][1] # Fallback
+
     def _draw_arc_segment(self, p1, p2, thickness, life, color):
         """繪製具有光暈、顏色和粗細漸變的單一段電弧"""
         if thickness < 0.2: return
@@ -715,22 +750,28 @@ class Simulator:
         nx, ny = -dy / length, dx / length
 
         if self.arc_glow_strength > 0:
-            # 外圈光暈
-            glow_width_outer = core_thickness * (1 + self.arc_glow_strength * 2.5) / 2
-            p1a = (p1[0] + nx * glow_width_outer, p1[1] + ny * glow_width_outer)
-            p2a = (p2[0] + nx * glow_width_outer, p2[1] + ny * glow_width_outer)
-            p2b = (p2[0] - nx * glow_width_outer, p2[1] - ny * glow_width_outer)
-            p1b = (p1[0] - nx * glow_width_outer, p1[1] - ny * glow_width_outer)
-            glow_color_outer = self._interpolate_color(BACKGROUND_COLOR, color, 0.3)
-            self.canvas.create_polygon(p1a, p2a, p2b, p1b, fill=glow_color_outer, outline="", tags="arc")
+            num_glow_layers = 15 # 漸層的層數，越高越平滑但效能越低
+            max_glow_radius = core_thickness / 2 * (1 + self.arc_glow_strength * 3.0)
 
-            # 內圈光暈
-            glow_width_inner = core_thickness * (1 + self.arc_glow_strength * 1.2) / 2
-            p1a = (p1[0] + nx * glow_width_inner, p1[1] + ny * glow_width_inner)
-            p2a = (p2[0] + nx * glow_width_inner, p2[1] + ny * glow_width_inner)
-            p2b = (p2[0] - nx * glow_width_inner, p2[1] - ny * glow_width_inner)
-            p1b = (p1[0] - nx * glow_width_inner, p1[1] - ny * glow_width_inner)
-            self.canvas.create_polygon(p1a, p2a, p2b, p1b, fill=color, outline="", tags="arc")
+            for i in range(num_glow_layers, 0, -1):
+                # 從外層畫到內層
+                normalized_dist = i / num_glow_layers
+
+                # 根據輪廓計算透明度 (混合比例)
+                alpha = self._get_glow_alpha_from_profile(normalized_dist)
+                if alpha <= 0.01:
+                    continue
+
+                # 計算該層的顏色和寬度
+                layer_color = self._interpolate_color(BACKGROUND_COLOR, color, alpha)
+                layer_width = max_glow_radius * normalized_dist * 2
+
+                # 繪製多邊形來模擬該層的光暈
+                p1a = (p1[0] + nx * layer_width/2, p1[1] + ny * layer_width/2)
+                p2a = (p2[0] + nx * layer_width/2, p2[1] + ny * layer_width/2)
+                p2b = (p2[0] - nx * layer_width/2, p2[1] - ny * layer_width/2)
+                p1b = (p1[0] - nx * layer_width/2, p1[1] - ny * layer_width/2)
+                self.canvas.create_polygon(p1a, p2a, p2b, p1b, fill=layer_color, outline="", tags="arc")
 
         # --- 4. 核心 ---
         self.canvas.create_line(*p1, *p2, fill=segment_color, width=core_thickness, tags="arc", capstyle=tk.ROUND)
@@ -906,6 +947,11 @@ class App(tk.Tk):
             'arc_max_thickness': 2.0, # 電弧最大粗細
             'arc_glow_strength': 0.4, # 光暈強度 (乘數)
             'arc_max_life': 200, # 電弧最大生命週期 (步數)
+            # --- 【新增】 --- 光暈輪廓控制點 (0=全透明, 1=不透明)
+            'glow_falloff_1': 0.7, # 25% 半徑處的不透明度
+            'glow_falloff_2': 0.3, # 50% 半徑處的不透明度
+            'glow_falloff_3': 0.1, # 75% 半徑處的不透明度
+            'glow_falloff_4': 0.0, # 100% 半徑處的不透明度
         }
 
         self.create_widgets()
@@ -970,6 +1016,13 @@ class App(tk.Tk):
         # 粗細和光暈 (使用 grid，並修正 row index)
         add_bar("電弧粗細", 'arc_max_thickness', appearance_frame, 1, 20, 0.5, "{:.1f}", 1)
         add_bar("光暈強度", 'arc_glow_strength', appearance_frame, 0.0, 5.0, 0.1, "{:.1f}", 2)
+
+        # --- 【新增】 --- 光暈輪廓控制滑桿
+        ttk.Separator(appearance_frame).grid(row=3, columnspan=3, sticky='ew', pady=5)
+        add_bar("輪廓 (25%)", 'glow_falloff_1', appearance_frame, 0.0, 1.0, 0.05, "{:.2f}", 4)
+        add_bar("輪廓 (50%)", 'glow_falloff_2', appearance_frame, 0.0, 1.0, 0.05, "{:.2f}", 5)
+        add_bar("輪廓 (75%)", 'glow_falloff_3', appearance_frame, 0.0, 1.0, 0.05, "{:.2f}", 6)
+        add_bar("輪廓 (100%)", 'glow_falloff_4', appearance_frame, 0.0, 1.0, 0.05, "{:.2f}", 7)
 
 
         sim_frame = tk.LabelFrame(control_panel, text="模擬控制", padx=10, pady=10, bg=CONTROL_PANEL_BG)
@@ -1246,7 +1299,12 @@ class App(tk.Tk):
                 arc_color=self.sim_params['arc_color'],
                 arc_max_thickness=self.sim_params['arc_max_thickness'],
                 arc_max_life=int(self.sim_params['arc_max_life']),
-                arc_glow_strength=self.sim_params['arc_glow_strength']
+                arc_glow_strength=self.sim_params['arc_glow_strength'],
+                # --- 【新增】 --- 傳入光暈輪廓參數
+                glow_falloff_1=self.sim_params['glow_falloff_1'],
+                glow_falloff_2=self.sim_params['glow_falloff_2'],
+                glow_falloff_3=self.sim_params['glow_falloff_3'],
+                glow_falloff_4=self.sim_params['glow_falloff_4']
             )
             self.simulator.start(arc_jobs)
         else:
