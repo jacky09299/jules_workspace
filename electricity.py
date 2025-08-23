@@ -715,32 +715,25 @@ class Simulator:
         nx, ny = -dy / length, dx / length
 
         if self.arc_glow_strength > 0:
-            glow_color_outer = self._interpolate_color(BACKGROUND_COLOR, color, 0.3)
-
-            # --- 外圈光暈 ---
+            # 外圈光暈
             glow_width_outer = core_thickness * (1 + self.arc_glow_strength * 2.5) / 2
-            # 矩形
-            p1a_o = (p1[0] + nx * glow_width_outer, p1[1] + ny * glow_width_outer)
-            p2a_o = (p2[0] + nx * glow_width_outer, p2[1] + ny * glow_width_outer)
-            p2b_o = (p2[0] - nx * glow_width_outer, p2[1] - ny * glow_width_outer)
-            p1b_o = (p1[0] - nx * glow_width_outer, p1[1] - ny * glow_width_outer)
-            self.canvas.create_polygon(p1a_o, p2a_o, p2b_o, p1b_o, fill=glow_color_outer, outline="", tags="arc")
-            # 圓形關節
-            self.canvas.create_oval(p1[0]-glow_width_outer, p1[1]-glow_width_outer, p1[0]+glow_width_outer, p1[1]+glow_width_outer, fill=glow_color_outer, outline="", tags="arc")
+            p1a = (p1[0] + nx * glow_width_outer, p1[1] + ny * glow_width_outer)
+            p2a = (p2[0] + nx * glow_width_outer, p2[1] + ny * glow_width_outer)
+            p2b = (p2[0] - nx * glow_width_outer, p2[1] - ny * glow_width_outer)
+            p1b = (p1[0] - nx * glow_width_outer, p1[1] - ny * glow_width_outer)
+            glow_color_outer = self._interpolate_color(BACKGROUND_COLOR, color, 0.3)
+            self.canvas.create_polygon(p1a, p2a, p2b, p1b, fill=glow_color_outer, outline="", tags="arc")
 
-            # --- 內圈光暈 ---
+            # 內圈光暈
             glow_width_inner = core_thickness * (1 + self.arc_glow_strength * 1.2) / 2
-            # 矩形
-            p1a_i = (p1[0] + nx * glow_width_inner, p1[1] + ny * glow_width_inner)
-            p2a_i = (p2[0] + nx * glow_width_inner, p2[1] + ny * glow_width_inner)
-            p2b_i = (p2[0] - nx * glow_width_inner, p2[1] - ny * glow_width_inner)
-            p1b_i = (p1[0] - nx * glow_width_inner, p1[1] - ny * glow_width_inner)
-            self.canvas.create_polygon(p1a_i, p2a_i, p2b_i, p1b_i, fill=color, outline="", tags="arc")
-            # 圓形關節
-            self.canvas.create_oval(p1[0]-glow_width_inner, p1[1]-glow_width_inner, p1[0]+glow_width_inner, p1[1]+glow_width_inner, fill=color, outline="", tags="arc")
+            p1a = (p1[0] + nx * glow_width_inner, p1[1] + ny * glow_width_inner)
+            p2a = (p2[0] + nx * glow_width_inner, p2[1] + ny * glow_width_inner)
+            p2b = (p2[0] - nx * glow_width_inner, p2[1] - ny * glow_width_inner)
+            p1b = (p1[0] - nx * glow_width_inner, p1[1] - ny * glow_width_inner)
+            self.canvas.create_polygon(p1a, p2a, p2b, p1b, fill=color, outline="", tags="arc")
 
         # --- 4. 核心 ---
-        self.canvas.create_line(*p1, *p2, fill=segment_color, width=core_thickness, tags="arc", capstyle=tk.ROUND, joinstyle=tk.ROUND)
+        self.canvas.create_line(*p1, *p2, fill=segment_color, width=core_thickness, tags="arc", capstyle=tk.BUTT)
 
 
     def _get_next_point(self, current_point, current_direction):
