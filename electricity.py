@@ -1208,7 +1208,7 @@ class App(tk.Tk):
                 coords = (shape.x - shape.radius, shape.y - shape.radius, shape.x + shape.radius, shape.y + shape.radius)
                 draw.ellipse(coords, fill=color, outline="white", width=1)
             elif shape.shape_type == "Rod":
-                draw.line((shape.x1, shape.y1, shape.x2, shape.y2), fill=color, width=shape.thickness)
+                draw.line((shape.x1, shape.y1, shape.x2, shape.y2), fill=color, width=int(shape.thickness))
             elif shape.shape_type in ["Plate", "Arbitrary"]:
                 draw.polygon(shape.points, fill=color, outline="white", width=1)
 
