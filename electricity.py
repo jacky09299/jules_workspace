@@ -554,16 +554,17 @@ class DecorativeImage:
             if self in self.app.top_images:
                 self.app.top_images.remove(self)
 
-# --- 【新增】速率控制圖表 ---
+# --- 【新增】速率控制圖表 (線性內插版本) ---
 class SpeedControlGraph(tk.Canvas):
     def __init__(self, master, on_change_callback=None, **kwargs):
         super().__init__(master, **kwargs)
         self.on_change_callback = on_change_callback
-        self.segments = []
+        self.points = []
         self.total_frames = 0
 
         self.padding = {'left': 40, 'right': 10, 'top': 10, 'bottom': 20}
         self.max_speed = 10.0
+        self.point_radius = 5
         self.line_color = "#00A0FF"
         self.bg_color = BACKGROUND_COLOR
         self.grid_color = "#444444"
@@ -576,6 +577,7 @@ class SpeedControlGraph(tk.Canvas):
         self.bind("<ButtonPress-1>", self._on_press)
         self.bind("<B1-Motion>", self._on_drag)
         self.bind("<ButtonRelease-1>", self._on_release)
+        self.bind("<Button-3>", self._on_right_click)
         self.reset(0)
 
     def _x_to_percent(self, x):
@@ -608,63 +610,65 @@ class SpeedControlGraph(tk.Canvas):
         self.create_text(self.padding['left'] / 2, self.padding['top'], text=f"{int(self.max_speed)}x", fill=self.font_color, font=("Arial", 8))
         self.create_text(self.padding['left'] / 2, h - self.padding['bottom'], text="0x", fill=self.font_color, font=("Arial", 8), anchor='w')
 
-        if not self.segments: return
+        if not self.points: return
 
-        # Draw line segments
-        for i, seg in enumerate(self.segments):
-            x1 = self._percent_to_x(seg['start'])
-            x2 = self._percent_to_x(seg['end'])
-            y = self._speed_to_y(seg['speed'])
-            self.create_line(x1, y, x2, y, fill=self.line_color, width=2, tags=f"segment_{i}")
-            if i > 0:
-                prev_seg = self.segments[i-1]
-                prev_y = self._speed_to_y(prev_seg['speed'])
-                self.create_line(x1, y, x1, prev_y, fill=self.line_color, width=1)
+        # Draw lines connecting points
+        tk_points = []
+        for p in self.points:
+            tk_points.append(self._percent_to_x(p[0]))
+            tk_points.append(self._speed_to_y(p[1]))
+        self.create_line(tk_points, fill=self.line_color, width=2)
+
+        # Draw points (handles)
+        for i, p in enumerate(self.points):
+            x = self._percent_to_x(p[0])
+            y = self._speed_to_y(p[1])
+            self.create_oval(x - self.point_radius, y - self.point_radius, x + self.point_radius, y + self.point_radius,
+                             fill=self.line_color, outline='white', tags=f"point_{i}")
+
+    def _get_point_at(self, x, y):
+        for i, p in enumerate(self.points):
+            px = self._percent_to_x(p[0])
+            py = self._speed_to_y(p[1])
+            if (x - px)**2 + (y - py)**2 < self.point_radius**2:
+                return i
+        return None
 
     def _on_press(self, event):
         if not self.total_frames > 0: return
-        percent_x = self._x_to_percent(event.x)
-        target_index = -1
-        for i, seg in enumerate(self.segments):
-            if seg['start'] <= percent_x < seg['end']:
-                target_index = i
-                break
-        if target_index == -1 and percent_x >= self.segments[-1]['end']:
-             target_index = len(self.segments)-1
-
-        if target_index != -1:
-            self.drag_data = {'index': target_index, 'start_percent': percent_x}
+        point_idx = self._get_point_at(event.x, event.y)
+        if point_idx is not None:
+            self.drag_data = {'type': 'point', 'index': point_idx}
+        else:
+            # Add a new point on the line
+            new_percent = self._x_to_percent(event.x)
+            new_speed = self._y_to_speed(event.y)
+            self.points.append((new_percent, new_speed))
+            self.points.sort(key=lambda p: p[0])
+            new_idx = self.points.index((new_percent, new_speed))
+            self.drag_data = {'type': 'point', 'index': new_idx}
+            self.draw()
 
     def _on_drag(self, event):
         if not self.drag_data or not self.total_frames > 0: return
 
-        index = self.drag_data['index']
-        original_segment = self.segments[index].copy()
+        idx = self.drag_data['index']
+
+        # Prevent dragging start/end points horizontally
+        if idx == 0 or idx == len(self.points) - 1:
+            new_percent = self.points[idx][0]
+        else:
+            new_percent = self._x_to_percent(event.x)
 
         new_speed = self._y_to_speed(event.y)
-        drag_start_percent = self.drag_data['start_percent']
-        current_percent = self._x_to_percent(event.x)
 
-        start_p = min(drag_start_percent, current_percent)
-        end_p = max(drag_start_percent, current_percent)
+        # Clamp horizontal position to be between neighbors
+        if idx > 0:
+            new_percent = max(self.points[idx-1][0], new_percent)
+        if idx < len(self.points) - 1:
+            new_percent = min(self.points[idx+1][0], new_percent)
 
-        new_segments = []
-        # Add segments before the affected one
-        new_segments.extend(self.segments[:index])
-
-        # Split the original segment
-        if original_segment['start'] < start_p:
-            new_segments.append({'start': original_segment['start'], 'end': start_p, 'speed': original_segment['speed']})
-
-        new_segments.append({'start': start_p, 'end': end_p, 'speed': new_speed})
-
-        if original_segment['end'] > end_p:
-            new_segments.append({'start': end_p, 'end': original_segment['end'], 'speed': original_segment['speed']})
-
-        # Add segments after the affected one
-        new_segments.extend(self.segments[index+1:])
-
-        self.segments = self._merge_segments(new_segments)
+        self.points[idx] = (new_percent, new_speed)
         self.draw()
 
     def _on_release(self, event):
@@ -673,83 +677,27 @@ class SpeedControlGraph(tk.Canvas):
             if self.on_change_callback:
                 self.on_change_callback()
 
-    def _merge_segments(self, segments):
-        if not segments: return []
-        segments.sort(key=lambda s: s['start'])
-
-        merged = [segments[0]]
-        for current in segments[1:]:
-            last = merged[-1]
-            if current['start'] == last['end'] and abs(current['speed'] - last['speed']) < 0.01:
-                last['end'] = current['end']
-            elif current['start'] < last['end']: # Overlap, adjust previous
-                 last['end'] = current['start']
-                 if last['start'] < last['end']: # Only add if it's not a zero-length segment
-                     merged.append(current)
-                 else: # Replace if it was a zero-length segment
-                     merged[-1] = current
-            else: # No overlap
-                merged.append(current)
-
-        # Ensure segments cover the full range [0, 1] and are contiguous
-        final_segments = []
-        if not merged or merged[0]['start'] > 0:
-            final_segments.append({'start': 0.0, 'end': merged[0]['start'] if merged else 1.0, 'speed': 1.0})
-
-        for i, seg in enumerate(merged):
-            if not final_segments:
-                final_segments.append(seg)
-                continue
-
-            last = final_segments[-1]
-            if seg['start'] > last['end']: # Gap
-                final_segments.append({'start': last['end'], 'end': seg['start'], 'speed': 1.0}) # fill gap with default speed
-            final_segments.append(seg)
-
-        if final_segments and final_segments[-1]['end'] < 1.0:
-            final_segments.append({'start': final_segments[-1]['end'], 'end': 1.0, 'speed': 1.0})
-
-        # Ensure first segment starts at 0 and last ends at 1
-        if final_segments:
-            final_segments[0]['start'] = 0.0
-            final_segments[-1]['end'] = 1.0
-
-        return [s for s in final_segments if s['start'] < s['end']] # Remove zero-length segments
+    def _on_right_click(self, event):
+        if not self.total_frames > 0: return
+        point_idx = self._get_point_at(event.x, event.y)
+        # Allow deleting any point except the first and last
+        if point_idx is not None and 0 < point_idx < len(self.points) - 1:
+            self.points.pop(point_idx)
+            self.draw()
+            if self.on_change_callback:
+                self.on_change_callback()
 
     def reset(self, total_frames):
         self.total_frames = total_frames
         if self.total_frames > 0:
-            self.segments = [{'start': 0.0, 'end': 1.0, 'speed': 1.0}]
+            self.points = [(0.0, 1.0), (1.0, 1.0)]
         else:
-            self.segments = []
+            self.points = []
         self.draw()
 
-    def get_segments(self):
-        """Converts percentage-based segments to absolute frame segments for the simulator."""
-        if not self.total_frames > 0 or not self.segments:
-            return []
-
-        frame_segments = []
-        for seg in self.segments:
-            start_frame = max(1, int(seg['start'] * self.total_frames))
-            end_frame = int(seg['end'] * self.total_frames)
-            if end_frame < start_frame: continue
-
-            # Ensure continuity with previous segment
-            if frame_segments:
-                start_frame = frame_segments[-1]['end'] + 1
-
-            frame_segments.append({
-                'start': start_frame,
-                'end': end_frame,
-                'speed': max(0.1, seg['speed']) # Speed must be > 0 for simulation logic
-            })
-
-        # Adjust last segment to cover all frames
-        if frame_segments:
-            frame_segments[-1]['end'] = self.total_frames
-
-        return frame_segments
+    def get_points(self):
+        """Returns a sorted list of control points."""
+        return sorted(self.points, key=lambda p: p[0])
 
 # --- 【新增】電弧彩現器 ---
 class ArcRenderer:
@@ -1284,9 +1232,9 @@ class App(tk.Tk):
             return
 
         self.clear_simulation()
-        # Get segments from the new graph widget
-        segments = self.speed_control_graph.get_segments()
-        self.animation_frame_map = self._build_frame_map(segments, self.total_frames)
+        # Get points from the new graph widget
+        points = self.speed_control_graph.get_points()
+        self.animation_frame_map = self._build_frame_map(points, self.total_frames)
         if not self.animation_frame_map:
             return
 
@@ -1334,22 +1282,49 @@ class App(tk.Tk):
             return
         VideoExportDialog(self, "匯出動畫", self)
 
-    def _build_frame_map(self, segments, total_original_frames):
-        """根據分段速率定義，建立最終的畫格對應列表"""
+    def _build_frame_map(self, points, total_original_frames):
+        """根據控制點進行線性內插，建立最終的畫格對應列表"""
+        if not points or total_original_frames == 0:
+            return []
+
+        # 確保點是排序過的
+        points.sort(key=lambda p: p[0])
+
+        def get_speed_at_frame(frame_num):
+            time_percent = frame_num / total_original_frames
+
+            # 找到目前的影格時間點在哪兩個控制點之間
+            p1, p2 = None, None
+            if time_percent <= points[0][0]:
+                 return points[0][1]
+            if time_percent >= points[-1][0]:
+                 return points[-1][1]
+
+            for i in range(len(points) - 1):
+                if points[i][0] <= time_percent <= points[i+1][0]:
+                    p1, p2 = points[i], points[i+1]
+                    break
+
+            if p1 is None: return 1.0
+
+            # 線性內插
+            time_range = p2[0] - p1[0]
+            if time_range == 0: return p1[1]
+
+            local_percent = (time_percent - p1[0]) / time_range
+            speed_range = p2[1] - p1[1]
+
+            return p1[1] + local_percent * speed_range
+
         frame_map = []
-        # 將片段轉換為以0為基底的索引
-        processed_segments = [{'start': s['start']-1, 'end': s['end']-1, 'speed': s['speed']} for s in segments]
+        time_in_original_frames = 0.0
+        while time_in_original_frames < total_original_frames:
+            frame_map.append(int(round(time_in_original_frames)))
 
-        for seg in processed_segments:
-            # 使用浮點數進行精確的時間步進
-            time_in_original_frames = float(seg['start'])
-            while time_in_original_frames <= seg['end']:
-                frame_map.append(int(round(time_in_original_frames))) # 四捨五入以處理浮點數精度問題
-                time_in_original_frames += seg['speed']
+            speed = get_speed_at_frame(time_in_original_frames)
+            speed = max(0.1, speed) # 避免速度為0或負數導致卡住
 
-            # 確保每個片段的最後一格都被包含，以防步進時跳過
-            if not frame_map or frame_map[-1] < seg['end']:
-                frame_map.append(seg['end'])
+            time_in_original_frames += speed
 
         # 過濾掉超出範圍的畫格並移除重複項，同時保持順序
         final_map = []
@@ -1358,6 +1333,11 @@ class App(tk.Tk):
             if frame < total_original_frames and frame not in seen:
                 final_map.append(frame)
                 seen.add(frame)
+
+        # 確保最後一格總是存在
+        if total_original_frames - 1 not in seen:
+            final_map.append(total_original_frames - 1)
+
         return final_map
 
     def export_video(self, settings, progress_var, status_label):
@@ -1367,7 +1347,7 @@ class App(tk.Tk):
             status_label.config(text="錯誤: 未指定路徑")
             return
 
-        frame_map = self._build_frame_map(settings['speed_segments'], len(self.last_simulation_data))
+        frame_map = self._build_frame_map(settings['speed_points'], len(self.last_simulation_data))
         total_new_frames = len(frame_map)
 
         if total_new_frames == 0:
@@ -1573,11 +1553,13 @@ class VideoExportDialog(simpledialog.Dialog):
     def ok_pressed(self):
         # The app now manages the speed segments. The dialog just uses them.
         # The app's refresh logic already fills gaps, so we can use the segments directly.
+        # The app's _build_frame_map now expects points, not segments.
+        # The export_video function will call _build_frame_map itself.
         self.settings = {
             'filepath': self.path_var.get(), 'format': self.format_var.get(),
             'include_conductors': self.include_conductors.get(), 'include_images': self.include_images.get(),
             'bg_color': self.bg_color_var.get(), 'transparent_bg': self.transparent_bg.get(),
-            'speed_segments': self.app.speed_control_graph.get_segments()
+            'speed_points': self.app.speed_control_graph.get_points()
         }
         self.ok_button.config(state=tk.DISABLED)
         self.app.export_video(self.settings, self.progress_var, self.status_label)
