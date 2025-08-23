@@ -1172,18 +1172,20 @@ class App(tk.Tk):
         writer = imageio.get_writer(filepath, fps=60, format=settings['format'], codec='libx264' if settings['format'] == 'mp4' else None)
         appearance_params = self._get_current_appearance_params()
 
+        bg_color = settings['bg_color']
+        img_mode = 'RGBA' if settings['format'] == 'gif' and settings['transparent_bg'] else 'RGB'
+        bg = (0,0,0,0) if img_mode == 'RGBA' else bg_color
+        img = Image.new(img_mode, (self.canvas.winfo_width(), self.canvas.winfo_height()), bg)
+        draw = ImageDraw.Draw(img, 'RGBA')
+
+        if settings['include_conductors']: self._draw_conductors_on_pil(draw)
+        if settings['include_images']: self._draw_images_on_pil(img)
+
         try:
             for i, original_frame_index in enumerate(frame_map):
                 frame_data = self.last_simulation_data[original_frame_index]
-                bg_color = settings['bg_color']
-                img_mode = 'RGBA' if settings['format'] == 'gif' and settings['transparent_bg'] else 'RGB'
-                bg = (0,0,0,0) if img_mode == 'RGBA' else bg_color
-                img = Image.new(img_mode, (self.canvas.winfo_width(), self.canvas.winfo_height()), bg)
-                draw = ImageDraw.Draw(img, 'RGBA')
 
-                if settings['include_conductors']: self._draw_conductors_on_pil(draw)
-                if settings['include_images']: self._draw_images_on_pil(img)
-                self._draw_arcs_on_pil(draw, frame_data, appearance_params, img.copy())
+                self._draw_arcs_on_pil(draw, frame_data, appearance_params, img)
 
                 final_frame = np.array(img.convert('RGB') if img_mode == 'RGB' else img)
                 writer.append_data(final_frame)
