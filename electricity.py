@@ -1034,8 +1034,8 @@ class App(tk.Tk):
         self.animation_frame_index = 0; self.play_simulation_animation()
     def play_simulation_animation(self):
         if self.animation_frame_index < len(self.last_simulation_data):
-            self.canvas.delete("arc")
-            self.canvas.update_idletasks() # Force canvas to process the delete command
+            # Per user request, arcs are intentionally not cleared to create an accumulating effect.
+            # self.canvas.delete("arc")
             frame_data = self.last_simulation_data[self.animation_frame_index]
             self.arc_renderer.render_frame_data(frame_data)
             self.raise_top_images()
