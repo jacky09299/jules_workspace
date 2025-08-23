@@ -823,7 +823,18 @@ class App(tk.Tk):
             scale.grid(row=row, column=1)
             val_label = tk.Label(frm, text=fmt.format(self.sim_params[key]), bg=CONTROL_PANEL_BG, width=6, anchor='w')
             val_label.grid(row=row, column=2)
-            def on_change(val): self.sim_params[key] = float(val); val_label.config(text=fmt.format(float(val)))
+            def on_change(val):
+                self.sim_params[key] = float(val)
+                val_label.config(text=f"{float(val):.1f}")
+                # For appearance params, trigger a live preview
+                if 'arc' in key or 'glow' in key:
+                    # To avoid stuttering, schedule the preview
+                    if hasattr(self, '_preview_job'):
+                        self.after_cancel(self, self._preview_job)
+                    self._preview_job = self.after(50, self.preview_simulation)
+            # A bit of a hack to make the label update on creation for float values
+            if isinstance(resolution, float):
+                val_label.config(text=f"{var.get():.1f}")
             scale.config(command=on_change)
         add_bar("觸發閾(V/px)", 'arc_threshold_v_pixel', param_frame, 1, 500, 1, "{:.0f}", 0)
         add_bar("分岔機率", 'fork_chance', param_frame, 0, 0.05, 0.001, "{:.3f}", 1)
@@ -1024,6 +1035,7 @@ class App(tk.Tk):
     def play_simulation_animation(self):
         if self.animation_frame_index < len(self.last_simulation_data):
             self.canvas.delete("arc")
+            self.canvas.update_idletasks() # Force canvas to process the delete command
             frame_data = self.last_simulation_data[self.animation_frame_index]
             self.arc_renderer.render_frame_data(frame_data)
             self.raise_top_images()
