@@ -811,14 +811,49 @@ class App(tk.Tk):
     def create_widgets(self):
         main_frame = tk.Frame(self)
         main_frame.pack(fill=tk.BOTH, expand=True)
-        control_panel = tk.Frame(main_frame, width=250, bg=CONTROL_PANEL_BG, relief=tk.RIDGE, borderwidth=2)
-        control_panel.pack(side=tk.LEFT, fill=tk.Y, padx=5, pady=5)
-        control_panel.pack_propagate(False)
+
+        # --- Create a container for the scrollable control panel ---
+        control_container = tk.Frame(main_frame, relief=tk.RIDGE, borderwidth=2)
+        control_container.pack(side=tk.LEFT, fill=tk.Y, padx=5, pady=5)
+
+        # --- Create a Canvas and a Scrollbar ---
+        scroll_canvas = tk.Canvas(control_container, bg=CONTROL_PANEL_BG, highlightthickness=0, width=250)
+        scrollbar = ttk.Scrollbar(control_container, orient="vertical", command=scroll_canvas.yview)
+        scroll_canvas.configure(yscrollcommand=scrollbar.set)
+
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        scroll_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # --- Create a frame inside the canvas to hold the content ---
+        scrollable_frame = tk.Frame(scroll_canvas, bg=CONTROL_PANEL_BG)
+
+        # --- Add the frame to a window in the canvas ---
+        scrollable_frame_window = scroll_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+
+        def configure_scroll_region(event):
+            scroll_canvas.configure(scrollregion=scroll_canvas.bbox("all"))
+            # Make the scrollable frame match the canvas width
+            scroll_canvas.itemconfig(scrollable_frame_window, width=scroll_canvas.winfo_width())
+
+        def on_mouse_wheel(event):
+            # Platform-independent scrolling
+            if event.num == 5 or event.delta < 0:
+                scroll_canvas.yview_scroll(1, "units")
+            elif event.num == 4 or event.delta > 0:
+                scroll_canvas.yview_scroll(-1, "units")
+
+        scrollable_frame.bind("<Configure>", configure_scroll_region)
+        # Bind mouse wheel scrolling to the canvas and its children
+        self.bind_all("<MouseWheel>", on_mouse_wheel)
+        self.bind_all("<Button-4>", on_mouse_wheel)
+        self.bind_all("<Button-5>", on_mouse_wheel)
+
+
         self.canvas = tk.Canvas(main_frame, bg=BACKGROUND_COLOR, highlightthickness=0)
         self.canvas.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-        # ... (Add/Param/Appearance frames are unchanged, so they are omitted for brevity)
-        add_frame = tk.LabelFrame(control_panel, text="新增物體", padx=10, pady=10, bg=CONTROL_PANEL_BG)
+        # --- All subsequent frames are packed into the scrollable_frame ---
+        add_frame = tk.LabelFrame(scrollable_frame, text="新增物體", padx=10, pady=10, bg=CONTROL_PANEL_BG)
         add_frame.pack(fill=tk.X, padx=10, pady=10)
         tk.Button(add_frame, text="針頭", command=lambda: self.set_add_mode("Needle")).pack(fill=tk.X)
         tk.Button(add_frame, text="電棒", command=lambda: self.set_add_mode("Rod")).pack(fill=tk.X)
@@ -826,25 +861,24 @@ class App(tk.Tk):
         tk.Button(add_frame, text="任意形狀", command=lambda: self.set_add_mode("Arbitrary")).pack(fill=tk.X)
         ttk.Separator(add_frame, orient='horizontal').pack(fill='x', pady=5)
         tk.Button(add_frame, text="新增圖片", command=self.add_image).pack(fill=tk.X)
-        param_frame = tk.LabelFrame(control_panel, text="模擬參數", padx=10, pady=10, bg=CONTROL_PANEL_BG)
+
+        param_frame = tk.LabelFrame(scrollable_frame, text="模擬參數", padx=10, pady=10, bg=CONTROL_PANEL_BG)
         param_frame.pack(fill=tk.X, padx=10, pady=10)
         def add_bar(label, key, frm, from_, to_, resolution, fmt, row):
             tk.Label(frm, text=label, bg=CONTROL_PANEL_BG).grid(row=row, column=0, sticky="w")
             var = tk.DoubleVar(value=self.sim_params[key])
-            scale = tk.Scale(frm, variable=var, from_=from_, to=to_, resolution=resolution, orient=tk.HORIZONTAL, length=120, showvalue=0, bg=CONTROL_PANEL_BG)
+            # Reduce scale length slightly to fit better with scrollbar
+            scale = tk.Scale(frm, variable=var, from_=from_, to=to_, resolution=resolution, orient=tk.HORIZONTAL, length=100, showvalue=0, bg=CONTROL_PANEL_BG)
             scale.grid(row=row, column=1)
             val_label = tk.Label(frm, text=fmt.format(self.sim_params[key]), bg=CONTROL_PANEL_BG, width=6, anchor='w')
             val_label.grid(row=row, column=2)
             def on_change(val):
                 self.sim_params[key] = float(val)
                 val_label.config(text=f"{float(val):.1f}")
-                # For appearance params, trigger a live preview
                 if 'arc' in key or 'glow' in key:
-                    # To avoid stuttering, schedule the preview
                     if hasattr(self, '_preview_job'):
                         self.after_cancel(self._preview_job)
                     self._preview_job = self.after(50, self.preview_simulation)
-            # A bit of a hack to make the label update on creation for float values
             if isinstance(resolution, float):
                 val_label.config(text=f"{var.get():.1f}")
             scale.config(command=on_change)
@@ -856,7 +890,8 @@ class App(tk.Tk):
         add_bar("探測角度(°)", 'probe_angle', param_frame, 30, 180, 5, "{:.0f}", 5)
         add_bar("電場指數", 'field_exponent', param_frame, 1.0, 5.0, 0.1, "{:.1f}", 6)
         add_bar("最終跳躍(px)", 'final_jump_distance', param_frame, 0, 100, 1, "{:.0f}", 7)
-        appearance_frame = tk.LabelFrame(control_panel, text="電弧外觀 (可即時預覽)", padx=10, pady=10, bg=CONTROL_PANEL_BG)
+
+        appearance_frame = tk.LabelFrame(scrollable_frame, text="電弧外觀 (可即時預覽)", padx=10, pady=10, bg=CONTROL_PANEL_BG)
         appearance_frame.pack(fill=tk.X, padx=10, pady=10)
         appearance_frame.columnconfigure(1, weight=1)
         tk.Button(appearance_frame, text="電弧顏色", command=self._choose_arc_color).grid(row=0, column=0, columnspan=2, sticky="ew", pady=2)
@@ -870,7 +905,7 @@ class App(tk.Tk):
         add_bar("輪廓 (75%)", 'glow_falloff_3', appearance_frame, 0.0, 1.0, 0.05, "{:.2f}", 6)
         add_bar("輪廓 (100%)", 'glow_falloff_4', appearance_frame, 0.0, 1.0, 0.05, "{:.2f}", 7)
 
-        sim_frame = tk.LabelFrame(control_panel, text="模擬控制", padx=10, pady=10, bg=CONTROL_PANEL_BG)
+        sim_frame = tk.LabelFrame(scrollable_frame, text="模擬控制", padx=10, pady=10, bg=CONTROL_PANEL_BG)
         sim_frame.pack(fill=tk.X, padx=10, pady=10)
         tk.Button(sim_frame, text="執行新模擬", command=self.start_new_simulation).pack(fill=tk.X, pady=3)
         tk.Button(sim_frame, text="預覽上次模擬", command=self.preview_simulation).pack(fill=tk.X, pady=3)
@@ -879,13 +914,12 @@ class App(tk.Tk):
         ttk.Separator(sim_frame).pack(fill='x', pady=5)
         tk.Button(sim_frame, text="儲存動畫...", command=self.open_export_dialog).pack(fill=tk.X, pady=3)
 
-        # --- 新增: 分段速率UI ---
-        self.speed_control_frame = ttk.LabelFrame(control_panel, text="分段速率控制")
+        self.speed_control_frame = ttk.LabelFrame(scrollable_frame, text="分段速率控制")
         self.speed_control_frame.pack(fill=tk.X, padx=10, pady=10)
         self._create_speed_control_widgets(self.speed_control_frame)
-        self._set_speed_controls_state(tk.DISABLED) # 初始為禁用
+        self._set_speed_controls_state(tk.DISABLED)
 
-        tk.Button(control_panel, text="刪除選取", command=self.delete_selected).pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=10)
+        tk.Button(scrollable_frame, text="刪除選取", command=self.delete_selected).pack(side=tk.TOP, fill=tk.X, padx=10, pady=10)
         
         self.canvas.bind("<ButtonPress-1>", self.on_canvas_press); self.canvas.bind("<B1-Motion>", self.on_canvas_drag)
         self.canvas.bind("<ButtonRelease-1>", self.on_canvas_release); self.canvas.bind("<Double-1>", self.on_canvas_double_click)
@@ -1226,7 +1260,7 @@ class App(tk.Tk):
                     poly_img = Image.new('RGBA', draw.im.size, (0,0,0,0)); poly_draw = ImageDraw.Draw(poly_img)
                     poly_draw.polygon([p1a, p2a, p2b, p1b], fill=layer_color_rgb + (int(alpha*255*0.5),))
                     draw.im.paste(poly_img, (0,0), poly_img)
-            draw.line([p1, p2], fill=segment_color, width=int(core_thickness), joint=None)
+            draw.line((p1[0], p1[1], p2[0], p2[1]), fill=segment_color, width=int(core_thickness))
 
     # --- 【新增】分段速率控制相關方法 ---
     def _create_speed_control_widgets(self, parent_frame):
