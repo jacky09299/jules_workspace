@@ -554,6 +554,203 @@ class DecorativeImage:
             if self in self.app.top_images:
                 self.app.top_images.remove(self)
 
+# --- 【新增】速率控制圖表 ---
+class SpeedControlGraph(tk.Canvas):
+    def __init__(self, master, on_change_callback=None, **kwargs):
+        super().__init__(master, **kwargs)
+        self.on_change_callback = on_change_callback
+        self.segments = []
+        self.total_frames = 0
+
+        self.padding = {'left': 40, 'right': 10, 'top': 10, 'bottom': 20}
+        self.max_speed = 10.0
+        self.line_color = "#00A0FF"
+        self.bg_color = BACKGROUND_COLOR
+        self.grid_color = "#444444"
+        self.font_color = "#FFFFFF"
+
+        self.drag_data = {}
+        self.config(bg=self.bg_color, highlightthickness=0)
+
+        self.bind("<Configure>", lambda e: self.draw())
+        self.bind("<ButtonPress-1>", self._on_press)
+        self.bind("<B1-Motion>", self._on_drag)
+        self.bind("<ButtonRelease-1>", self._on_release)
+        self.reset(0)
+
+    def _x_to_percent(self, x):
+        graph_width = self.winfo_width() - self.padding['left'] - self.padding['right']
+        if graph_width <= 0: return 0.0
+        return max(0.0, min(1.0, (x - self.padding['left']) / graph_width))
+
+    def _y_to_speed(self, y):
+        graph_height = self.winfo_height() - self.padding['top'] - self.padding['bottom']
+        if graph_height <= 0: return 0.0
+        return max(0.0, min(self.max_speed, self.max_speed * (1 - (y - self.padding['top']) / graph_height)))
+
+    def _percent_to_x(self, p):
+        graph_width = self.winfo_width() - self.padding['left'] - self.padding['right']
+        return self.padding['left'] + p * graph_width
+
+    def _speed_to_y(self, s):
+        graph_height = self.winfo_height() - self.padding['top'] - self.padding['bottom']
+        return self.padding['top'] + (1 - s / self.max_speed) * graph_height
+
+    def draw(self):
+        self.delete("all")
+        w, h = self.winfo_width(), self.winfo_height()
+        if w < 2 or h < 2: return
+
+        # Draw axes and grid lines
+        self.create_rectangle(self.padding['left'], self.padding['top'], w - self.padding['right'], h - self.padding['bottom'], outline=self.grid_color)
+        self.create_text(self.padding['left'] / 2, h - self.padding['bottom'], text="0%", fill=self.font_color, font=("Arial", 8))
+        self.create_text(w - self.padding['right'], h - self.padding['bottom'] + 10, text="100%", fill=self.font_color, font=("Arial", 8))
+        self.create_text(self.padding['left'] / 2, self.padding['top'], text=f"{int(self.max_speed)}x", fill=self.font_color, font=("Arial", 8))
+        self.create_text(self.padding['left'] / 2, h - self.padding['bottom'], text="0x", fill=self.font_color, font=("Arial", 8), anchor='w')
+
+        if not self.segments: return
+
+        # Draw line segments
+        for i, seg in enumerate(self.segments):
+            x1 = self._percent_to_x(seg['start'])
+            x2 = self._percent_to_x(seg['end'])
+            y = self._speed_to_y(seg['speed'])
+            self.create_line(x1, y, x2, y, fill=self.line_color, width=2, tags=f"segment_{i}")
+            if i > 0:
+                prev_seg = self.segments[i-1]
+                prev_y = self._speed_to_y(prev_seg['speed'])
+                self.create_line(x1, y, x1, prev_y, fill=self.line_color, width=1)
+
+    def _on_press(self, event):
+        if not self.total_frames > 0: return
+        percent_x = self._x_to_percent(event.x)
+        target_index = -1
+        for i, seg in enumerate(self.segments):
+            if seg['start'] <= percent_x < seg['end']:
+                target_index = i
+                break
+        if target_index == -1 and percent_x >= self.segments[-1]['end']:
+             target_index = len(self.segments)-1
+
+        if target_index != -1:
+            self.drag_data = {'index': target_index, 'start_percent': percent_x}
+
+    def _on_drag(self, event):
+        if not self.drag_data or not self.total_frames > 0: return
+
+        index = self.drag_data['index']
+        original_segment = self.segments[index].copy()
+
+        new_speed = self._y_to_speed(event.y)
+        drag_start_percent = self.drag_data['start_percent']
+        current_percent = self._x_to_percent(event.x)
+
+        start_p = min(drag_start_percent, current_percent)
+        end_p = max(drag_start_percent, current_percent)
+
+        new_segments = []
+        # Add segments before the affected one
+        new_segments.extend(self.segments[:index])
+
+        # Split the original segment
+        if original_segment['start'] < start_p:
+            new_segments.append({'start': original_segment['start'], 'end': start_p, 'speed': original_segment['speed']})
+
+        new_segments.append({'start': start_p, 'end': end_p, 'speed': new_speed})
+
+        if original_segment['end'] > end_p:
+            new_segments.append({'start': end_p, 'end': original_segment['end'], 'speed': original_segment['speed']})
+
+        # Add segments after the affected one
+        new_segments.extend(self.segments[index+1:])
+
+        self.segments = self._merge_segments(new_segments)
+        self.draw()
+
+    def _on_release(self, event):
+        if self.drag_data:
+            self.drag_data = {}
+            if self.on_change_callback:
+                self.on_change_callback()
+
+    def _merge_segments(self, segments):
+        if not segments: return []
+        segments.sort(key=lambda s: s['start'])
+
+        merged = [segments[0]]
+        for current in segments[1:]:
+            last = merged[-1]
+            if current['start'] == last['end'] and abs(current['speed'] - last['speed']) < 0.01:
+                last['end'] = current['end']
+            elif current['start'] < last['end']: # Overlap, adjust previous
+                 last['end'] = current['start']
+                 if last['start'] < last['end']: # Only add if it's not a zero-length segment
+                     merged.append(current)
+                 else: # Replace if it was a zero-length segment
+                     merged[-1] = current
+            else: # No overlap
+                merged.append(current)
+
+        # Ensure segments cover the full range [0, 1] and are contiguous
+        final_segments = []
+        if not merged or merged[0]['start'] > 0:
+            final_segments.append({'start': 0.0, 'end': merged[0]['start'] if merged else 1.0, 'speed': 1.0})
+
+        for i, seg in enumerate(merged):
+            if not final_segments:
+                final_segments.append(seg)
+                continue
+
+            last = final_segments[-1]
+            if seg['start'] > last['end']: # Gap
+                final_segments.append({'start': last['end'], 'end': seg['start'], 'speed': 1.0}) # fill gap with default speed
+            final_segments.append(seg)
+
+        if final_segments and final_segments[-1]['end'] < 1.0:
+            final_segments.append({'start': final_segments[-1]['end'], 'end': 1.0, 'speed': 1.0})
+
+        # Ensure first segment starts at 0 and last ends at 1
+        if final_segments:
+            final_segments[0]['start'] = 0.0
+            final_segments[-1]['end'] = 1.0
+
+        return [s for s in final_segments if s['start'] < s['end']] # Remove zero-length segments
+
+    def reset(self, total_frames):
+        self.total_frames = total_frames
+        if self.total_frames > 0:
+            self.segments = [{'start': 0.0, 'end': 1.0, 'speed': 1.0}]
+        else:
+            self.segments = []
+        self.draw()
+
+    def get_segments(self):
+        """Converts percentage-based segments to absolute frame segments for the simulator."""
+        if not self.total_frames > 0 or not self.segments:
+            return []
+
+        frame_segments = []
+        for seg in self.segments:
+            start_frame = max(1, int(seg['start'] * self.total_frames))
+            end_frame = int(seg['end'] * self.total_frames)
+            if end_frame < start_frame: continue
+
+            # Ensure continuity with previous segment
+            if frame_segments:
+                start_frame = frame_segments[-1]['end'] + 1
+
+            frame_segments.append({
+                'start': start_frame,
+                'end': end_frame,
+                'speed': max(0.1, seg['speed']) # Speed must be > 0 for simulation logic
+            })
+
+        # Adjust last segment to cover all frames
+        if frame_segments:
+            frame_segments[-1]['end'] = self.total_frames
+
+        return frame_segments
+
 # --- 【新增】電弧彩現器 ---
 class ArcRenderer:
     def __init__(self, canvas, appearance_params):
@@ -786,18 +983,8 @@ class App(tk.Tk):
         self.animation_job = None
         self.animation_frame_index = 0
         self.arc_renderer = None
-
-        # --- 新增: 分段速率控制的狀態 ---
-        self.speed_segments = []
-        self.animation_frame_map = []
         self.total_frames = 0
-
-        # --- 新增: 分段速率UI的變數 ---
-        self.speed_control_frame = None
-        self.segment_listbox = None
-        self.start_frame_var = None
-        self.end_frame_var = None
-        self.speed_var = None
+        self.speed_control_graph = None # Will be created in create_widgets
 
         self.sim_params = {
             'fork_chance': 0.015, 'path_interruption_chance': 0.005, 'step_length': 5,
@@ -914,10 +1101,10 @@ class App(tk.Tk):
         ttk.Separator(sim_frame).pack(fill='x', pady=5)
         tk.Button(sim_frame, text="儲存動畫...", command=self.open_export_dialog).pack(fill=tk.X, pady=3)
 
-        self.speed_control_frame = ttk.LabelFrame(scrollable_frame, text="分段速率控制")
-        self.speed_control_frame.pack(fill=tk.X, padx=10, pady=10)
-        self._create_speed_control_widgets(self.speed_control_frame)
-        self._set_speed_controls_state(tk.DISABLED)
+        speed_control_frame = ttk.LabelFrame(scrollable_frame, text="速率曲線控制")
+        speed_control_frame.pack(fill=tk.X, padx=10, pady=10)
+        self.speed_control_graph = SpeedControlGraph(speed_control_frame, on_change_callback=self.preview_simulation, height=80)
+        self.speed_control_graph.pack(fill=tk.X, padx=5, pady=5)
 
         tk.Button(scrollable_frame, text="刪除選取", command=self.delete_selected).pack(side=tk.TOP, fill=tk.X, padx=10, pady=10)
         
@@ -1079,18 +1266,17 @@ class App(tk.Tk):
 
             if self.last_simulation_data:
                 self.total_frames = len(self.last_simulation_data)
-                self._set_speed_controls_state(tk.NORMAL)
-                self._reset_speed_segments() # This will also trigger a preview
+                self.speed_control_graph.reset(self.total_frames)
+                self.preview_simulation()
             else:
                 self.total_frames = 0
-                self._set_speed_controls_state(tk.DISABLED)
-                self._reset_speed_segments()
+                self.speed_control_graph.reset(0)
 
         else:
             messagebox.showinfo("模擬資訊", "在目前的佈局和電壓設定下，沒有物體之間的電位梯度超過觸發閾值。")
             self.total_frames = 0
-            self._set_speed_controls_state(tk.DISABLED)
-            self._reset_speed_segments()
+            if self.speed_control_graph:
+                self.speed_control_graph.reset(0)
 
     def preview_simulation(self):
         if not self.last_simulation_data:
@@ -1098,7 +1284,9 @@ class App(tk.Tk):
             return
 
         self.clear_simulation()
-        self.animation_frame_map = self._build_frame_map(self.speed_segments, self.total_frames)
+        # Get segments from the new graph widget
+        segments = self.speed_control_graph.get_segments()
+        self.animation_frame_map = self._build_frame_map(segments, self.total_frames)
         if not self.animation_frame_map:
             return
 
@@ -1136,8 +1324,8 @@ class App(tk.Tk):
         self.shapes.clear(); self.images.clear()
 
         self.total_frames = 0
-        self._set_speed_controls_state(tk.DISABLED)
-        self._reset_speed_segments()
+        if self.speed_control_graph:
+            self.speed_control_graph.reset(0)
 
     # --- 【新增】影片匯出功能 ---
     def open_export_dialog(self):
@@ -1335,129 +1523,6 @@ class App(tk.Tk):
 
             # 最後再用 draw 畫核心線（draw 是基於原圖的 ImageDraw）
             draw.line([p1[0], p1[1], p2[0], p2[1]], fill=segment_color, width=int(core_thickness))
-    # --- 【新增】分段速率控制相關方法 ---
-    def _create_speed_control_widgets(self, parent_frame):
-        """在指定的父框架中建立速率控制UI"""
-        list_frame = tk.Frame(parent_frame, bg=CONTROL_PANEL_BG); list_frame.pack(fill=tk.X, pady=2, padx=5)
-        self.segment_listbox = tk.Listbox(list_frame, height=3, bg=BACKGROUND_COLOR, fg="white", selectbackground="#0074D9");
-        self.segment_listbox.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        self.segment_listbox.bind('<<ListboxSelect>>', self._on_segment_select)
-
-        edit_frame = tk.Frame(parent_frame, bg=CONTROL_PANEL_BG); edit_frame.pack(fill=tk.X, pady=3, padx=5)
-        tk.Label(edit_frame, text="從:", bg=CONTROL_PANEL_BG).pack(side=tk.LEFT); self.start_frame_var = tk.StringVar(); tk.Entry(edit_frame, textvariable=self.start_frame_var, width=6).pack(side=tk.LEFT, padx=(0,5))
-        tk.Label(edit_frame, text="到:", bg=CONTROL_PANEL_BG).pack(side=tk.LEFT); self.end_frame_var = tk.StringVar(); tk.Entry(edit_frame, textvariable=self.end_frame_var, width=6).pack(side=tk.LEFT, padx=(0,5))
-        tk.Label(edit_frame, text="速率:", bg=CONTROL_PANEL_BG).pack(side=tk.LEFT); self.speed_var = tk.StringVar(); tk.Entry(edit_frame, textvariable=self.speed_var, width=5).pack(side=tk.LEFT)
-
-        btn_frame = tk.Frame(parent_frame, bg=CONTROL_PANEL_BG); btn_frame.pack(fill=tk.X, padx=5)
-        tk.Button(btn_frame, text="更新", command=self._update_segment).pack(side=tk.LEFT, padx=2)
-        tk.Button(btn_frame, text="新增片段", command=self._add_segment).pack(side=tk.LEFT, padx=2)
-        tk.Button(btn_frame, text="移除片段", command=self._remove_segment).pack(side=tk.LEFT, padx=2)
-
-    def _set_speed_controls_state(self, state):
-        """啟用或禁用速率控制UI的所有子元件"""
-        # Recursively set state for all children of the frame
-        for widget in self.speed_control_frame.winfo_children():
-            # Check for specific widget types to configure
-            if isinstance(widget, (tk.Frame, tk.LabelFrame)):
-                 for sub_widget in widget.winfo_children():
-                    if isinstance(sub_widget, (tk.Button, tk.Entry, tk.Listbox)):
-                        sub_widget.config(state=state)
-            elif isinstance(widget, (tk.Button, tk.Entry, tk.Listbox)):
-                widget.config(state=state)
-
-        # Special handling for Listbox background color to indicate disabled state
-        if self.segment_listbox:
-            self.segment_listbox.config(bg=BACKGROUND_COLOR if state == tk.NORMAL else "#333333")
-
-    def _reset_speed_segments(self):
-        """重置分段速率為預設值 (單一段落涵蓋所有畫格)"""
-        if self.total_frames > 0:
-            self.speed_segments = [{'start': 1, 'end': self.total_frames, 'speed': 1.0}]
-        else:
-            self.speed_segments = []
-        self._refresh_segment_list()
-
-    def _refresh_segment_list(self):
-        if not self.segment_listbox: return
-        self.segment_listbox.delete(0, tk.END)
-        self.speed_segments.sort(key=lambda s: s['start'])
-
-        # 填補空白區域
-        filled_segments = []
-        last_end = 0
-        for seg in self.speed_segments:
-            if seg['start'] > last_end + 1:
-                filled_segments.append({'start': last_end + 1, 'end': seg['start'] - 1, 'speed': 1.0})
-            filled_segments.append(seg)
-            last_end = seg['end']
-        if self.total_frames > 0 and last_end < self.total_frames:
-            filled_segments.append({'start': last_end + 1, 'end': self.total_frames, 'speed': 1.0})
-        self.speed_segments = filled_segments
-
-        for seg in self.speed_segments:
-            self.segment_listbox.insert(tk.END, f"畫格 {seg['start']}-{seg['end']} @ {seg['speed']:.1f}x")
-
-        # 自動觸發預覽更新
-        if self.last_simulation_data:
-            if hasattr(self, '_preview_job'): self.after_cancel(self._preview_job)
-            self._preview_job = self.after(50, self.preview_simulation)
-
-    def _on_segment_select(self, event):
-        selection = event.widget.curselection()
-        if not selection: return
-        idx = selection[0]
-        try:
-            seg = self.speed_segments[idx]
-            self.start_frame_var.set(str(seg['start']))
-            self.end_frame_var.set(str(seg['end']))
-            self.speed_var.set(f"{seg['speed']:.1f}")
-        except IndexError:
-            # This can happen if the listbox is updated while a selection event is pending
-            pass
-
-    def _validate_speed_inputs(self):
-        try:
-            start, end = int(self.start_frame_var.get()), int(self.end_frame_var.get())
-            speed = float(self.speed_var.get())
-            if not (1 <= start and start <= end and end <= self.total_frames and 0.1 <= speed <= 10.0):
-                 raise ValueError("輸入值超出範圍")
-            return start, end, speed
-        except (ValueError, TypeError):
-            messagebox.showerror("輸入錯誤", f"請檢查輸入。\n畫格範圍必須在 [1, {self.total_frames}] 內。\n速率必須是 0.1 到 10.0 之間的數字。")
-            return None, None, None
-
-    def _add_segment(self):
-        start, end, speed = self._validate_speed_inputs()
-        if start is None: return
-
-        # 移除任何與新片段重疊的舊片段
-        self.speed_segments = [s for s in self.speed_segments if s['end'] < start or s['start'] > end]
-        self.speed_segments.append({'start': start, 'end': end, 'speed': speed})
-        self._refresh_segment_list()
-
-    def _update_segment(self):
-        selection = self.segment_listbox.curselection()
-        if not selection:
-            messagebox.showwarning("操作無效", "請先從列表中選擇一個片段進行更新。");
-            return
-
-        selected_idx = selection[0]
-        start, end, speed = self._validate_speed_inputs()
-        if start is None: return
-
-        # 移除舊片段，新增更新後的片段
-        self.speed_segments.pop(selected_idx)
-        self.speed_segments = [s for s in self.speed_segments if s['end'] < start or s['start'] > end]
-        self.speed_segments.append({'start': start, 'end': end, 'speed': speed})
-        self._refresh_segment_list()
-
-    def _remove_segment(self):
-        selection = self.segment_listbox.curselection()
-        if not selection:
-            messagebox.showwarning("操作無效", "請先從列表中選擇一個片段進行移除。");
-            return
-        self.speed_segments.pop(selection[0])
-        self._refresh_segment_list()
 
 
 class VideoExportDialog(simpledialog.Dialog):
@@ -1512,7 +1577,7 @@ class VideoExportDialog(simpledialog.Dialog):
             'filepath': self.path_var.get(), 'format': self.format_var.get(),
             'include_conductors': self.include_conductors.get(), 'include_images': self.include_images.get(),
             'bg_color': self.bg_color_var.get(), 'transparent_bg': self.transparent_bg.get(),
-            'speed_segments': self.app.speed_segments
+            'speed_segments': self.app.speed_control_graph.get_segments()
         }
         self.ok_button.config(state=tk.DISABLED)
         self.app.export_video(self.settings, self.progress_var, self.status_label)
