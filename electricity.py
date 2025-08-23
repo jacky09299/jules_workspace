@@ -950,17 +950,16 @@ class App(tk.Tk):
         # --- 【新增】 --- 電弧外觀控制
         appearance_frame = tk.LabelFrame(control_panel, text="電弧外觀", padx=10, pady=10, bg=CONTROL_PANEL_BG)
         appearance_frame.pack(fill=tk.X, padx=10, pady=10)
+        appearance_frame.columnconfigure(1, weight=1) # 讓第二列(滑桿)可以伸展
 
-        # 顏色選擇
-        color_frame = tk.Frame(appearance_frame, bg=CONTROL_PANEL_BG)
-        color_frame.pack(fill=tk.X, pady=2)
-        tk.Button(color_frame, text="電弧顏色", command=self._choose_arc_color).pack(side=tk.LEFT, expand=True, fill=tk.X)
-        self.arc_color_preview = tk.Frame(color_frame, width=24, height=24, bg=self.sim_params['arc_color'], relief=tk.SUNKEN, borderwidth=1)
-        self.arc_color_preview.pack(side=tk.RIGHT, padx=(5,0))
+        # 顏色選擇 (使用 grid)
+        tk.Button(appearance_frame, text="電弧顏色", command=self._choose_arc_color).grid(row=0, column=0, columnspan=2, sticky="ew", pady=2)
+        self.arc_color_preview = tk.Frame(appearance_frame, width=24, height=24, bg=self.sim_params['arc_color'], relief=tk.SUNKEN, borderwidth=1)
+        self.arc_color_preview.grid(row=0, column=2, padx=(5,0), pady=2)
 
-        # 粗細和光暈
-        add_bar("電弧粗細", 'arc_max_thickness', appearance_frame, 1, 20, 0.5, "{:.1f}", 8)
-        add_bar("光暈強度", 'arc_glow_strength', appearance_frame, 0.0, 5.0, 0.1, "{:.1f}", 9)
+        # 粗細和光暈 (使用 grid，並修正 row index)
+        add_bar("電弧粗細", 'arc_max_thickness', appearance_frame, 1, 20, 0.5, "{:.1f}", 1)
+        add_bar("光暈強度", 'arc_glow_strength', appearance_frame, 0.0, 5.0, 0.1, "{:.1f}", 2)
 
 
         sim_frame = tk.LabelFrame(control_panel, text="模擬控制", padx=10, pady=10, bg=CONTROL_PANEL_BG)
