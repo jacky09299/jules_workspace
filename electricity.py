@@ -1,5 +1,6 @@
 import tkinter as tk
-from tkinter import ttk, simpledialog, messagebox
+from tkinter import ttk, simpledialog, messagebox, filedialog
+from PIL import Image, ImageTk
 import math
 import random
 import itertools
@@ -394,6 +395,160 @@ class ArbitraryShape(Shape):
             self.points = kwargs['points']
         super().update_params(**kwargs)
 
+# --- 新增: 可裝飾的圖片物件 ---
+class DecorativeImage:
+    def __init__(self, canvas, x, y, pil_image):
+        self.canvas = canvas
+        self.pil_image_original = pil_image.convert("RGBA")
+        self.x, self.y = x, y
+        self.scale = 1.0
+        self.angle = 0.0
+        self.id = None
+        self.tk_image = None  # 防止被垃圾回收
+        self.outline_id = None
+        self.handles = {}  # {'scale': id, 'rotate': id}
+        self.shape_type = "Image"
+        self.draw()
+
+    def draw(self):
+        # 1. 旋轉: expand=True可確保旋轉後圖片不被裁切
+        rotated_img = self.pil_image_original.rotate(self.angle, resample=Image.Resampling.BICUBIC, expand=True)
+
+        # 2. 縮放
+        w, h = rotated_img.size
+        new_size = (int(w * self.scale), int(h * self.scale))
+        # 使用LANCZOS以獲得較好的縮放品質
+        scaled_img = rotated_img.resize(new_size, Image.Resampling.LANCZOS)
+
+        # 3. 轉換為Tkinter格式並繪製
+        self.tk_image = ImageTk.PhotoImage(scaled_img)
+        if self.id: self.canvas.delete(self.id)
+        self.id = self.canvas.create_image(self.x, self.y, image=self.tk_image, tags="image")
+
+    def contains(self, px, py):
+        # 使用旋轉後的邊界框進行點選偵測
+        # 先將點轉換回圖片的本地座標系 (反向旋轉)
+        rad = math.radians(self.angle)
+        cos_a, sin_a = math.cos(rad), math.sin(rad)
+
+        local_x = (px - self.x) * cos_a + (py - self.y) * sin_a
+        local_y = -(px - self.x) * sin_a + (py - self.y) * cos_a
+
+        # 取得原始圖片縮放後的尺寸
+        w, h = self.pil_image_original.size
+        scaled_w, scaled_h = w * self.scale / 2, h * self.scale / 2
+
+        # 判斷點是否在本地座標的矩形內
+        return -scaled_w <= local_x <= scaled_w and -scaled_h <= local_y <= scaled_h
+
+    def move(self, dx, dy):
+        self.x += dx
+        self.y += dy
+        self.canvas.move(self.id, dx, dy)
+        if self.outline_id:
+            self.canvas.move(self.outline_id, dx, dy)
+            for handle in self.handles.values():
+                self.canvas.move(handle, dx, dy)
+
+    def select(self):
+        self.deselect()
+
+        w, h = self.pil_image_original.size
+        w_scaled, h_scaled = w * self.scale / 2, h * self.scale / 2
+
+        # 定義本地座標中的四個角點
+        points = [(-w_scaled, -h_scaled), (w_scaled, -h_scaled),
+                  (w_scaled, h_scaled), (-w_scaled, h_scaled)]
+
+        rad = math.radians(self.angle)
+        cos_a, sin_a = math.cos(rad), math.sin(rad)
+
+        rotated_points = []
+        for p_x, p_y in points:
+            # 旋轉角點並加上中心點座標
+            world_x = (p_x * cos_a - p_y * sin_a) + self.x
+            world_y = (p_x * sin_a + p_y * cos_a) + self.y
+            rotated_points.extend([world_x, world_y])
+
+        self.outline_id = self.canvas.create_polygon(
+            rotated_points, outline=SELECTED_OUTLINE_COLOR,
+            width=2, fill='', dash=(4, 4), tags="selection")
+        self._create_handles()
+
+    def deselect(self):
+        if self.outline_id:
+            self.canvas.delete(self.outline_id)
+            self.outline_id = None
+        self._delete_handles()
+
+    def _create_handles(self):
+        self._delete_handles()
+
+        w, h = self.pil_image_original.size
+        w_s, h_s = w * self.scale, h * self.scale
+
+        # 定義控制點在本地座標的位置 (右下角:縮放, 右上角:旋轉)
+        handle_positions = {
+            'scale': (w_s / 2, h_s / 2),
+            'rotate': (w_s / 2, -h_s / 2)
+        }
+
+        rad = math.radians(self.angle)
+        cos_a, sin_a = math.cos(rad), math.sin(rad)
+
+        for name, (p_x, p_y) in handle_positions.items():
+            world_x = (p_x * cos_a - p_y * sin_a) + self.x
+            world_y = (p_x * sin_a + p_y * cos_a) + self.y
+
+            h_id = self.canvas.create_oval(world_x - HANDLE_RADIUS, world_y - HANDLE_RADIUS,
+                                           world_x + HANDLE_RADIUS, world_y + HANDLE_RADIUS,
+                                           fill=HANDLE_COLOR, outline='white', tags="selection")
+            self.handles[name] = h_id
+
+    def _delete_handles(self):
+        for handle_id in self.handles.values():
+            self.canvas.delete(handle_id)
+        self.handles.clear()
+
+    def get_handle_at(self, x, y):
+        for name, h_id in self.handles.items():
+            hx1, hy1, hx2, hy2 = self.canvas.coords(h_id)
+            if hx1 <= x <= hx2 and hy1 <= y <= hy2:
+                return name
+        return None
+
+    def move_handle(self, handle_name, new_x, new_y):
+        dx, dy = new_x - self.x, new_y - self.y
+
+        if handle_name == 'scale':
+            orig_w, orig_h = self.pil_image_original.size
+            # 用控制點到中心的距離來決定縮放比例
+            dist = math.hypot(dx, dy)
+            # 原始控制點到中心的距離
+            orig_dist = math.hypot(orig_w / 2, orig_h / 2)
+            if orig_dist > 1:
+                self.scale = dist / orig_dist
+                if self.scale < 0.05: self.scale = 0.05 # 避免縮太小
+
+        elif handle_name == 'rotate':
+            # 用滑鼠位置與中心點構成的角度來決定旋轉角度
+            # 減去控制點本身的初始角度 (右上角)
+            orig_w, orig_h = self.pil_image_original.size
+            base_angle_rad = math.atan2(-orig_h / 2, orig_w / 2)
+            mouse_angle_rad = math.atan2(dy, dx)
+            self.angle = math.degrees(mouse_angle_rad - base_angle_rad)
+
+        self.draw()
+        self.select()
+
+    def set_layer(self, layer):
+        if layer == 'front':
+            self.canvas.tag_raise(self.id)
+            self.canvas.tag_raise("selection") # 同時提高選取框和控制點
+        elif layer == 'back':
+            self.canvas.tag_lower(self.id)
+            # 選取框和控制點已經在圖片上層，所以不用動
+
 # --- 模擬器 (V8.0 - 動態消散模型) ---
 class Simulator:
     # --- 【修改】 --- 新增 final_jump_distance 參數
@@ -617,7 +772,8 @@ class App(tk.Tk):
         self.title("進階放電模擬系統 V8.0 (動態消散模型)")
         self.geometry("1200x800")
 
-        self.shapes, self.selected_shape = [], None
+        self.shapes, self.images = [], []
+        self.selected_item = None
         self.simulator = None
         self.drag_data = {}
 
@@ -660,6 +816,9 @@ class App(tk.Tk):
         tk.Button(add_frame, text="電棒", command=lambda: self.set_add_mode("Rod")).pack(fill=tk.X)
         tk.Button(add_frame, text="平板", command=lambda: self.set_add_mode("Plate")).pack(fill=tk.X)
         tk.Button(add_frame, text="任意形狀", command=lambda: self.set_add_mode("Arbitrary")).pack(fill=tk.X)
+        ttk.Separator(add_frame, orient='horizontal').pack(fill='x', pady=5)
+        tk.Button(add_frame, text="新增圖片", command=self.add_image).pack(fill=tk.X)
+
 
         param_frame = tk.LabelFrame(control_panel, text="模擬參數", padx=10, pady=10, bg=CONTROL_PANEL_BG)
         param_frame.pack(fill=tk.X, padx=10, pady=10)
@@ -701,14 +860,33 @@ class App(tk.Tk):
         self.canvas.bind("<ButtonRelease-1>", self.on_canvas_release)
         self.canvas.bind("<Double-1>", self.on_canvas_double_click)
         self.canvas.bind("<Motion>", self.on_canvas_motion)
-        self.canvas.bind("<Button-3>", self.cancel_creation_mode) 
+        self.canvas.bind("<Button-3>", self.on_canvas_right_click)
         self.bind("<Escape>", self.cancel_creation_mode)
+
+    def on_canvas_right_click(self, event):
+        # 如果正在建立任意形狀，右鍵是取消
+        if self.is_creating_arbitrary_shape:
+            self.cancel_creation_mode(event)
+            return
+
+        item_found = next((item for item in reversed(self.images) if item.contains(event.x, event.y)), None)
+
+        if item_found:
+            self.select_item(item_found)
+            menu = tk.Menu(self, tearoff=0)
+            menu.add_command(label="移到最上層", command=lambda: item_found.set_layer('front'))
+            menu.add_command(label="移到最下層", command=lambda: item_found.set_layer('back'))
+            menu.post(event.x_root, event.y_root)
+        else:
+            # 如果沒點到圖片，右鍵預設行為是取消建立模式
+            self.cancel_creation_mode(event)
 
     def cancel_creation_mode(self, event=None):
         self.canvas.config(cursor="")
         self.add_shape_mode = None
         self.is_creating_rod = False
         self.drag_data.clear()
+        self.select_item(None) # 取消選取
 
         if self.is_creating_arbitrary_shape:
             self.is_creating_arbitrary_shape = False
@@ -728,42 +906,67 @@ class App(tk.Tk):
         if shape_type == "Arbitrary":
             self.is_creating_arbitrary_shape = True
             messagebox.showinfo("繪製提示", "請在畫布上點擊以放置頂點。\n點擊第一個頂點或按兩下來完成形狀。\n按右鍵或 Esc 鍵取消。")
-        self.select_shape(None)
+        self.select_item(None)
         self.canvas.config(cursor="crosshair")
         
+    def add_image(self):
+        self.cancel_creation_mode()
+        filepath = filedialog.askopenfilename(
+            title="選擇圖片",
+            filetypes=[("Image files", "*.png *.jpg *.jpeg *.gif *.bmp"), ("All files", "*.*")]
+        )
+        if not filepath:
+            return
+        try:
+            pil_image = Image.open(filepath)
+            # 將圖片放在畫布中央
+            x = self.canvas.winfo_width() / 2
+            y = self.canvas.winfo_height() / 2
+            image_obj = DecorativeImage(self.canvas, x, y, pil_image)
+            self.images.append(image_obj)
+            self.select_item(image_obj)
+        except Exception as e:
+            messagebox.showerror("圖片載入失敗", f"無法載入圖片檔案：\n{e}")
+
     def on_canvas_press(self, event):
+        # 處理多邊形建立
         if self.is_creating_arbitrary_shape:
+            # ... (此部分邏輯不變)
             x, y = event.x, event.y
             if self.current_polygon_points and \
                math.hypot(x - self.current_polygon_points[0][0], y - self.current_polygon_points[0][1]) < HANDLE_RADIUS * 2:
                 self.finalize_arbitrary_shape()
                 return
-
             if self.current_polygon_points:
                 px, py = self.current_polygon_points[-1]
                 l_id = self.canvas.create_line(px, py, x, y, fill=SELECTED_OUTLINE_COLOR, width=2)
                 self.temp_drawing_artifacts.append(l_id)
-
             self.current_polygon_points.append((x, y))
             p_id = self.canvas.create_oval(x-3, y-3, x+3, y+3, fill=HANDLE_COLOR)
             self.temp_drawing_artifacts.append(p_id)
             return
         
+        # 處理物件新增模式
         if self.add_shape_mode:
             if self.is_creating_rod:
                 self.drag_data = {'x1': event.x, 'y1': event.y, 'line_id': None}
             return
 
-        if self.selected_shape:
-            handle_index = self.selected_shape.get_handle_at(event.x, event.y)
+        # 處理已選取物件的控制點
+        if self.selected_item:
+            handle_index = self.selected_item.get_handle_at(event.x, event.y)
             if handle_index is not None:
-                self.drag_data = {'item': self.selected_shape, 'type': 'handle', 'index': handle_index}
+                self.drag_data = {'item': self.selected_item, 'type': 'handle', 'index': handle_index}
                 return
 
-        shape_found = next((s for s in reversed(self.shapes) if s.contains(event.x, event.y)), None)
-        self.select_shape(shape_found)
-        if shape_found:
-            self.drag_data = {'item': shape_found, 'type': 'body', 'x': event.x, 'y': event.y}
+        # 尋找並選取物件 (圖片優先)
+        all_items = self.images + self.shapes
+        item_found = next((item for item in reversed(all_items) if item.contains(event.x, event.y)), None)
+
+        self.select_item(item_found)
+
+        if item_found:
+            self.drag_data = {'item': item_found, 'type': 'body', 'x': event.x, 'y': event.y}
 
     def on_canvas_motion(self, event):
         if not self.is_creating_arbitrary_shape or not self.current_polygon_points: return
@@ -790,10 +993,10 @@ class App(tk.Tk):
             if self.drag_data['type'] == 'body':
                 dx, dy = event.x - self.drag_data['x'], event.y - self.drag_data['y']
                 item.move(dx, dy)
-                if item.outline_id: item.select()
                 self.drag_data['x'], self.drag_data['y'] = event.x, event.y
             elif self.drag_data['type'] == 'handle':
                 item.move_handle(self.drag_data['index'], event.x, event.y)
+
 
     def on_canvas_release(self, event):
         if self.is_creating_arbitrary_shape: return
@@ -811,7 +1014,9 @@ class App(tk.Tk):
                 if math.hypot(event.x - x1, event.y - y1) > 10:
                     shape = Rod(self.canvas, x1, y1, event.x, event.y)
             
-            if shape: self.shapes.append(shape)
+            if shape:
+                self.shapes.append(shape)
+                self.select_item(shape)
             self.add_shape_mode = None
             self.is_creating_rod = False
 
@@ -822,10 +1027,12 @@ class App(tk.Tk):
             self.finalize_arbitrary_shape()
             return
 
-        shape_found = next((s for s in reversed(self.shapes) if s.contains(event.x, event.y)), None)
-        if shape_found:
-            self.select_shape(shape_found)
-            ParameterDialog(self, f"設定 {shape_found.shape_type} 參數", shape_found)
+        item_found = next((s for s in reversed(self.shapes) if s.contains(event.x, event.y)), None)
+        if item_found:
+            self.select_item(item_found)
+            # 確保只有 Shape 物件能開啟參數對話框
+            if hasattr(item_found, 'voltage'):
+                ParameterDialog(self, f"設定 {item_found.shape_type} 參數", item_found)
             
     def finalize_arbitrary_shape(self):
         if not self.is_creating_arbitrary_shape or len(self.current_polygon_points) < 3:
@@ -837,22 +1044,31 @@ class App(tk.Tk):
         self.shapes.append(shape)
         
         self.cancel_creation_mode() 
-        self.select_shape(shape) 
+        self.select_item(shape)
 
-    def select_shape(self, shape):
-        if self.selected_shape and self.selected_shape != shape:
-            self.selected_shape.deselect()
-        if shape:
-            shape.select()
-        self.selected_shape = shape
+    def select_item(self, item):
+        if self.selected_item and self.selected_item != item:
+            self.selected_item.deselect()
+
+        if item and self.selected_item != item:
+            item.select()
+            self.selected_item = item
+        elif not item:
+            self.selected_item = None
 
     def delete_selected(self):
-        if self.selected_shape:
-            shape = self.selected_shape
-            self.select_shape(None)
-            shape.deselect()
-            self.canvas.delete(shape.id)
-            self.shapes.remove(shape)
+        if not self.selected_item: return
+
+        item = self.selected_item
+        item.deselect()
+        self.canvas.delete(item.id)
+
+        if item in self.shapes:
+            self.shapes.remove(item)
+        elif item in self.images:
+            self.images.remove(item)
+
+        self.select_item(None)
 
     def start_simulation(self):
         self.clear_simulation()
@@ -878,7 +1094,6 @@ class App(tk.Tk):
                 arc_jobs.append({'source': source, 'target': target})
 
         if arc_jobs:
-            # --- 【修改】 --- 傳入新的參數
             self.simulator = Simulator(
                 self, self.canvas, self.shapes,
                 fork_chance=self.sim_params['fork_chance'],
@@ -888,7 +1103,7 @@ class App(tk.Tk):
                 probe_angle=self.sim_params['probe_angle'],
                 field_exponent=self.sim_params['field_exponent'],
                 final_jump_distance=self.sim_params['final_jump_distance'],
-                arc_threshold=self.sim_params['arc_threshold_v_pixel'] # --- 【新增】 ---
+                arc_threshold=self.sim_params['arc_threshold_v_pixel']
             )
             self.simulator.start(arc_jobs)
         else:
@@ -902,11 +1117,14 @@ class App(tk.Tk):
 
     def clear_all(self):
         self.clear_simulation()
-        for shape in self.shapes:
-            shape.deselect()
-            self.canvas.delete(shape.id)
+        self.select_item(None)
+
+        for item in self.shapes + self.images:
+            item.deselect()
+            self.canvas.delete(item.id)
+
         self.shapes.clear()
-        self.select_shape(None)
+        self.images.clear()
 
 if __name__ == "__main__":
     app = App()
