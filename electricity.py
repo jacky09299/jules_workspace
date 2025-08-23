@@ -1228,40 +1228,73 @@ class App(tk.Tk):
     def _draw_arcs_on_pil(self, draw, frame_data, params, background_img):
         def _interpolate_color(c1, c2, f):
             try:
-                c1_rgb = tuple(int(c1.lstrip('#')[i:i+2], 16) for i in (0, 2, 4)); c2_rgb = tuple(int(c2.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
-                rgb = [int(c1_rgb[i] + (c2_rgb[i] - c1_rgb[i]) * f) for i in range(3)]; return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
-            except: return c1
+                c1_rgb = tuple(int(c1.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
+                c2_rgb = tuple(int(c2.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
+                rgb = [int(c1_rgb[i] + (c2_rgb[i] - c1_rgb[i]) * f) for i in range(3)]
+                return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
+            except:
+                return c1
+
         def _get_glow_alpha(dist, points):
             dist = max(0, min(1, dist))
             for i in range(len(points) - 1):
                 p1, p2 = points[i], points[i+1]
                 if p1[0] <= dist <= p2[0]:
-                    r = p2[0] - p1[0]; return p1[1] + ((dist - p1[0]) / r) * (p2[1] - p1[1]) if r != 0 else p1[1]
+                    r = p2[0] - p1[0]
+                    return p1[1] + ((dist - p1[0]) / r) * (p2[1] - p1[1]) if r != 0 else p1[1]
             return points[-1][1]
+
+        # 確保 background_img 是 PIL Image 且為 RGBA（方便處理 alpha）
+        if background_img.mode != 'RGBA':
+            background_img = background_img.convert('RGBA')
+            # 注意：若外面還有其他地方持有原圖的引用，視情況你可能要回傳這個 new image
+            # 不過通常 paste() 會就在原圖上修改（若不轉換則會直接修改）
+
         for segment in frame_data:
             p1, p2, thickness, life = segment['p1'], segment['p2'], segment['thickness'], segment['life']
-            if thickness < 0.2: continue
-            life_factor = max(0, min(1, life / params['arc_max_life'])); core_thickness = thickness * (0.2 + life_factor * 0.8)
-            if core_thickness < 0.5: continue
+            if thickness < 0.2:
+                continue
+            life_factor = max(0, min(1, life / params['arc_max_life']))
+            core_thickness = thickness * (0.2 + life_factor * 0.8)
+            if core_thickness < 0.5:
+                continue
             segment_color = _interpolate_color(params['arc_color'], "#FFFFFF", life_factor)
-            dx, dy = p2[0] - p1[0], p2[1] - p1[1]; length = math.hypot(dx, dy)
-            if length < 1e-6: continue
+            dx, dy = p2[0] - p1[0], p2[1] - p1[1]
+            length = math.hypot(dx, dy)
+            if length < 1e-6:
+                continue
             nx, ny = -dy / length, dx / length
-            if params['arc_glow_strength'] > 0:
-                max_glow_radius = core_thickness / 2 * (1 + params['arc_glow_strength'] * 3.0); glow_points = params['glow_falloff_points']
-                for i in range(15, 0, -1):
-                    dist = i / 15; alpha = _get_glow_alpha(dist, glow_points)
-                    if alpha <= 0.01: continue
-                    layer_color_str = _interpolate_color(BACKGROUND_COLOR, params['arc_color'], alpha)
-                    layer_color_rgb = (int(layer_color_str[1:3], 16), int(layer_color_str[3:5], 16), int(layer_color_str[5:7], 16))
-                    layer_width = max_glow_radius * dist * 2
-                    p1a = (p1[0] + nx * layer_width/2, p1[1] + ny * layer_width/2); p2a = (p2[0] + nx * layer_width/2, p2[1] + ny * layer_width/2)
-                    p2b = (p2[0] - nx * layer_width/2, p2[1] - ny * layer_width/2); p1b = (p1[0] - nx * layer_width/2, p1[1] - ny * layer_width/2)
-                    poly_img = Image.new('RGBA', draw.im.size, (0,0,0,0)); poly_draw = ImageDraw.Draw(poly_img)
-                    poly_draw.polygon([p1a, p2a, p2b, p1b], fill=layer_color_rgb + (int(alpha*255*0.5),))
-                    draw.im.paste(poly_img, (0,0), poly_img)
-            draw.line((p1[0], p1[1], p2[0], p2[1]), fill=segment_color, width=int(core_thickness))
 
+            if params['arc_glow_strength'] > 0:
+                max_glow_radius = core_thickness / 2 * (1 + params['arc_glow_strength'] * 3.0)
+                glow_points = params['glow_falloff_points']
+                for i in range(15, 0, -1):
+                    dist = i / 15
+                    alpha = _get_glow_alpha(dist, glow_points)
+                    if alpha <= 0.01:
+                        continue
+                    layer_color_str = _interpolate_color(BACKGROUND_COLOR, params['arc_color'], alpha)
+                    layer_color_rgb = (int(layer_color_str[1:3], 16),
+                                    int(layer_color_str[3:5], 16),
+                                    int(layer_color_str[5:7], 16))
+                    layer_width = max_glow_radius * dist * 2
+                    p1a = (p1[0] + nx * layer_width/2, p1[1] + ny * layer_width/2)
+                    p2a = (p2[0] + nx * layer_width/2, p2[1] + ny * layer_width/2)
+                    p2b = (p2[0] - nx * layer_width/2, p2[1] - ny * layer_width/2)
+                    p1b = (p1[0] - nx * layer_width/2, p1[1] - ny * layer_width/2)
+
+                    # 用 background_img.size 來建立同尺寸的 poly_img
+                    poly_img = Image.new('RGBA', background_img.size, (0,0,0,0))
+                    poly_draw = ImageDraw.Draw(poly_img)
+                    poly_draw.polygon([p1a, p2a, p2b, p1b], fill=layer_color_rgb + (int(alpha*255*0.5),))
+
+                    # === 這裡改用 Image.paste (在 PIL 層) 而不是 draw.im.paste ===
+                    background_img.paste(poly_img, (0, 0), poly_img)
+                    # 如果你想用 alpha_composite（速度/品質差異），可以改成：
+                    # background_img = Image.alpha_composite(background_img, poly_img)
+
+            # 最後再用 draw 畫核心線（draw 是基於原圖的 ImageDraw）
+            draw.line([p1[0], p1[1], p2[0], p2[1]], fill=segment_color, width=int(core_thickness))
     # --- 【新增】分段速率控制相關方法 ---
     def _create_speed_control_widgets(self, parent_frame):
         """在指定的父框架中建立速率控制UI"""
