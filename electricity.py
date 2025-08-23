@@ -1153,13 +1153,24 @@ class App(tk.Tk):
         processed_segments = [{'start': s['start']-1, 'end': s['end']-1, 'speed': s['speed']} for s in segments]
 
         for seg in processed_segments:
-            num_original_frames = seg['end'] - seg['start'] + 1
-            num_new_frames = int(num_original_frames / seg['speed'])
-            for i in range(num_new_frames):
-                original_index = seg['start'] + int(i * seg['speed'])
-                if original_index < total_original_frames:
-                    frame_map.append(original_index)
-        return frame_map
+            # 使用浮點數進行精確的時間步進
+            time_in_original_frames = float(seg['start'])
+            while time_in_original_frames <= seg['end']:
+                frame_map.append(int(round(time_in_original_frames))) # 四捨五入以處理浮點數精度問題
+                time_in_original_frames += seg['speed']
+
+            # 確保每個片段的最後一格都被包含，以防步進時跳過
+            if not frame_map or frame_map[-1] < seg['end']:
+                frame_map.append(seg['end'])
+
+        # 過濾掉超出範圍的畫格並移除重複項，同時保持順序
+        final_map = []
+        seen = set()
+        for frame in frame_map:
+            if frame < total_original_frames and frame not in seen:
+                final_map.append(frame)
+                seen.add(frame)
+        return final_map
 
     def export_video(self, settings, progress_var, status_label):
         filepath = settings['filepath']
