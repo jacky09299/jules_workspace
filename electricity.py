@@ -912,7 +912,7 @@ class Simulator:
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("進階放電模擬系統 V10.1 (即時速率預覽)")
+        self.title("進階放電模擬系統 V11.0 (即時顯示控制)")
         self.geometry("1200x800")
 
         self.shapes, self.images = [], []
@@ -932,7 +932,12 @@ class App(tk.Tk):
         self.animation_frame_index = 0
         self.arc_renderer = None
         self.total_frames = 0
-        self.speed_control_graph = None # Will be created in create_widgets
+        self.speed_control_graph = None
+
+        # --- 新增: 用於UI控制的變數 ---
+        self.show_conductors = tk.BooleanVar(value=True)
+        self.show_images = tk.BooleanVar(value=True)
+        self.background_color_str = tk.StringVar(value=BACKGROUND_COLOR)
 
         self.sim_params = {
             'fork_chance': 0.015, 'path_interruption_chance': 0.005, 'step_length': 5,
@@ -942,52 +947,43 @@ class App(tk.Tk):
             'glow_falloff_1': 0.7, 'glow_falloff_2': 0.3, 'glow_falloff_3': 0.1, 'glow_falloff_4': 0.0,
         }
         self.create_widgets()
+        # 初始更新一次顯示狀態
+        self.update_display()
 
     def create_widgets(self):
         main_frame = tk.Frame(self)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # --- Create a container for the scrollable control panel ---
         control_container = tk.Frame(main_frame, relief=tk.RIDGE, borderwidth=2)
         control_container.pack(side=tk.LEFT, fill=tk.Y, padx=5, pady=5)
 
-        # --- Create a Canvas and a Scrollbar ---
         scroll_canvas = tk.Canvas(control_container, bg=CONTROL_PANEL_BG, highlightthickness=0, width=250)
         scrollbar = ttk.Scrollbar(control_container, orient="vertical", command=scroll_canvas.yview)
         scroll_canvas.configure(yscrollcommand=scrollbar.set)
-
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         scroll_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # --- Create a frame inside the canvas to hold the content ---
         scrollable_frame = tk.Frame(scroll_canvas, bg=CONTROL_PANEL_BG)
-
-        # --- Add the frame to a window in the canvas ---
         scrollable_frame_window = scroll_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
 
         def configure_scroll_region(event):
             scroll_canvas.configure(scrollregion=scroll_canvas.bbox("all"))
-            # Make the scrollable frame match the canvas width
             scroll_canvas.itemconfig(scrollable_frame_window, width=scroll_canvas.winfo_width())
 
         def on_mouse_wheel(event):
-            # Platform-independent scrolling
             if event.num == 5 or event.delta < 0:
                 scroll_canvas.yview_scroll(1, "units")
             elif event.num == 4 or event.delta > 0:
                 scroll_canvas.yview_scroll(-1, "units")
 
         scrollable_frame.bind("<Configure>", configure_scroll_region)
-        # Bind mouse wheel scrolling to the canvas and its children
         self.bind_all("<MouseWheel>", on_mouse_wheel)
         self.bind_all("<Button-4>", on_mouse_wheel)
         self.bind_all("<Button-5>", on_mouse_wheel)
 
-
-        self.canvas = tk.Canvas(main_frame, bg=BACKGROUND_COLOR, highlightthickness=0)
+        self.canvas = tk.Canvas(main_frame, bg=self.background_color_str.get(), highlightthickness=0)
         self.canvas.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-        # --- All subsequent frames are packed into the scrollable_frame ---
         add_frame = tk.LabelFrame(scrollable_frame, text="新增物體", padx=10, pady=10, bg=CONTROL_PANEL_BG)
         add_frame.pack(fill=tk.X, padx=10, pady=10)
         tk.Button(add_frame, text="針頭", command=lambda: self.set_add_mode("Needle")).pack(fill=tk.X)
@@ -997,26 +993,48 @@ class App(tk.Tk):
         ttk.Separator(add_frame, orient='horizontal').pack(fill='x', pady=5)
         tk.Button(add_frame, text="新增圖片", command=self.add_image).pack(fill=tk.X)
 
+        # --- 【新】顯示設定 ---
+        display_frame = tk.LabelFrame(scrollable_frame, text="顯示設定", padx=10, pady=10, bg=CONTROL_PANEL_BG)
+        display_frame.pack(fill=tk.X, padx=10, pady=10)
+        tk.Checkbutton(display_frame, text="顯示導體", variable=self.show_conductors, command=self.update_display, bg=CONTROL_PANEL_BG).pack(anchor="w")
+        tk.Checkbutton(display_frame, text="顯示圖片", variable=self.show_images, command=self.update_display, bg=CONTROL_PANEL_BG).pack(anchor="w")
+        
+        bg_frame = tk.Frame(display_frame, bg=CONTROL_PANEL_BG)
+        bg_frame.pack(fill='x', pady=(5,0))
+        tk.Button(bg_frame, text="背景顏色", command=self._choose_main_bg_color).pack(side=tk.LEFT)
+        self.bg_preview = tk.Frame(bg_frame, width=24, height=24, bg=self.background_color_str.get(), relief=tk.SUNKEN, borderwidth=1)
+        self.bg_preview.pack(side=tk.LEFT, padx=5)
+        
         param_frame = tk.LabelFrame(scrollable_frame, text="模擬參數", padx=10, pady=10, bg=CONTROL_PANEL_BG)
         param_frame.pack(fill=tk.X, padx=10, pady=10)
         def add_bar(label, key, frm, from_, to_, resolution, fmt, row):
             tk.Label(frm, text=label, bg=CONTROL_PANEL_BG).grid(row=row, column=0, sticky="w")
+            # 【修改】從 self.sim_params 初始化，確保值被保留
             var = tk.DoubleVar(value=self.sim_params[key])
-            # Reduce scale length slightly to fit better with scrollbar
             scale = tk.Scale(frm, variable=var, from_=from_, to=to_, resolution=resolution, orient=tk.HORIZONTAL, length=100, showvalue=0, bg=CONTROL_PANEL_BG)
             scale.grid(row=row, column=1)
             val_label = tk.Label(frm, text=fmt.format(self.sim_params[key]), bg=CONTROL_PANEL_BG, width=6, anchor='w')
             val_label.grid(row=row, column=2)
             def on_change(val):
                 self.sim_params[key] = float(val)
-                val_label.config(text=f"{float(val):.1f}")
+                # 【修改】格式化輸出以避免不必要的 .0
+                if resolution >= 1:
+                    val_label.config(text=f"{int(float(val))}")
+                else:
+                    val_label.config(text=f"{float(val):.3f}".rstrip('0').rstrip('.'))
+
                 if 'arc' in key or 'glow' in key:
                     if hasattr(self, '_preview_job'):
                         self.after_cancel(self._preview_job)
                     self._preview_job = self.after(50, self.preview_simulation)
-            if isinstance(resolution, float):
-                val_label.config(text=f"{var.get():.1f}")
+            
             scale.config(command=on_change)
+            # 【修改】將 scale 和 label 附加到 var 上，以便可以從外部更新
+            var.trace_add("write", lambda *args: on_change(var.get()))
+            setattr(var, 'scale_widget', scale)
+            setattr(var, 'label_widget', val_label)
+            setattr(self, f"var_{key}", var) # 將變數儲存到 self
+
         add_bar("觸發閾(V/px)", 'arc_threshold_v_pixel', param_frame, 1, 500, 1, "{:.0f}", 0)
         add_bar("分岔機率", 'fork_chance', param_frame, 0, 0.05, 0.001, "{:.3f}", 1)
         add_bar("消散機率", 'path_interruption_chance', param_frame, 0, 0.05, 0.001, "{:.3f}", 2)
@@ -1061,13 +1079,46 @@ class App(tk.Tk):
         self.canvas.bind("<Motion>", self.on_canvas_motion); self.canvas.bind("<Button-3>", self.on_canvas_right_click)
         self.bind("<Escape>", self.cancel_creation_mode)
 
-    # Most methods from V9.0 are unchanged and omitted for brevity...
+    # --- 【新】方法: 更新畫布顯示 ---
+    def update_display(self):
+        # 更新背景顏色
+        self.canvas.config(bg=self.background_color_str.get())
+        self.bg_preview.config(bg=self.background_color_str.get())
+
+        # 更新導體可見性
+        conductor_state = 'normal' if self.show_conductors.get() else 'hidden'
+        for shape in self.shapes:
+            self.canvas.itemconfig(shape.id, state=conductor_state)
+            # 選取框和控制點也需要同步
+            if shape.outline_id:
+                self.canvas.itemconfig(shape.outline_id, state=conductor_state)
+            for handle in shape.handles:
+                self.canvas.itemconfig(handle, state=conductor_state)
+
+        # 更新圖片可見性
+        image_state = 'normal' if self.show_images.get() else 'hidden'
+        for image in self.images:
+            self.canvas.itemconfig(image.id, state=image_state)
+            # 選取框和控制點也需要同步
+            if image.outline_id:
+                self.canvas.itemconfig(image.outline_id, state=image_state)
+            for handle in image.handles.values():
+                self.canvas.itemconfig(handle, state=image_state)
+
+    # --- 【新】方法: 選擇主畫布背景顏色 ---
+    def _choose_main_bg_color(self):
+        color_code = colorchooser.askcolor(title="選擇背景顏色", initialcolor=self.background_color_str.get())
+        if color_code and color_code[1]:
+            self.background_color_str.set(color_code[1])
+            self.update_display()
+
     def _choose_arc_color(self):
         color_code = colorchooser.askcolor(title="選擇電弧顏色", initialcolor=self.sim_params['arc_color'])
         if color_code and color_code[1]:
             self.sim_params['arc_color'] = color_code[1]
             self.arc_color_preview.config(bg=color_code[1])
             self.preview_simulation()
+
     def on_canvas_right_click(self, event):
         if self.is_creating_arbitrary_shape: self.cancel_creation_mode(event); return
         item_found = next((item for item in reversed(self.images) if item.contains(event.x, event.y)), None)
@@ -1078,6 +1129,7 @@ class App(tk.Tk):
             menu.add_command(label="移到最下層", command=lambda: item_found.set_layer('back'))
             menu.post(event.x_root, event.y_root)
         else: self.cancel_creation_mode(event)
+
     def cancel_creation_mode(self, event=None):
         self.canvas.config(cursor=""); self.add_shape_mode = None; self.is_creating_rod = False
         self.drag_data.clear(); self.select_item(None)
@@ -1089,13 +1141,15 @@ class App(tk.Tk):
             self.temp_drawing_artifacts.clear(); self.current_polygon_points.clear()
             self.rubber_band_line_id, self.closing_line_id = None, None
         return "break"
+
     def set_add_mode(self, shape_type):
         self.cancel_creation_mode(); self.add_shape_mode = shape_type
         self.is_creating_rod = (shape_type == "Rod")
         if shape_type == "Arbitrary":
-            self.is_creating_arbitrary_shape = True
             messagebox.showinfo("繪製提示", "請在畫布上點擊以放置頂點。\n點擊第一個頂點或按兩下來完成形狀。\n按右鍵或 Esc 鍵取消。")
+            self.is_creating_arbitrary_shape = True
         self.select_item(None); self.canvas.config(cursor="crosshair")
+
     def add_image(self):
         self.cancel_creation_mode()
         filepath = filedialog.askopenfilename(title="選擇圖片", filetypes=[("Image files", "*.png *.jpg *.jpeg *.gif *.bmp"), ("All files", "*.*")])
@@ -1104,10 +1158,14 @@ class App(tk.Tk):
             pil_image = Image.open(filepath)
             x, y = self.canvas.winfo_width() / 2, self.canvas.winfo_height() / 2
             image_obj = DecorativeImage(self.canvas, x, y, pil_image, self)
-            self.images.append(image_obj); self.select_item(image_obj)
+            self.images.append(image_obj)
+            self.select_item(image_obj)
+            self.update_display() # 確保新圖片符合顯示設定
         except Exception as e: messagebox.showerror("圖片載入失敗", f"無法載入圖片檔案：\n{e}")
+
     def raise_top_images(self):
         for img in self.top_images: img.set_layer('front')
+
     def on_canvas_press(self, event):
         if self.is_creating_arbitrary_shape:
             x, y = event.x, event.y
@@ -1122,14 +1180,23 @@ class App(tk.Tk):
         if self.add_shape_mode:
             if self.is_creating_rod: self.drag_data = {'x1': event.x, 'y1': event.y, 'line_id': None}
             return
+        
+        # 【修改】點選前先確認物件是否可見
+        all_items = []
+        if self.show_images.get():
+            all_items.extend(self.images)
+        if self.show_conductors.get():
+            all_items.extend(self.shapes)
+
         if self.selected_item:
             handle_index = self.selected_item.get_handle_at(event.x, event.y)
             if handle_index is not None:
                 self.drag_data = {'item': self.selected_item, 'type': 'handle', 'index': handle_index}; return
-        all_items = self.images + self.shapes
+
         item_found = next((item for item in reversed(all_items) if item.contains(event.x, event.y)), None)
         self.select_item(item_found)
         if item_found: self.drag_data = {'item': item_found, 'type': 'body', 'x': event.x, 'y': event.y}
+
     def on_canvas_motion(self, event):
         if not self.is_creating_arbitrary_shape or not self.current_polygon_points: return
         if self.rubber_band_line_id: self.canvas.delete(self.rubber_band_line_id)
@@ -1139,9 +1206,10 @@ class App(tk.Tk):
         if len(self.current_polygon_points) > 1:
             sx, sy = self.current_polygon_points[0]
             self.closing_line_id = self.canvas.create_line(event.x, event.y, sx, sy, fill=SELECTED_OUTLINE_COLOR, dash=(4,4))
+
     def on_canvas_drag(self, event):
         if self.is_creating_rod and 'x1' in self.drag_data:
-            if self.drag_data['line_id']: self.canvas.delete(self.drag_data['line_id'])
+            if self.drag_data.get('line_id'): self.canvas.delete(self.drag_data['line_id'])
             self.drag_data['line_id'] = self.canvas.create_line(self.drag_data['x1'], self.drag_data['y1'], event.x, event.y, fill=SELECTED_OUTLINE_COLOR, width=3, dash=(4,4))
             return
         if 'item' in self.drag_data:
@@ -1150,7 +1218,14 @@ class App(tk.Tk):
                 dx, dy = event.x - self.drag_data['x'], event.y - self.drag_data['y']
                 item.move(dx, dy)
                 self.drag_data['x'], self.drag_data['y'] = event.x, event.y
-            elif self.drag_data['type'] == 'handle': item.move_handle(self.drag_data['index'], event.x, event.y)
+            elif self.drag_data['type'] == 'handle': 
+                item.move_handle(self.drag_data['index'], event.x, event.y)
+                # 【新增】拖動控制點時即時預覽電弧
+                if 'arc' in self.sim_params:
+                    if hasattr(self, '_preview_job'):
+                        self.after_cancel(self._preview_job)
+                    self._preview_job = self.after(50, self.preview_simulation)
+
     def on_canvas_release(self, event):
         if self.is_creating_arbitrary_shape: return
         self.canvas.config(cursor="")
@@ -1162,24 +1237,42 @@ class App(tk.Tk):
                 if self.drag_data.get('line_id'): self.canvas.delete(self.drag_data['line_id'])
                 x1, y1 = self.drag_data['x1'], self.drag_data['y1']
                 if math.hypot(event.x - x1, event.y - y1) > 10: shape = Rod(self.canvas, x1, y1, event.x, event.y)
-            if shape: self.shapes.append(shape); self.select_item(shape)
+            if shape: 
+                self.shapes.append(shape)
+                self.select_item(shape)
+                self.update_display() # 確保新導體符合顯示設定
             self.add_shape_mode, self.is_creating_rod = None, False
         self.drag_data.clear()
+
     def on_canvas_double_click(self, event):
         if self.is_creating_arbitrary_shape: self.finalize_arbitrary_shape(); return
-        item_found = next((s for s in reversed(self.shapes) if s.contains(event.x, event.y)), None)
-        if item_found and hasattr(item_found, 'voltage'):
-            self.select_item(item_found)
-            ParameterDialog(self, f"設定 {item_found.shape_type} 參數", item_found)
+        # 【修改】只在可見的導體中尋找
+        if self.show_conductors.get():
+            item_found = next((s for s in reversed(self.shapes) if s.contains(event.x, event.y)), None)
+            if item_found and hasattr(item_found, 'voltage'):
+                self.select_item(item_found)
+                ParameterDialog(self, f"設定 {item_found.shape_type} 參數", item_found)
+
     def finalize_arbitrary_shape(self):
         if not self.is_creating_arbitrary_shape or len(self.current_polygon_points) < 3:
             messagebox.showwarning("創建錯誤", "一個有效的封閉導體至少需要3個頂點。"); self.cancel_creation_mode(); return
         shape = ArbitraryShape(self.canvas, self.current_polygon_points.copy())
-        self.shapes.append(shape); self.cancel_creation_mode(); self.select_item(shape)
+        self.shapes.append(shape)
+        self.cancel_creation_mode()
+        self.select_item(shape)
+        self.update_display() # 確保新導體符合顯示設定
+
     def select_item(self, item):
         if self.selected_item and self.selected_item != item: self.selected_item.deselect()
-        if item and self.selected_item != item: item.select(); self.selected_item = item
-        elif not item: self.selected_item = None
+        if item and self.selected_item != item: 
+            item.select()
+            self.selected_item = item
+        elif not item: 
+            if self.selected_item:
+                self.selected_item.deselect()
+            self.selected_item = None
+        self.update_display() # 確保選取框也更新
+
     def delete_selected(self):
         if not self.selected_item: return
         item = self.selected_item; item.deselect(); self.canvas.delete(item.id)
@@ -1188,6 +1281,7 @@ class App(tk.Tk):
             self.images.remove(item)
             if item in self.top_images: self.top_images.remove(item)
         self.select_item(None)
+
     def _get_current_appearance_params(self):
         params = {k: v for k, v in self.sim_params.items() if 'arc' in k or 'glow' in k}
         params['glow_falloff_points'] = [
@@ -1195,9 +1289,13 @@ class App(tk.Tk):
             (0.5, self.sim_params['glow_falloff_2']), (0.75, self.sim_params['glow_falloff_3']),
             (1.0, self.sim_params['glow_falloff_4'])]
         return params
+
     def start_new_simulation(self):
+        # 【修改】執行模擬時，所有UI上的設定值 (sim_params, 顯示與否, 背景色) 都會自然保留
+        # 因為它們是 self 的屬性，這個方法不會重置它們
         self.clear_simulation()
         if len(self.shapes) < 2: messagebox.showwarning("模擬錯誤", "需要至少兩個物體才能進行模擬。"); return
+        
         arc_jobs = []
         threshold = self.sim_params['arc_threshold_v_pixel']
         for shape_a, shape_b in itertools.combinations(self.shapes, 2):
@@ -1207,6 +1305,7 @@ class App(tk.Tk):
             if distance > 1.0 and delta_v / distance > threshold:
                 source, target = (shape_a, shape_b) if shape_a.voltage > shape_b.voltage else (shape_b, shape_a)
                 arc_jobs.append({'source': source, 'target': target})
+        
         if arc_jobs:
             simulator = Simulator(self.shapes, self.sim_params)
             canvas_size = (self.canvas.winfo_width(), self.canvas.winfo_height())
@@ -1219,7 +1318,6 @@ class App(tk.Tk):
             else:
                 self.total_frames = 0
                 self.speed_control_graph.reset(0)
-
         else:
             messagebox.showinfo("模擬資訊", "在目前的佈局和電壓設定下，沒有物體之間的電位梯度超過觸發閾值。")
             self.total_frames = 0
@@ -1232,7 +1330,6 @@ class App(tk.Tk):
             return
 
         self.clear_simulation()
-        # Get points from the new graph widget
         points = self.speed_control_graph.get_points()
         self.animation_frame_map = self._build_frame_map(points, self.total_frames)
         if not self.animation_frame_map:
@@ -1247,16 +1344,13 @@ class App(tk.Tk):
     def play_simulation_animation(self):
         if self.animation_frame_index < len(self.animation_frame_map):
             original_frame_index = self.animation_frame_map[self.animation_frame_index]
-
             frames_to_render = range(self.last_preview_frame_index + 1, original_frame_index + 1)
             for frame_idx_to_draw in frames_to_render:
                 if frame_idx_to_draw < len(self.last_simulation_data):
                      frame_data = self.last_simulation_data[frame_idx_to_draw]
                      self.arc_renderer.render_frame_data(frame_data)
-
             self.last_preview_frame_index = original_frame_index
             self.raise_top_images()
-
             self.animation_frame_index += 1
             self.animation_job = self.after(15, self.play_simulation_animation)
         else:
@@ -1267,15 +1361,25 @@ class App(tk.Tk):
         self.canvas.delete("arc")
 
     def clear_all(self):
-        self.clear_simulation(); self.last_simulation_data = None; self.select_item(None)
-        for item in self.shapes + self.images: item.deselect(); self.canvas.delete(item.id)
-        self.shapes.clear(); self.images.clear()
+        self.clear_simulation()
+        self.last_simulation_data = None
+        self.select_item(None)
+        for item in self.shapes + self.images: 
+            item.deselect()
+            self.canvas.delete(item.id)
+        self.shapes.clear()
+        self.images.clear()
+        
+        # 重置顯示設定
+        self.show_conductors.set(True)
+        self.show_images.set(True)
+        self.background_color_str.set(BACKGROUND_COLOR)
+        self.update_display()
 
         self.total_frames = 0
         if self.speed_control_graph:
             self.speed_control_graph.reset(0)
 
-    # --- 【新增】影片匯出功能 ---
     def open_export_dialog(self):
         if not self.last_simulation_data:
             messagebox.showerror("錯誤", "沒有可以匯出的模擬數據。\n請先『執行新模擬』。")
@@ -1283,61 +1387,34 @@ class App(tk.Tk):
         VideoExportDialog(self, "匯出動畫", self)
 
     def _build_frame_map(self, points, total_original_frames):
-        """根據控制點進行線性內插，建立最終的畫格對應列表"""
-        if not points or total_original_frames == 0:
-            return []
-
-        # 確保點是排序過的
+        if not points or total_original_frames == 0: return []
         points.sort(key=lambda p: p[0])
-
         def get_speed_at_frame(frame_num):
             time_percent = frame_num / total_original_frames
-
-            # 找到目前的影格時間點在哪兩個控制點之間
-            p1, p2 = None, None
-            if time_percent <= points[0][0]:
-                 return points[0][1]
-            if time_percent >= points[-1][0]:
-                 return points[-1][1]
-
+            if time_percent <= points[0][0]: return points[0][1]
+            if time_percent >= points[-1][0]: return points[-1][1]
             for i in range(len(points) - 1):
                 if points[i][0] <= time_percent <= points[i+1][0]:
                     p1, p2 = points[i], points[i+1]
                     break
-
-            if p1 is None: return 1.0
-
-            # 線性內插
+            else: return 1.0
             time_range = p2[0] - p1[0]
             if time_range == 0: return p1[1]
-
             local_percent = (time_percent - p1[0]) / time_range
             speed_range = p2[1] - p1[1]
-
             return p1[1] + local_percent * speed_range
-
-        frame_map = []
-        time_in_original_frames = 0.0
+        frame_map, time_in_original_frames = [], 0.0
         while time_in_original_frames < total_original_frames:
             frame_map.append(int(round(time_in_original_frames)))
-
             speed = get_speed_at_frame(time_in_original_frames)
-            speed = max(0.1, speed) # 避免速度為0或負數導致卡住
-
-            time_in_original_frames += speed
-
-        # 過濾掉超出範圍的畫格並移除重複項，同時保持順序
-        final_map = []
-        seen = set()
+            time_in_original_frames += max(0.1, speed)
+        final_map, seen = [], set()
         for frame in frame_map:
             if frame < total_original_frames and frame not in seen:
                 final_map.append(frame)
                 seen.add(frame)
-
-        # 確保最後一格總是存在
-        if total_original_frames - 1 not in seen:
+        if total_original_frames > 0 and total_original_frames - 1 not in seen:
             final_map.append(total_original_frames - 1)
-
         return final_map
 
     def export_video(self, settings, progress_var, status_label):
@@ -1349,7 +1426,6 @@ class App(tk.Tk):
 
         frame_map = self._build_frame_map(settings['speed_points'], len(self.last_simulation_data))
         total_new_frames = len(frame_map)
-
         if total_new_frames == 0:
             messagebox.showerror("錯誤", "根據目前的分段速率設定，沒有足夠的畫格可以匯出。")
             status_label.config(text="錯誤: 速率設定問題")
@@ -1357,33 +1433,27 @@ class App(tk.Tk):
 
         writer = imageio.get_writer(filepath, fps=60, format=settings['format'], codec='libx264' if settings['format'] == 'mp4' else None)
         appearance_params = self._get_current_appearance_params()
-
         bg_color = settings['bg_color']
         img_mode = 'RGBA' if settings['format'] == 'gif' and settings['transparent_bg'] else 'RGB'
         bg = (0,0,0,0) if img_mode == 'RGBA' else bg_color
-
         w, h = self.canvas.winfo_width(), self.canvas.winfo_height()
-        img = Image.new(img_mode, (w, h), bg)
-        draw = ImageDraw.Draw(img, 'RGBA')
-
-        if settings['include_conductors']: self._draw_conductors_on_pil(draw)
-        if settings['include_images']: self._draw_images_on_pil(img)
-
-        last_original_frame_index = -1
-
+        
         try:
+            last_original_frame_index = -1
             for i, original_frame_index in enumerate(frame_map):
+                # 【修改】每一幀都重新繪製背景和物件，以支援背景變化
+                img = Image.new(img_mode, (w, h), bg)
+                draw = ImageDraw.Draw(img, 'RGBA')
+                if settings['include_images']: self._draw_images_on_pil(img)
+                if settings['include_conductors']: self._draw_conductors_on_pil(draw)
+
                 frames_to_render = range(last_original_frame_index + 1, original_frame_index + 1)
                 for frame_idx_to_draw in frames_to_render:
                     if frame_idx_to_draw < len(self.last_simulation_data):
                         frame_data = self.last_simulation_data[frame_idx_to_draw]
-                        # The new function returns the modified image. `draw` is no longer used directly here.
                         img = self._draw_arcs_on_pil(draw, frame_data, appearance_params, img)
-
                 last_original_frame_index = original_frame_index
-
                 final_frame_pil = img.convert('RGB') if img_mode == 'RGB' else img
-
                 if settings['format'] == 'mp4':
                     fw, fh = final_frame_pil.size
                     macro_block_size = 16
@@ -1393,15 +1463,12 @@ class App(tk.Tk):
                         padded_img = Image.new(final_frame_pil.mode, (new_w, new_h), (0,0,0))
                         padded_img.paste(final_frame_pil, (0,0))
                         final_frame_pil = padded_img
-
                 final_frame = np.array(final_frame_pil)
                 writer.append_data(final_frame)
-
                 progress = (i + 1) / total_new_frames * 100
                 progress_var.set(progress)
                 status_label.config(text=f"正在匯出... {i+1}/{total_new_frames}")
                 self.update_idletasks()
-
             messagebox.showinfo("完成", f"動畫已成功儲存至:\n{filepath}")
             status_label.config(text="匯出完成！")
         except Exception as e:
@@ -1422,7 +1489,10 @@ class App(tk.Tk):
                 draw.polygon(shape.points, fill=color, outline="white", width=1)
 
     def _draw_images_on_pil(self, base_image):
-        sorted_images = sorted(self.images, key=lambda i: self.canvas.winfo_children().index(i.id) if i.id in self.canvas.winfo_children() else -1)
+        # 【修改】根據畫布上的順序繪製圖片
+        all_canvas_items = self.canvas.find_all()
+        sorted_images = sorted(self.images, key=lambda i: all_canvas_items.index(i.id) if i.id in all_canvas_items else -1)
+        
         for img_obj in sorted_images:
             if not hasattr(img_obj, 'pil_image_original'): continue
             rotated_img = img_obj.pil_image_original.rotate(img_obj.angle, resample=Image.Resampling.BICUBIC, expand=True)
@@ -1441,9 +1511,7 @@ class App(tk.Tk):
                 c2_rgb = tuple(int(c2.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
                 rgb = [int(c1_rgb[i] + (c2_rgb[i] - c1_rgb[i]) * f) for i in range(3)]
                 return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
-            except:
-                return c1
-
+            except: return c1
         def _get_glow_alpha(dist, points):
             dist = max(0, min(1, dist))
             for i in range(len(points) - 1):
@@ -1453,69 +1521,44 @@ class App(tk.Tk):
                     return p1[1] + ((dist - p1[0]) / r) * (p2[1] - p1[1]) if r != 0 else p1[1]
             return points[-1][1]
 
-        # Ensure background_img is RGBA for compositing
-        if background_img.mode != 'RGBA':
-            background_img = background_img.convert('RGBA')
-
-        # Create an overlay for core lines so they are drawn on top of all glows
+        if background_img.mode != 'RGBA': background_img = background_img.convert('RGBA')
         core_line_overlay = Image.new('RGBA', background_img.size, (0,0,0,0))
         core_draw = ImageDraw.Draw(core_line_overlay)
 
         for segment in frame_data:
             p1, p2, thickness, life = segment['p1'], segment['p2'], segment['thickness'], segment['life']
-            if thickness < 0.2:
-                continue
+            if thickness < 0.2: continue
             life_factor = max(0, min(1, life / params['arc_max_life']))
             core_thickness = thickness * (0.2 + life_factor * 0.8)
-            if core_thickness < 0.5:
-                continue
+            if core_thickness < 0.5: continue
             segment_color = _interpolate_color(params['arc_color'], "#FFFFFF", life_factor)
             dx, dy = p2[0] - p1[0], p2[1] - p1[1]
             length = math.hypot(dx, dy)
-            if length < 1e-6:
-                continue
+            if length < 1e-6: continue
             nx, ny = -dy / length, dx / length
 
-            # --- Glow Effect ---
             if params['arc_glow_strength'] > 0:
                 max_glow_radius = core_thickness / 2 * (1 + params['arc_glow_strength'] * 3.0)
                 glow_points = params['glow_falloff_points']
                 glow_color_rgb = tuple(int(params['arc_color'].lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
-
                 for i in range(15, 0, -1):
                     dist = i / 15
                     alpha = _get_glow_alpha(dist, glow_points)
-                    if alpha <= 0.01:
-                        continue
-
+                    if alpha <= 0.01: continue
                     layer_width = max_glow_radius * dist * 2
                     p1a = (p1[0] + nx * layer_width/2, p1[1] + ny * layer_width/2)
                     p2a = (p2[0] + nx * layer_width/2, p2[1] + ny * layer_width/2)
                     p2b = (p2[0] - nx * layer_width/2, p2[1] - ny * layer_width/2)
                     p1b = (p1[0] - nx * layer_width/2, p1[1] - ny * layer_width/2)
-
-                    # Create a temporary image for this glow layer to composite it correctly
                     poly_img = Image.new('RGBA', background_img.size, (0,0,0,0))
                     poly_draw = ImageDraw.Draw(poly_img)
-
-                    # Use pure glow color with alpha for correct blending.
-                    # Removed the 0.5 multiplier which may have made it too faint.
                     poly_draw.polygon([p1a, p2a, p2b, p1b], fill=glow_color_rgb + (int(alpha*255),))
-
-                    # Use alpha_composite for proper additive blending of glow layers
                     background_img = Image.alpha_composite(background_img, poly_img)
 
-            # --- Core Arc ---
-            # Draw the core line for this segment onto the separate core line overlay
-            # To fix the "rectangle" issue, we draw a circle at the end of each segment
-            # to simulate a round cap, creating a continuous line.
             core_draw.line([p1[0], p1[1], p2[0], p2[1]], fill=segment_color, width=int(core_thickness))
             r = core_thickness / 2
-            if r > 0:
-                 core_draw.ellipse([p2[0]-r, p2[1]-r, p2[0]+r, p2[1]+r], fill=segment_color)
-
-
-        # After all segments, composite the core lines on top of the glows
+            if r > 0: core_draw.ellipse([p2[0]-r, p2[1]-r, p2[0]+r, p2[1]+r], fill=segment_color)
+        
         background_img = Image.alpha_composite(background_img, core_line_overlay)
         return background_img
 
