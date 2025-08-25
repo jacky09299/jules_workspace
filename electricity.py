@@ -972,6 +972,7 @@ class App(tk.Tk):
         # --- 新增: 用於UI控制的變數 ---
         self.show_conductors = tk.BooleanVar(value=True)
         self.show_images = tk.BooleanVar(value=True)
+        self.use_lossless_codec = tk.BooleanVar(value=False)
         self.background_color_str = tk.StringVar(value=BACKGROUND_COLOR)
 
         self.sim_params = {
@@ -1097,7 +1098,8 @@ class App(tk.Tk):
         sim_frame.pack(fill=tk.X, padx=10, pady=10)
         tk.Button(sim_frame, text="執行新模擬", command=self.start_new_simulation).pack(fill=tk.X, pady=3)
         tk.Button(sim_frame, text="預覽上次模擬", command=self.preview_simulation).pack(fill=tk.X, pady=3)
-        tk.Button(sim_frame, text="匯出影片", command=self.export_video).pack(fill=tk.X, pady=3) # Placeholder for now
+        tk.Button(sim_frame, text="匯出影片", command=self.export_video).pack(fill=tk.X, pady=3)
+        tk.Checkbutton(sim_frame, text="使用無損編碼 (檔案大)", variable=self.use_lossless_codec, bg=CONTROL_PANEL_BG).pack(anchor="w", padx=5)
         ttk.Separator(sim_frame, orient='horizontal').pack(fill='x', pady=5)
         tk.Button(sim_frame, text="清除電弧", command=self.clear_simulation).pack(fill=tk.X, pady=3)
         tk.Button(sim_frame, text="清除所有", command=self.clear_all).pack(fill=tk.X, pady=3)
@@ -1498,10 +1500,17 @@ class App(tk.Tk):
             messagebox.showwarning("沒有可匯出的內容", "請先執行一次模擬，再匯出影片。")
             return
 
+        if self.use_lossless_codec.get():
+            default_ext = ".avi"
+            file_types = [("無損 AVI 影片", "*.avi")]
+        else:
+            default_ext = ".mp4"
+            file_types = [("MP4 影片", "*.mp4"), ("AVI 影片", "*.avi")]
+
         filepath = filedialog.asksaveasfilename(
             title="匯出影片為...",
-            defaultextension=".mp4",
-            filetypes=[("MP4 影片", "*.mp4"), ("AVI 影片", "*.avi")]
+            defaultextension=default_ext,
+            filetypes=file_types
         )
         if not filepath:
             return
@@ -1511,8 +1520,13 @@ class App(tk.Tk):
             messagebox.showerror("錯誤", "無法取得有效的畫布尺寸。")
             return
 
-        # 根據副檔名選擇 FourCC
-        if filepath.lower().endswith('.avi'):
+        # 根據選項和副檔名選擇 FourCC
+        if self.use_lossless_codec.get():
+            fourcc = cv2.VideoWriter_fourcc(*'FFV1')
+            # 確保副檔名是 .avi
+            if not filepath.lower().endswith('.avi'):
+                filepath += '.avi'
+        elif filepath.lower().endswith('.avi'):
             fourcc = cv2.VideoWriter_fourcc(*'XVID')
         else: # 預設為 MP4
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
