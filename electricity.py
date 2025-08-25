@@ -8,7 +8,7 @@ import numpy as np
 import os
 from datetime import datetime
 import time
-import imageio.v2 as imageio
+import imageio
 
 
 # --- 常數設定 ---
@@ -1202,11 +1202,6 @@ class App(tk.Tk):
 
         w_scaled, h_scaled = int(w * scale), int(h * scale)
 
-        # Ensure dimensions are divisible by 16 for video codecs
-        if scale != 1.0: # Only adjust for off-screen rendering/export
-            w_scaled = (w_scaled + 15) // 16 * 16
-            h_scaled = (h_scaled + 15) // 16 * 16
-
         # 1. Create scene image and draw context
         bg_color = self.background_color_str.get()
         try:
@@ -1651,7 +1646,7 @@ class App(tk.Tk):
                 progress_win.update()
 
                 video_path = os.path.join(output_dir, "animation.mp4")
-                with imageio.get_writer(video_path, fps=params['fps'], pixelformat='yuv420p') as writer:
+                with imageio.get_writer(video_path, fps=params['fps']) as writer:
                     for i, filepath in enumerate(exported_files):
                         writer.append_data(imageio.imread(filepath))
                         progress_bar['value'] = i + 1
