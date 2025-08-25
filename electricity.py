@@ -78,6 +78,70 @@ class ParameterDialog(simpledialog.Dialog):
         except (ValueError, IndexError):
             messagebox.showerror("輸入錯誤", "無效的輸入格式！請檢查您的輸入。")
 
+
+# --- 【新增】高解析度匯出彈出視窗 ---
+class ExportDialog(simpledialog.Dialog):
+    """一個用於設定高解析度匯出參數的對話框"""
+    def __init__(self, parent, title):
+        self.result = None
+        super().__init__(parent, title)
+
+    def body(self, master):
+        # 佈局
+        master.grid_columnconfigure(1, weight=1)
+
+        # 縮放比例
+        tk.Label(master, text="縮放比例 (e.g., 2, 4, 8):").grid(row=0, sticky="w")
+        self.scale_entry = tk.Entry(master)
+        self.scale_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+        self.scale_entry.insert(0, "4")
+
+        # 檔案路徑
+        tk.Label(master, text="儲存路徑:").grid(row=1, sticky="w")
+        self.path_entry = tk.Entry(master)
+        self.path_entry.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+
+        browse_button = tk.Button(master, text="...", command=self._browse_file)
+        browse_button.grid(row=1, column=2, padx=5, pady=5)
+
+        return self.scale_entry # initial focus
+
+    def _browse_file(self):
+        filepath = filedialog.asksaveasfilename(
+            parent=self, # 確保對話框在頂層
+            title="匯出圖片為...",
+            defaultextension=".png",
+            filetypes=[("PNG 圖片", "*.png"), ("JPEG 圖片", "*.jpg"), ("BMP 圖片", "*.bmp")]
+        )
+        if filepath:
+            self.path_entry.delete(0, tk.END)
+            self.path_entry.insert(0, filepath)
+
+    def validate(self):
+        # 驗證縮放比例
+        try:
+            scale = float(self.scale_entry.get())
+            if scale <= 0:
+                messagebox.showwarning("輸入無效", "縮放比例必須是正數。", parent=self)
+                return 0
+        except ValueError:
+            messagebox.showwarning("輸入無效", "縮放比例必須是一個數字。", parent=self)
+            return 0
+
+        # 驗證檔案路徑
+        filepath = self.path_entry.get()
+        if not filepath:
+            messagebox.showwarning("輸入無效", "請選擇一個有效的儲存路徑。", parent=self)
+            return 0
+
+        self.result = (scale, filepath)
+        return 1
+
+    def apply(self):
+        # The result is already set in validate()
+        pass
+
+
 # --- 幾何物體基底類別 ---
 class Shape:
     # Constructor now takes the main app instance instead of the canvas
@@ -162,16 +226,18 @@ class Needle(Shape):
         if 'radius' in kwargs: self.radius = kwargs['radius']
         super().update_params(**kwargs)
 
-    def draw_to_pillow(self, draw):
+    def draw_to_pillow(self, draw, scale=1.0):
         """Draws the shape on a Pillow ImageDraw context."""
         color = HV_COLOR if self.voltage >= 0 else GND_COLOR
-        bbox = self.get_outline_points()
-        draw.ellipse(bbox, fill=color, outline="white", width=1)
+        bbox_unscaled = self.get_outline_points()
+        bbox_scaled = [p * scale for p in bbox_unscaled]
+        draw.ellipse(bbox_scaled, fill=color, outline="white", width=int(1 * scale))
 
-    def draw_selection_to_pillow(self, draw):
+    def draw_selection_to_pillow(self, draw, scale=1.0):
         """Draws the selection outline and handles on a Pillow ImageDraw context."""
-        bbox = self.get_outline_points()
-        draw.ellipse(bbox, fill=None, outline=SELECTED_OUTLINE_COLOR, width=2)
+        bbox_unscaled = self.get_outline_points()
+        bbox_scaled = [p * scale for p in bbox_unscaled]
+        draw.ellipse(bbox_scaled, fill=None, outline=SELECTED_OUTLINE_COLOR, width=int(2 * scale))
         # Needle has no handles.
 
 class Rod(Shape):
@@ -229,20 +295,21 @@ class Rod(Shape):
             self.x2, self.y2 = kwargs['points'][1]
         super().update_params(**kwargs)
 
-    def draw_to_pillow(self, draw):
+    def draw_to_pillow(self, draw, scale=1.0):
         """Draws the shape on a Pillow ImageDraw context."""
         color = HV_COLOR if self.voltage >= 0 else GND_COLOR
         draw.line(
-            (self.x1, self.y1, self.x2, self.y2),
-            fill=color, width=int(self.thickness)
+            (self.x1 * scale, self.y1 * scale, self.x2 * scale, self.y2 * scale),
+            fill=color, width=int(self.thickness * scale)
         )
 
-    def draw_selection_to_pillow(self, draw):
+    def draw_selection_to_pillow(self, draw, scale=1.0):
         """Draws the selection outline and handles on a Pillow ImageDraw context."""
-        draw.line((self.x1, self.y1, self.x2, self.y2), fill=SELECTED_OUTLINE_COLOR, width=3)
+        draw.line((self.x1 * scale, self.y1 * scale, self.x2 * scale, self.y2 * scale), fill=SELECTED_OUTLINE_COLOR, width=int(3 * scale))
         for x, y in [(self.x1, self.y1), (self.x2, self.y2)]:
-            r = HANDLE_RADIUS
-            draw.ellipse([x-r, y-r, x+r, y+r], fill=HANDLE_COLOR, outline='white')
+            r = HANDLE_RADIUS * scale
+            x_s, y_s = x * scale, y * scale
+            draw.ellipse([x_s-r, y_s-r, x_s+r, y_s+r], fill=HANDLE_COLOR, outline='white')
 
 class Plate(Shape):
     def __init__(self, app, x, y, voltage=0, width=150, height=30):
@@ -304,33 +371,23 @@ class Plate(Shape):
             self.points = kwargs['points']
         super().update_params(**kwargs)
 
-    def draw_to_pillow(self, draw):
+    def draw_to_pillow(self, draw, scale=1.0):
         """Draws the shape on a Pillow ImageDraw context."""
         color = HV_COLOR if self.voltage >= 0 else GND_COLOR
         if len(self.points) > 1:
-            draw.polygon(self.points, fill=color, outline="white", width=1)
+            scaled_points = [(p[0] * scale, p[1] * scale) for p in self.points]
+            draw.polygon(scaled_points, fill=color, outline="white", width=int(1 * scale))
 
-    def draw_selection_to_pillow(self, draw):
+    def draw_selection_to_pillow(self, draw, scale=1.0):
         """Draws the selection outline and handles on a Pillow ImageDraw context."""
-        # Dashed line is not supported, so we draw a solid polygon outline.
         if len(self.points) > 1:
-            draw.polygon(self.points, fill=None, outline=SELECTED_OUTLINE_COLOR, width=2)
+            scaled_points = [(p[0] * scale, p[1] * scale) for p in self.points]
+            draw.polygon(scaled_points, fill=None, outline=SELECTED_OUTLINE_COLOR, width=int(2 * scale))
         # Draw handles
         for x, y in self.points:
-            r = HANDLE_RADIUS
-            draw.ellipse([x-r, y-r, x+r, y+r], fill=HANDLE_COLOR, outline='white')
-
-    def draw_to_pillow(self, draw):
-        """Draws the shape on a Pillow ImageDraw context."""
-        color = HV_COLOR if self.voltage >= 0 else GND_COLOR
-        draw.polygon(self.points, fill=color, outline="white", width=1)
-
-    def draw_selection_to_pillow(self, draw):
-        """Draws the selection outline and handles on a Pillow ImageDraw context."""
-        draw.polygon(self.points, fill=None, outline=SELECTED_OUTLINE_COLOR, width=2)
-        for x, y in self.points:
-            r = HANDLE_RADIUS
-            draw.ellipse([x-r, y-r, x+r, y+r], fill=HANDLE_COLOR, outline='white')
+            r = HANDLE_RADIUS * scale
+            x_s, y_s = x * scale, y * scale
+            draw.ellipse([x_s-r, y_s-r, x_s+r, y_s+r], fill=HANDLE_COLOR, outline='white')
 
 class ArbitraryShape(Shape):
     def __init__(self, app, points, voltage=0):
@@ -393,6 +450,25 @@ class ArbitraryShape(Shape):
             self.points = kwargs['points']
         super().update_params(**kwargs)
 
+    def draw_to_pillow(self, draw, scale=1.0):
+        """Draws the shape on a Pillow ImageDraw context."""
+        color = HV_COLOR if self.voltage >= 0 else GND_COLOR
+        if len(self.points) > 1:
+            scaled_points = [(p[0] * scale, p[1] * scale) for p in self.points]
+            draw.polygon(scaled_points, fill=color, outline="white", width=int(1 * scale))
+
+    def draw_selection_to_pillow(self, draw, scale=1.0):
+        """Draws the selection outline and handles on a Pillow ImageDraw context."""
+        if len(self.points) > 1:
+            scaled_points = [(p[0] * scale, p[1] * scale) for p in self.points]
+            draw.polygon(scaled_points, fill=None, outline=SELECTED_OUTLINE_COLOR, width=int(2 * scale))
+        # Draw handles
+        for x, y in self.points:
+            r = HANDLE_RADIUS * scale
+            x_s, y_s = x * scale, y * scale
+            draw.ellipse([x_s-r, y_s-r, x_s+r, y_s+r], fill=HANDLE_COLOR, outline='white')
+
+
 # --- 新增: 可裝飾的圖片物件 ---
 class DecorativeImage:
     def __init__(self, canvas, x, y, pil_image, app):
@@ -413,57 +489,62 @@ class DecorativeImage:
         """This method is now obsolete. Drawing is handled by draw_to_pillow."""
         pass
 
-    def get_transformed_image(self):
+    def get_transformed_image(self, export_scale=1.0):
         """Applies rotation and scaling to the original PIL image and returns a new PIL image."""
         # 1. 旋轉: expand=True可確保旋轉後圖片不被裁切
         rotated_img = self.pil_image_original.rotate(self.angle, resample=Image.Resampling.BICUBIC, expand=True)
 
         # 2. 縮放
         w, h = rotated_img.size
-        new_size = (int(w * self.scale), int(h * self.scale))
+        final_scale = self.scale * export_scale
+        new_size = (int(w * final_scale), int(h * final_scale))
         # 使用LANCZOS以獲得較好的縮放品質
         scaled_img = rotated_img.resize(new_size, Image.Resampling.LANCZOS)
         return scaled_img
 
-    def draw_to_pillow(self, main_image):
+    def draw_to_pillow(self, main_image, scale=1.0):
         """Renders the transformed image onto the main Pillow image context."""
-        transformed_img = self.get_transformed_image()
+        transformed_img = self.get_transformed_image(scale)
         # The position (self.x, self.y) is the center, so we need to calculate the top-left corner for pasting.
         w, h = transformed_img.size
-        paste_x = int(self.x - w / 2)
-        paste_y = int(self.y - h / 2)
+        paste_x = int(self.x * scale - w / 2)
+        paste_y = int(self.y * scale - h / 2)
         # The image might have RGBA transparency, so we should use it as the mask for pasting.
         if transformed_img.mode == 'RGBA':
             main_image.paste(transformed_img, (paste_x, paste_y), transformed_img)
         else:
             main_image.paste(transformed_img, (paste_x, paste_y))
 
-    def draw_selection_to_pillow(self, draw):
+    def draw_selection_to_pillow(self, draw, scale=1.0):
         """Draws the selection outline and handles on a Pillow ImageDraw context."""
         w, h = self.pil_image_original.size
 
         # 1. Draw outline
-        w_scaled, h_scaled = w * self.scale / 2, h * self.scale / 2
+        w_scaled = w * self.scale * scale / 2
+        h_scaled = h * self.scale * scale / 2
         local_points = [(-w_scaled, -h_scaled), (w_scaled, -h_scaled), (w_scaled, h_scaled), (-w_scaled, h_scaled)]
         rad = math.radians(self.angle)
         cos_a, sin_a = math.cos(rad), math.sin(rad)
 
+        center_x_s, center_y_s = self.x * scale, self.y * scale
+
         world_points = []
         for p_x, p_y in local_points:
-            world_x = (p_x * cos_a - p_y * sin_a) + self.x
-            world_y = (p_x * sin_a + p_y * cos_a) + self.y
+            world_x = (p_x * cos_a - p_y * sin_a) + center_x_s
+            world_y = (p_x * sin_a + p_y * cos_a) + center_y_s
             world_points.append((world_x, world_y))
 
-        draw.polygon(world_points, fill=None, outline=SELECTED_OUTLINE_COLOR, width=2)
+        draw.polygon(world_points, fill=None, outline=SELECTED_OUTLINE_COLOR, width=int(2 * scale))
 
         # 2. Draw handles
-        w_s, h_s = w * self.scale, h * self.scale
+        w_s = w * self.scale * scale
+        h_s = h * self.scale * scale
         handle_positions = { 'scale': (w_s / 2, h_s / 2), 'rotate': (w_s / 2, -h_s / 2) }
 
         for name, (p_x, p_y) in handle_positions.items():
-            world_x = (p_x * cos_a - p_y * sin_a) + self.x
-            world_y = (p_x * sin_a + p_y * cos_a) + self.y
-            r = HANDLE_RADIUS
+            world_x = (p_x * cos_a - p_y * sin_a) + center_x_s
+            world_y = (p_x * sin_a + p_y * cos_a) + center_y_s
+            r = HANDLE_RADIUS * scale
             draw.ellipse([world_x-r, world_y-r, world_x+r, world_y+r], fill=HANDLE_COLOR, outline='white')
 
     def contains(self, px, py):
@@ -733,11 +814,13 @@ class ArcRenderer:
                 return p1[1] + local_factor * (p2[1] - p1[1])
         return glow_falloff_points[-1][1]
 
-    def _draw_arc_segment(self, segment_data, draw_context):
-        p1, p2 = segment_data['p1'], segment_data['p2']
+    def _draw_arc_segment(self, segment_data, draw_context, scale=1.0):
+        p1_unscaled, p2_unscaled = segment_data['p1'], segment_data['p2']
+        p1 = (p1_unscaled[0] * scale, p1_unscaled[1] * scale)
+        p2 = (p2_unscaled[0] * scale, p2_unscaled[1] * scale)
         thickness_ratio, life = segment_data['thickness_ratio'], segment_data['life']
 
-        base_thickness = self.params.get('arc_max_thickness', 2.0) * thickness_ratio
+        base_thickness = self.params.get('arc_max_thickness', 2.0) * thickness_ratio * scale
         if base_thickness < 0.2: return
 
         max_life = self.params.get('arc_max_life', 200)
@@ -769,9 +852,9 @@ class ArcRenderer:
         if core_thickness >= 1:
             draw_context.line((*p1, *p2), fill=core_color_rgba, width=int(core_thickness))
 
-    def render_frame_data(self, frame_data, draw_context):
+    def render_frame_data(self, frame_data, draw_context, scale=1.0):
         for segment in frame_data:
-            self._draw_arc_segment(segment, draw_context)
+            self._draw_arc_segment(segment, draw_context, scale)
 
 # --- 模擬器 (V9.0 - 資料導向模型) ---
 class Simulator:
@@ -1085,60 +1168,64 @@ class App(tk.Tk):
         self.bind("<Escape>", self.cancel_creation_mode)
 
     # --- 【新】方法: 更新畫布顯示 (Pillow渲染引擎) ---
-    def _render_scene_to_pillow(self, arc_data_for_frame=None):
-        """Renders the current scene to a Pillow image and returns it."""
+    def _render_scene_to_pillow(self, arc_data_for_frame=None, scale=1.0):
+        """Renders the current scene to a Pillow image, optionally scaled."""
         if arc_data_for_frame is None:
             arc_data_for_frame = []
 
         w, h = self.canvas.winfo_width(), self.canvas.winfo_height()
         if w < 1 or h < 1: return None
 
+        w_scaled, h_scaled = int(w * scale), int(h * scale)
+
         # 1. Create scene image and draw context
         bg_color = self.background_color_str.get()
         try:
-            scene_image = Image.new('RGBA', (w, h), bg_color)
+            scene_image = Image.new('RGBA', (w_scaled, h_scaled), bg_color)
         except ValueError:
-            scene_image = Image.new('RGBA', (w, h), BACKGROUND_COLOR)
+            scene_image = Image.new('RGBA', (w_scaled, h_scaled), BACKGROUND_COLOR)
 
         scene_draw = ImageDraw.Draw(scene_image)
 
         # 2. Z-ordered drawing of objects
         bottom_images = [img for img in self.images if img not in self.top_images]
 
+        # The individual draw methods will need to be updated to handle the scale argument
         if self.show_images.get():
             for image in bottom_images:
-                image.draw_to_pillow(scene_image)
+                image.draw_to_pillow(scene_image, scale)
 
         if self.show_conductors.get():
             for shape in self.shapes:
-                shape.draw_to_pillow(scene_draw)
+                shape.draw_to_pillow(scene_draw, scale)
 
         if self.show_images.get():
             for image in self.top_images:
-                image.draw_to_pillow(scene_image)
+                image.draw_to_pillow(scene_image, scale)
 
         # 3. Render arcs
         if arc_data_for_frame:
-            glow_layer = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+            glow_layer = Image.new('RGBA', (w_scaled, h_scaled), (0, 0, 0, 0))
             glow_draw = ImageDraw.Draw(glow_layer)
             appearance_params = self._get_current_appearance_params()
             arc_renderer = ArcRenderer(appearance_params)
-            arc_renderer.render_frame_data(arc_data_for_frame, glow_draw)
+            arc_renderer.render_frame_data(arc_data_for_frame, glow_draw, scale)
             scene_image = Image.alpha_composite(scene_image, glow_layer)
             scene_draw = ImageDraw.Draw(scene_image)
 
-        # 4. Draw selection outline
-        if self.selected_item:
+        # 4. Draw selection outline (only for on-screen display, not for export)
+        if self.selected_item and scale == 1.0:
             is_conductor = self.selected_item in self.shapes and self.show_conductors.get()
             is_image = self.selected_item in self.images and self.show_images.get()
             if is_conductor or is_image:
-                 self.selected_item.draw_selection_to_pillow(scene_draw)
+                 self.selected_item.draw_selection_to_pillow(scene_draw, scale)
 
         return scene_image
 
     def redraw_canvas(self, arc_data_for_frame=None):
         """Redraws the entire canvas using the Pillow off-screen rendering engine."""
-        scene_image = self._render_scene_to_pillow(arc_data_for_frame)
+        # On-screen canvas is always rendered at 1x scale
+        scene_image = self._render_scene_to_pillow(arc_data_for_frame, scale=1.0)
         if scene_image is None: return
 
         # Display the final rendered image on the canvas
@@ -1459,7 +1546,13 @@ class App(tk.Tk):
         self.redraw_canvas()
 
     def export_image(self):
-        """Exports the current canvas view to an image file."""
+        """Exports the current canvas view to a high-resolution image file."""
+        dialog = ExportDialog(self, "高解析度匯出")
+        if not dialog.result:
+            return # User cancelled
+
+        scale, filepath = dialog.result
+
         # Determine arc data to render. We'll render the final state of the last simulation.
         arc_data = []
         if self.last_simulation_data:
@@ -1467,20 +1560,11 @@ class App(tk.Tk):
             for frame_segments in self.last_simulation_data:
                 arc_data.extend(frame_segments)
 
-        # Render the scene to a Pillow image
-        image_to_save = self._render_scene_to_pillow(arc_data)
+        # Render the scene to a Pillow image with the specified scale
+        image_to_save = self._render_scene_to_pillow(arc_data, scale=scale)
 
         if image_to_save is None:
             messagebox.showwarning("匯出失敗", "畫布上沒有可匯出的內容。")
-            return
-
-        # Ask user for save location
-        filepath = filedialog.asksaveasfilename(
-            title="匯出圖片為...",
-            defaultextension=".png",
-            filetypes=[("PNG 圖片", "*.png"), ("JPEG 圖片", "*.jpg"), ("BMP 圖片", "*.bmp")]
-        )
-        if not filepath:
             return
 
         # Save the image
@@ -1492,10 +1576,10 @@ class App(tk.Tk):
                 final_image = Image.new('RGB', image_to_save.size, bg_color)
                 # Paste using the alpha channel of the source image as a mask
                 final_image.paste(image_to_save, mask=image_to_save.split()[3])
-                final_image.save(filepath)
+                final_image.save(filepath, dpi=(scale * 72, scale * 72))
             else:
                 # PNG and BMP can be saved directly
-                image_to_save.save(filepath)
+                image_to_save.save(filepath, dpi=(scale * 72, scale * 72))
 
             messagebox.showinfo("匯出成功", f"圖片已成功儲存至:\n{filepath}")
         except Exception as e:
