@@ -1186,7 +1186,7 @@ class App(tk.Tk):
         tk.Button(sim_frame, text="執行新模擬", command=self.start_new_simulation).pack(fill=tk.X, pady=3)
         tk.Button(sim_frame, text="預覽上次模擬", command=self.preview_simulation).pack(fill=tk.X, pady=3)
         tk.Button(sim_frame, text="匯出完整動畫", command=self.export_image).pack(fill=tk.X, pady=3)
-        tk.Button(sim_frame, text="匯出選取區域 (單幀)", command=self.export_region_as_image).pack(fill=tk.X, pady=3)
+        tk.Button(sim_frame, text="匯出選取區域 (動畫)", command=self.export_region_as_animation).pack(fill=tk.X, pady=3)
         ttk.Separator(sim_frame, orient='horizontal').pack(fill='x', pady=5)
         tk.Button(sim_frame, text="清除電弧", command=self.clear_simulation).pack(fill=tk.X, pady=3)
         tk.Button(sim_frame, text="清除所有", command=self.clear_all).pack(fill=tk.X, pady=3)
@@ -1795,8 +1795,8 @@ class App(tk.Tk):
             # 確保進度條視窗總是會被關閉
             progress_win.destroy()
 
-    def export_region_as_image(self):
-        """Exports a single, high-resolution image of the area defined by the export box."""
+    def export_region_as_animation(self):
+        """Exports an animation of the area defined by the export box."""
         if not self.show_export_box.get():
             messagebox.showwarning("無效操作", "請先勾選 '顯示/啟用匯出框' 並設定您想匯出的區域。")
             return
@@ -1805,58 +1805,74 @@ class App(tk.Tk):
             messagebox.showwarning("無資料", "沒有可匯出的模擬資料。請先執行一次模擬以產生畫面。")
             return
 
-        filepath = filedialog.asksaveasfilename(
-            parent=self,
-            title="匯出選取區域為...",
-            defaultextension=".png",
-            filetypes=[("PNG 圖片", "*.png"), ("JPEG 圖片", "*.jpg")]
-        )
-        if not filepath:
+        # 1. Get export box dimensions and calculate scale
+        box = self.export_box
+        box_w, box_h = box['w'], box['h']
+        if box_w <= 0 or box_h <= 0:
+            messagebox.showerror("錯誤", "匯出框的寬度和高度必須大於 0。")
             return
 
+        # Calculate scale to fit the BOX into a target resolution (e.g., 4K)
+        target_width, target_height = 3840, 2160
+        render_scale = min(target_width / box_w, target_height / box_h)
+        if render_scale <= 0:
+            messagebox.showerror("錯誤", "計算出的縮放比例無效。")
+            return
+
+        # 2. Ask for output directory
+        parent_dir = filedialog.askdirectory(parent=self, title="請選擇儲存匯出資料夾的父目錄")
+        if not parent_dir:
+            return
+
+        # 3. Create timestamped folder
+        timestamp_folder_name = f"export_region_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        output_dir = os.path.join(parent_dir, timestamp_folder_name)
         try:
-            # 1. Get export box dimensions
-            box = self.export_box
-            box_w, box_h = box['w'], box['h']
-            if box_w <= 0 or box_h <= 0:
-                messagebox.showerror("錯誤", "匯出框的寬度和高度必須大於 0。")
-                return
+            os.makedirs(output_dir, exist_ok=True)
+        except OSError as e:
+            messagebox.showerror("建立資料夾失敗", f"無法建立資料夾:\n{output_dir}\n錯誤: {e}")
+            return
 
-            # 2. Calculate scale to fit the BOX into 4K resolution
-            target_width, target_height = 3840, 2160
-            render_scale = min(target_width / box_w, target_height / box_h)
+        # 4. Create and show progress bar
+        num_frames = len(self.last_simulation_data)
+        progress_win, progress_bar, progress_label = self._create_progress_window("匯出區域動畫中...", num_frames)
 
-            # 3. Get all arc data from the final frame of the simulation
+        try:
             cumulative_arc_data = []
-            for frame_segments in self.last_simulation_data:
+            for i, frame_segments in enumerate(self.last_simulation_data):
                 cumulative_arc_data.extend(frame_segments)
 
-            # 4. Render the entire scene at the high resolution
-            full_image = self._render_scene_to_pillow(cumulative_arc_data, scale=render_scale)
-            if full_image is None:
-                messagebox.showerror("渲染錯誤", "無法渲染場景。")
-                return
+                # Render the entire scene at high resolution for the current frame
+                full_image = self._render_scene_to_pillow(cumulative_arc_data, scale=render_scale)
+                if full_image is None:
+                    print(f"警告: 第 {i} 幀渲染失敗，跳過。")
+                    continue
 
-            # 5. Define the crop area in the scaled coordinates
-            crop_x1 = int(box['x'] * render_scale)
-            crop_y1 = int(box['y'] * render_scale)
-            crop_x2 = int((box['x'] + box['w']) * render_scale)
-            crop_y2 = int((box['y'] + box['h']) * render_scale)
+                # Define the crop area in scaled coordinates
+                crop_x1 = int(box['x'] * render_scale)
+                crop_y1 = int(box['y'] * render_scale)
+                crop_x2 = int((box['x'] + box['w']) * render_scale)
+                crop_y2 = int((box['y'] + box['h']) * render_scale)
 
-            # 6. Crop the image
-            cropped_image = full_image.crop((crop_x1, crop_y1, crop_x2, crop_y2))
+                # Crop the image
+                cropped_image = full_image.crop((crop_x1, crop_y1, crop_x2, crop_y2))
 
-            # 7. Save the final image
-            file_format = 'PNG' if filepath.lower().endswith('.png') else 'JPEG'
-            if file_format == 'JPEG':
-                 # PIL needs an RGB image to save as JPEG
-                cropped_image = cropped_image.convert('RGB')
+                # Define filename and save
+                filename = f"frame_{i:04d}.png"
+                filepath = os.path.join(output_dir, filename)
+                cropped_image.save(filepath, 'PNG', dpi=(300, 300))
 
-            cropped_image.save(filepath, file_format, dpi=(300, 300))
-            messagebox.showinfo("成功", f"已成功匯出選取區域圖片至:\n{filepath}")
+                # Update progress bar
+                progress_bar['value'] = i + 1
+                progress_label.config(text=f"{i + 1} / {num_frames}")
+                progress_win.update()
+
+            messagebox.showinfo("成功", f"已成功匯出 {num_frames} 幀區域動畫至:\n{output_dir}")
 
         except Exception as e:
             messagebox.showerror("匯出錯誤", f"匯出過程中發生錯誤:\n{e}")
+        finally:
+            progress_win.destroy()
 
 
     def _build_frame_map(self, points, total_original_frames):
