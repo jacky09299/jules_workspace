@@ -6,6 +6,7 @@ import random
 import itertools
 import numpy as np
 import os
+import subprocess
 from datetime import datetime
 import time
 
@@ -1720,6 +1721,98 @@ class App(tk.Tk):
         progress_win.update()
         return progress_win, progress_bar, progress_label
 
+    def _create_video_from_frames(self, output_dir, num_frames):
+        """Runs ffmpeg to create a video from the exported frames."""
+        video_filename = "outputfile.mp4"
+        # The user provided a complex command, let's build it carefully.
+        # Note: The user's original command had `-frames:v 100`, which is now dynamic.
+        ffmpeg_command = [
+            'ffmpeg',
+            '-r', '24',
+            '-start_number', '1',
+            '-i', 'frame_%04d.png',
+            '-pix_fmt', 'yuv420p',
+            '-vf', 'scale=in_color_matrix=bt709:out_color_matrix=bt709',
+            '-frames:v', str(num_frames),
+            '-c:v', 'libx264',
+            '-preset', 'slower',
+            '-color_range', 'tv',
+            '-colorspace', 'bt709',
+            '-color_primaries', 'bt709',
+            '-color_trc', 'iec61966-2-1',
+            '-movflags', 'faststart',
+            video_filename
+        ]
+
+        # Create a simple "Encoding..." window
+        encoding_win = tk.Toplevel(self)
+        encoding_win.title("影片編碼中")
+        encoding_win.geometry("350x100")
+        encoding_win.resizable(False, False)
+        encoding_win.transient(self)
+        encoding_win.grab_set()
+        tk.Label(encoding_win, text=f"正在使用 FFmpeg 編碼影片...\n這可能需要一些時間，請勿關閉主視窗。").pack(pady=10)
+        # Add a progress bar in indeterminate mode
+        progress_bar = ttk.Progressbar(encoding_win, orient="horizontal", length=330, mode="indeterminate")
+        progress_bar.pack(pady=5)
+        progress_bar.start(10) # Start the animation
+        encoding_win.update()
+
+        try:
+            # Run ffmpeg
+            # Using Popen for non-blocking call might be better for a GUI, but for this task,
+            # we'll stick to the simpler `run` and just show a waiting message.
+            result = subprocess.run(
+                ffmpeg_command,
+                cwd=output_dir,
+                check=True,
+                capture_output=True,
+                text=True,
+                encoding='utf-8', # Explicitly set encoding
+                errors='replace' # Handle potential encoding errors in ffmpeg output
+            )
+            encoding_win.destroy() # Close the encoding window on success
+            messagebox.showinfo("影片建立成功", f"影片已成功儲存至:\n{os.path.join(output_dir, video_filename)}")
+
+        except FileNotFoundError:
+            if encoding_win.winfo_exists(): encoding_win.destroy()
+            messagebox.showerror("FFmpeg 錯誤", "找不到 FFmpeg 執行檔。\n請確認 FFmpeg 已安裝並在系統的 PATH 中。")
+        except subprocess.CalledProcessError as e:
+            if encoding_win.winfo_exists(): encoding_win.destroy()
+            # Create a dedicated window for the detailed error message
+            error_win = tk.Toplevel(self)
+            error_win.title("FFmpeg 執行錯誤")
+            error_win.geometry("600x400")
+            error_win.transient(self)
+            error_win.grab_set()
+
+            error_message = f"FFmpeg 執行時發生錯誤 (返回碼 {e.returncode})。\n\n" \
+                            f"指令:\n{' '.join(e.cmd)}\n\n" \
+                            f"FFmpeg 輸出 (Stderr):\n{e.stderr}"
+
+            text_frame = tk.Frame(error_win)
+            text_frame.pack(expand=True, fill="both", padx=5, pady=5)
+
+            text_widget = tk.Text(text_frame, wrap="word", height=15)
+            text_widget.insert("1.0", error_message)
+            text_widget.config(state="disabled")
+
+            scrollbar = tk.Scrollbar(text_frame, command=text_widget.yview)
+            text_widget.config(yscrollcommand=scrollbar.set)
+
+            scrollbar.pack(side="right", fill="y")
+            text_widget.pack(side="left", expand=True, fill="both")
+
+            tk.Button(error_win, text="關閉", command=error_win.destroy).pack(pady=10)
+        except Exception as e:
+            # Catch any other unexpected errors
+            if encoding_win.winfo_exists(): encoding_win.destroy()
+            messagebox.showerror("未知錯誤", f"處理影片時發生預期外的錯誤:\n{str(e)}")
+        finally:
+            # Final check to ensure the encoding window is closed
+            if encoding_win.winfo_exists():
+                encoding_win.destroy()
+
     def export_image(self):
         """匯出上次模擬的動畫幀序列到一個新資料夾。"""
         if not self.last_simulation_data:
@@ -1774,7 +1867,7 @@ class App(tk.Tk):
                     continue
 
                 # Define filename and path
-                filename = f"frame_{i:04d}.png"
+                filename = f"frame_{i+1:04d}.png"
                 filepath = os.path.join(output_dir, filename)
 
                 # Save the image as PNG to preserve transparency
@@ -1785,14 +1878,18 @@ class App(tk.Tk):
                 progress_label.config(text=f"{i + 1} / {num_frames}")
                 progress_win.update() # Process UI events
 
-            # 5. 完成後顯示成功訊息
-            messagebox.showinfo("匯出成功", f"已成功匯出 {num_frames} 幀圖片至:\n{output_dir}")
+            # 5. Destroy the progress window for frames
+            progress_win.destroy()
+
+            # 6. Call ffmpeg to create video
+            self._create_video_from_frames(output_dir, num_frames)
 
         except Exception as e:
             messagebox.showerror("匯出錯誤", f"匯出過程中發生錯誤:\n{e}")
         finally:
-            # 確保進度條視窗總是會被關閉
-            progress_win.destroy()
+            # Ensure the progress window is always closed
+            if progress_win.winfo_exists():
+                progress_win.destroy()
 
     def export_region_as_animation(self):
         """Exports an animation of the area defined by the export box."""
@@ -1857,7 +1954,7 @@ class App(tk.Tk):
                 cropped_image = full_image.crop((crop_x1, crop_y1, crop_x2, crop_y2))
 
                 # Define filename and save
-                filename = f"frame_{i:04d}.png"
+                filename = f"frame_{i+1:04d}.png"
                 filepath = os.path.join(output_dir, filename)
                 cropped_image.save(filepath, 'PNG', dpi=(300, 300))
 
@@ -1866,12 +1963,18 @@ class App(tk.Tk):
                 progress_label.config(text=f"{i + 1} / {num_frames}")
                 progress_win.update()
 
-            messagebox.showinfo("成功", f"已成功匯出 {num_frames} 幀區域動畫至:\n{output_dir}")
+            # Destroy the progress window for frames
+            progress_win.destroy()
+
+            # Call ffmpeg to create video
+            self._create_video_from_frames(output_dir, num_frames)
 
         except Exception as e:
             messagebox.showerror("匯出錯誤", f"匯出過程中發生錯誤:\n{e}")
         finally:
-            progress_win.destroy()
+            # Ensure the progress window is always closed
+            if progress_win.winfo_exists():
+                progress_win.destroy()
 
     def dispatch_export_animation(self):
         """Dispatches to the correct export method based on the export box checkbox."""
