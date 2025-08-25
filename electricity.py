@@ -5,6 +5,9 @@ import math
 import random
 import itertools
 import numpy as np
+import os
+from datetime import datetime
+import time
 
 
 # --- 常數設定 ---
@@ -1545,45 +1548,86 @@ class App(tk.Tk):
         # Finally, trigger a redraw of the now-empty canvas
         self.redraw_canvas()
 
+    def _create_progress_window(self, title, max_value):
+        """Creates and returns a progress bar window."""
+        progress_win = tk.Toplevel(self)
+        progress_win.title(title)
+        progress_win.geometry("300x100")
+        progress_win.resizable(False, False)
+        # Make it modal
+        progress_win.transient(self)
+        progress_win.grab_set()
+
+        tk.Label(progress_win, text="處理中，請稍候...").pack(pady=10)
+
+        progress_bar = ttk.Progressbar(progress_win, orient="horizontal", length=280, mode="determinate", maximum=max_value)
+        progress_bar.pack(pady=5)
+
+        progress_label = tk.Label(progress_win, text=f"0 / {max_value}")
+        progress_label.pack()
+
+        progress_win.update()
+        return progress_win, progress_bar, progress_label
+
     def export_image(self):
-        """Exports the current canvas view to a high-resolution image file."""
-        dialog = ExportDialog(self, "高解析度匯出")
-        if not dialog.result:
-            return # User cancelled
-
-        scale, filepath = dialog.result
-
-        # Determine arc data to render. We'll render the final state of the last simulation.
-        arc_data = []
-        if self.last_simulation_data:
-            # By collecting all segments from all frames, we get the final composite image.
-            for frame_segments in self.last_simulation_data:
-                arc_data.extend(frame_segments)
-
-        # Render the scene to a Pillow image with the specified scale
-        image_to_save = self._render_scene_to_pillow(arc_data, scale=scale)
-
-        if image_to_save is None:
-            messagebox.showwarning("匯出失敗", "畫布上沒有可匯出的內容。")
+        """匯出上次模擬的動畫幀序列到一個新資料夾。"""
+        if not self.last_simulation_data:
+            messagebox.showwarning("無資料", "沒有可匯出的模擬資料。請先執行一次模擬。")
             return
 
-        # Save the image
-        try:
-            # Handle formats that don't support transparency (like JPEG)
-            if filepath.lower().endswith(('.jpg', '.jpeg')):
-                # Create a new image with the background color and paste the rendered image onto it
-                bg_color = self.background_color_str.get()
-                final_image = Image.new('RGB', image_to_save.size, bg_color)
-                # Paste using the alpha channel of the source image as a mask
-                final_image.paste(image_to_save, mask=image_to_save.split()[3])
-                final_image.save(filepath, dpi=(scale * 72, scale * 72))
-            else:
-                # PNG and BMP can be saved directly
-                image_to_save.save(filepath, dpi=(scale * 72, scale * 72))
+        # 1. 詢問使用者參數
+        scale = simpledialog.askfloat("設定縮放比例", "請輸入匯出圖片的縮放比例:", parent=self, initialvalue=2.0, minvalue=0.1, maxvalue=32.0)
+        if scale is None: return
 
-            messagebox.showinfo("匯出成功", f"圖片已成功儲存至:\n{filepath}")
+        parent_dir = filedialog.askdirectory(parent=self, title="請選擇儲存匯出資料夾的父目錄")
+        if not parent_dir: return
+
+        # 2. 建立時間戳記資料夾
+        timestamp_folder_name = f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        output_dir = os.path.join(parent_dir, timestamp_folder_name)
+        try:
+            os.makedirs(output_dir, exist_ok=True)
+        except OSError as e:
+            messagebox.showerror("建立資料夾失敗", f"無法建立資料夾:\n{output_dir}\n錯誤: {e}")
+            return
+
+        # 3. 建立並顯示進度條
+        num_frames = len(self.last_simulation_data)
+        progress_win, progress_bar, progress_label = self._create_progress_window("匯出中...", num_frames)
+
+        # 4. 迴圈匯出每一幀
+        try:
+            cumulative_arc_data = []
+            for i, frame_segments in enumerate(self.last_simulation_data):
+                cumulative_arc_data.extend(frame_segments)
+
+                # Render the scene for the current cumulative frame
+                image_to_save = self._render_scene_to_pillow(cumulative_arc_data, scale=scale)
+
+                if image_to_save is None:
+                    print(f"警告: 第 {i} 幀渲染失敗，跳過。")
+                    continue
+
+                # Define filename and path
+                filename = f"frame_{i:04d}.png"
+                filepath = os.path.join(output_dir, filename)
+
+                # Save the image as PNG to preserve transparency
+                image_to_save.save(filepath, 'PNG', dpi=(scale * 72, scale * 72))
+
+                # Update progress bar
+                progress_bar['value'] = i + 1
+                progress_label.config(text=f"{i + 1} / {num_frames}")
+                progress_win.update() # Process UI events
+
+            # 5. 完成後顯示成功訊息
+            messagebox.showinfo("匯出成功", f"已成功匯出 {num_frames} 幀圖片至:\n{output_dir}")
+
         except Exception as e:
-            messagebox.showerror("匯出失敗", f"儲存圖片時發生錯誤:\n{e}")
+            messagebox.showerror("匯出錯誤", f"匯出過程中發生錯誤:\n{e}")
+        finally:
+            # 確保進度條視窗總是會被關閉
+            progress_win.destroy()
 
     def _build_frame_map(self, points, total_original_frames):
         if not points or total_original_frames == 0: return []
