@@ -8,7 +8,6 @@ import numpy as np
 import os
 from datetime import datetime
 import time
-import imageio
 
 
 # --- 常數設定 ---
@@ -84,53 +83,45 @@ class ParameterDialog(simpledialog.Dialog):
 
 
 # --- 【新增】高解析度匯出彈出視窗 ---
-class AnimationExportDialog(simpledialog.Dialog):
-    """一個用於設定動畫匯出參數的對話框"""
+class ExportDialog(simpledialog.Dialog):
+    """一個用於設定高解析度匯出參數的對話框"""
     def __init__(self, parent, title):
         self.result = None
         super().__init__(parent, title)
 
     def body(self, master):
+        # 佈局
         master.grid_columnconfigure(1, weight=1)
 
-        # Scale
-        tk.Label(master, text="縮放比例:").grid(row=0, sticky="w", padx=5, pady=2)
+        # 縮放比例
+        tk.Label(master, text="縮放比例 (e.g., 2, 4, 8):").grid(row=0, sticky="w")
         self.scale_entry = tk.Entry(master)
-        self.scale_entry.grid(row=0, column=1, padx=5, pady=2, sticky="ew")
-        self.scale_entry.insert(0, "2.0")
+        self.scale_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+        self.scale_entry.insert(0, "4")
 
-        # Separator
-        ttk.Separator(master, orient='horizontal').grid(row=1, columnspan=2, sticky='ew', padx=5, pady=5)
+        # 檔案路徑
+        tk.Label(master, text="儲存路徑:").grid(row=1, sticky="w")
+        self.path_entry = tk.Entry(master)
+        self.path_entry.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
 
-        # Video options frame
-        video_frame = tk.LabelFrame(master, text="影片選項")
-        video_frame.grid(row=2, columnspan=2, sticky='ew', padx=5, pady=5)
-        video_frame.grid_columnconfigure(1, weight=1)
+        browse_button = tk.Button(master, text="...", command=self._browse_file)
+        browse_button.grid(row=1, column=2, padx=5, pady=5)
 
-        self.create_video_var = tk.BooleanVar(value=True)
-        self.create_video_check = tk.Checkbutton(video_frame, text="產生 MP4 影片", variable=self.create_video_var, command=self._toggle_video_options)
-        self.create_video_check.grid(row=0, columnspan=2, sticky="w", padx=5)
+        return self.scale_entry # initial focus
 
-        self.fps_label = tk.Label(video_frame, text="影片幀率 (FPS):")
-        self.fps_label.grid(row=1, sticky="w", padx=5, pady=2)
-        self.fps_entry = tk.Entry(video_frame)
-        self.fps_entry.grid(row=1, column=1, padx=5, pady=2, sticky="ew")
-        self.fps_entry.insert(0, "30")
-
-        self.delete_frames_var = tk.BooleanVar(value=False)
-        self.delete_frames_check = tk.Checkbutton(video_frame, text="完成後刪除圖片序列", variable=self.delete_frames_var)
-        self.delete_frames_check.grid(row=2, columnspan=2, sticky="w", padx=5)
-
-        self._toggle_video_options() # Set initial state
-        return self.scale_entry
-
-    def _toggle_video_options(self):
-        state = tk.NORMAL if self.create_video_var.get() else tk.DISABLED
-        self.fps_label.config(state=state)
-        self.fps_entry.config(state=state)
-        self.delete_frames_check.config(state=state)
+    def _browse_file(self):
+        filepath = filedialog.asksaveasfilename(
+            parent=self, # 確保對話框在頂層
+            title="匯出圖片為...",
+            defaultextension=".png",
+            filetypes=[("PNG 圖片", "*.png"), ("JPEG 圖片", "*.jpg"), ("BMP 圖片", "*.bmp")]
+        )
+        if filepath:
+            self.path_entry.delete(0, tk.END)
+            self.path_entry.insert(0, filepath)
 
     def validate(self):
+        # 驗證縮放比例
         try:
             scale = float(self.scale_entry.get())
             if scale <= 0:
@@ -140,30 +131,18 @@ class AnimationExportDialog(simpledialog.Dialog):
             messagebox.showwarning("輸入無效", "縮放比例必須是一個數字。", parent=self)
             return 0
 
-        if self.create_video_var.get():
-            try:
-                fps = int(self.fps_entry.get())
-                if fps <= 0:
-                    messagebox.showwarning("輸入無效", "FPS 必須是正整數。", parent=self)
-                    return 0
-            except ValueError:
-                messagebox.showwarning("輸入無效", "FPS 必須是一個整數。", parent=self)
-                return 0
+        # 驗證檔案路徑
+        filepath = self.path_entry.get()
+        if not filepath:
+            messagebox.showwarning("輸入無效", "請選擇一個有效的儲存路徑。", parent=self)
+            return 0
 
+        self.result = (scale, filepath)
         return 1
 
     def apply(self):
-        scale = float(self.scale_entry.get())
-        create_video = self.create_video_var.get()
-        fps = int(self.fps_entry.get()) if create_video else 0
-        delete_frames = self.delete_frames_var.get() if create_video else False
-
-        self.result = {
-            "scale": scale,
-            "create_video": create_video,
-            "fps": fps,
-            "delete_frames": delete_frames
-        }
+        # The result is already set in validate()
+        pass
 
 
 # --- 幾何物體基底類別 ---
@@ -1591,15 +1570,14 @@ class App(tk.Tk):
         return progress_win, progress_bar, progress_label
 
     def export_image(self):
-        """匯出上次模擬的動畫幀序列，並可選地生成影片。"""
+        """匯出上次模擬的動畫幀序列到一個新資料夾。"""
         if not self.last_simulation_data:
             messagebox.showwarning("無資料", "沒有可匯出的模擬資料。請先執行一次模擬。")
             return
 
         # 1. 詢問使用者參數
-        dialog = AnimationExportDialog(self, "動畫匯出設定")
-        if not dialog.result: return # User cancelled
-        params = dialog.result
+        scale = simpledialog.askfloat("設定縮放比例", "請輸入匯出圖片的縮放比例:", parent=self, initialvalue=2.0, minvalue=0.1, maxvalue=32.0)
+        if scale is None: return
 
         parent_dir = filedialog.askdirectory(parent=self, title="請選擇儲存匯出資料夾的父目錄")
         if not parent_dir: return
@@ -1617,62 +1595,38 @@ class App(tk.Tk):
         num_frames = len(self.last_simulation_data)
         progress_win, progress_bar, progress_label = self._create_progress_window("匯出中...", num_frames)
 
-        exported_files = []
+        # 4. 迴圈匯出每一幀
         try:
-            # --- Phase 1: Exporting Frames ---
-            progress_label.config(text=f"正在匯出圖片... 0 / {num_frames}")
-            progress_win.update()
-
             cumulative_arc_data = []
             for i, frame_segments in enumerate(self.last_simulation_data):
                 cumulative_arc_data.extend(frame_segments)
-                image_to_save = self._render_scene_to_pillow(cumulative_arc_data, scale=params['scale'])
 
-                if image_to_save is None: continue
+                # Render the scene for the current cumulative frame
+                image_to_save = self._render_scene_to_pillow(cumulative_arc_data, scale=scale)
 
+                if image_to_save is None:
+                    print(f"警告: 第 {i} 幀渲染失敗，跳過。")
+                    continue
+
+                # Define filename and path
                 filename = f"frame_{i:04d}.png"
                 filepath = os.path.join(output_dir, filename)
-                image_to_save.save(filepath, 'PNG', dpi=(params['scale'] * 72, params['scale'] * 72))
-                exported_files.append(filepath)
 
+                # Save the image as PNG to preserve transparency
+                image_to_save.save(filepath, 'PNG', dpi=(scale * 72, scale * 72))
+
+                # Update progress bar
                 progress_bar['value'] = i + 1
-                progress_label.config(text=f"正在匯出圖片... {i + 1} / {num_frames}")
-                progress_win.update()
+                progress_label.config(text=f"{i + 1} / {num_frames}")
+                progress_win.update() # Process UI events
 
-            # --- Phase 2: Creating Video ---
-            if params['create_video']:
-                progress_label.config(text="正在合成影片...")
-                progress_bar['value'] = 0
-                progress_win.update()
-
-                video_path = os.path.join(output_dir, "animation.mp4")
-                with imageio.get_writer(video_path, fps=params['fps']) as writer:
-                    for i, filepath in enumerate(exported_files):
-                        writer.append_data(imageio.imread(filepath))
-                        progress_bar['value'] = i + 1
-                        progress_label.config(text=f"正在合成影片... {i + 1} / {num_frames}")
-                        progress_win.update()
-
-                # --- Phase 3: Deleting Frames ---
-                if params['delete_frames']:
-                    progress_label.config(text="正在清理圖片...")
-                    progress_bar['value'] = 0
-                    progress_win.update()
-                    for i, filepath in enumerate(exported_files):
-                        os.remove(filepath)
-                        progress_bar['value'] = i + 1
-                        progress_label.config(text=f"正在清理圖片... {i + 1} / {num_frames}")
-                        progress_win.update()
-
-            # --- Final Success Message ---
-            final_message = f"成功匯出 {len(exported_files)} 幀圖片至:\n{output_dir}"
-            if params['create_video']:
-                final_message += f"\n\n影片已儲存為:\n{video_path}"
-            messagebox.showinfo("匯出成功", final_message)
+            # 5. 完成後顯示成功訊息
+            messagebox.showinfo("匯出成功", f"已成功匯出 {num_frames} 幀圖片至:\n{output_dir}")
 
         except Exception as e:
             messagebox.showerror("匯出錯誤", f"匯出過程中發生錯誤:\n{e}")
         finally:
+            # 確保進度條視窗總是會被關閉
             progress_win.destroy()
 
     def _build_frame_map(self, points, total_original_frames):
