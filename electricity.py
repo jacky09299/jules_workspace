@@ -1575,9 +1575,23 @@ class App(tk.Tk):
             messagebox.showwarning("無資料", "沒有可匯出的模擬資料。請先執行一次模擬。")
             return
 
-        # 1. 詢問使用者參數
-        scale = simpledialog.askfloat("設定縮放比例", "請輸入匯出圖片的縮放比例:", parent=self, initialvalue=2.0, minvalue=0.1, maxvalue=32.0)
-        if scale is None: return
+        # 1. 自動計算縮放比例以符合 3840x2160 解析度
+        target_width, target_height = 3840, 2160
+        canvas_width = self.canvas.winfo_width()
+        canvas_height = self.canvas.winfo_height()
+
+        if canvas_width == 0 or canvas_height == 0:
+            messagebox.showerror("錯誤", "無法讀取畫布大小。")
+            return
+
+        # 為保持長寬比，取較小的縮放因子
+        scale_w = target_width / canvas_width
+        scale_h = target_height / canvas_height
+        scale = min(scale_w, scale_h)
+
+        if scale <= 0:
+            messagebox.showerror("錯誤", "計算出的縮放比例無效。")
+            return
 
         parent_dir = filedialog.askdirectory(parent=self, title="請選擇儲存匯出資料夾的父目錄")
         if not parent_dir: return
