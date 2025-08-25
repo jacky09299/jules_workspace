@@ -1030,6 +1030,18 @@ class App(tk.Tk):
         self.show_images = tk.BooleanVar(value=True)
         self.background_color_str = tk.StringVar(value=BACKGROUND_COLOR)
 
+        # --- 【新增】匯出框相關變數 ---
+        self.export_box = {'x': 50, 'y': 50, 'w': 400, 'h': 300}
+        self.show_export_box = tk.BooleanVar(value=False)
+        self.export_box_vars = {
+            'x': tk.StringVar(value=str(self.export_box['x'])),
+            'y': tk.StringVar(value=str(self.export_box['y'])),
+            'w': tk.StringVar(value=str(self.export_box['w'])),
+            'h': tk.StringVar(value=str(self.export_box['h'])),
+        }
+        self.show_export_box.trace_add("write", lambda *args: self.redraw_canvas())
+
+
         self.sim_params = {
             'fork_chance': 0.015, 'path_interruption_chance': 0.005, 'step_length': 5,
             'arc_threshold_v_pixel': 150.0, 'probe_count': 15, 'probe_angle': 120,
@@ -1095,6 +1107,26 @@ class App(tk.Tk):
         tk.Button(bg_frame, text="背景顏色", command=self._choose_main_bg_color).pack(side=tk.LEFT)
         self.bg_preview = tk.Frame(bg_frame, width=24, height=24, bg=self.background_color_str.get(), relief=tk.SUNKEN, borderwidth=1)
         self.bg_preview.pack(side=tk.LEFT, padx=5)
+
+        # --- 【新增】匯出區域設定 ---
+        export_frame = tk.LabelFrame(scrollable_frame, text="匯出區域", padx=10, pady=10, bg=CONTROL_PANEL_BG)
+        export_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        tk.Checkbutton(export_frame, text="顯示/啟用匯出框", variable=self.show_export_box, bg=CONTROL_PANEL_BG).pack(anchor="w")
+
+        entry_frame = tk.Frame(export_frame, bg=CONTROL_PANEL_BG)
+        entry_frame.pack(fill=tk.X, pady=5)
+
+        labels = ["X:", "Y:", "寬:", "高:"]
+        keys = ['x', 'y', 'w', 'h']
+        for i, (label, key) in enumerate(zip(labels, keys)):
+            tk.Label(entry_frame, text=label, bg=CONTROL_PANEL_BG).grid(row=i//2, column=(i%2)*2, sticky="w", padx=(0, 2))
+            tk.Entry(entry_frame, textvariable=self.export_box_vars[key], width=6).grid(row=i//2, column=(i%2)*2 + 1, sticky="ew", pady=2)
+
+        entry_frame.columnconfigure(1, weight=1)
+        entry_frame.columnconfigure(3, weight=1)
+
+        tk.Button(export_frame, text="從輸入更新匯出框", command=self._update_export_box_from_entries).pack(fill=tk.X, pady=(5, 0))
         
         param_frame = tk.LabelFrame(scrollable_frame, text="模擬參數", padx=10, pady=10, bg=CONTROL_PANEL_BG)
         param_frame.pack(fill=tk.X, padx=10, pady=10)
@@ -1153,7 +1185,8 @@ class App(tk.Tk):
         sim_frame.pack(fill=tk.X, padx=10, pady=10)
         tk.Button(sim_frame, text="執行新模擬", command=self.start_new_simulation).pack(fill=tk.X, pady=3)
         tk.Button(sim_frame, text="預覽上次模擬", command=self.preview_simulation).pack(fill=tk.X, pady=3)
-        tk.Button(sim_frame, text="匯出圖片", command=self.export_image).pack(fill=tk.X, pady=3)
+        tk.Button(sim_frame, text="匯出完整動畫", command=self.export_image).pack(fill=tk.X, pady=3)
+        tk.Button(sim_frame, text="匯出選取區域 (單幀)", command=self.export_region_as_image).pack(fill=tk.X, pady=3)
         ttk.Separator(sim_frame, orient='horizontal').pack(fill='x', pady=5)
         tk.Button(sim_frame, text="清除電弧", command=self.clear_simulation).pack(fill=tk.X, pady=3)
         tk.Button(sim_frame, text="清除所有", command=self.clear_all).pack(fill=tk.X, pady=3)
@@ -1216,7 +1249,34 @@ class App(tk.Tk):
             scene_image = Image.alpha_composite(scene_image, glow_layer)
             scene_draw = ImageDraw.Draw(scene_image)
 
-        # 4. Draw selection outline (only for on-screen display, not for export)
+        # 4. Draw export box (only for on-screen display)
+        if self.show_export_box.get() and scale == 1.0:
+            box = self.export_box
+            x1, y1 = box['x'], box['y']
+            x2, y2 = x1 + box['w'], y1 + box['h']
+
+            # To draw with transparency, we create an overlay
+            overlay = Image.new('RGBA', scene_image.size, (0,0,0,0))
+            draw_overlay = ImageDraw.Draw(overlay)
+
+            fill_color = (255, 255, 0, 30) # Very transparent yellow
+            outline_color = (255, 255, 0, 200) # Solid yellow
+
+            draw_overlay.rectangle([x1, y1, x2, y2], fill=fill_color, outline=outline_color, width=1)
+
+            # Draw resize handle
+            handle_x = x1 + box['w']
+            handle_y = y1 + box['h']
+            r = HANDLE_RADIUS
+            draw_overlay.rectangle([handle_x - r, handle_y - r, handle_x + r, handle_y + r],
+                                 fill=HANDLE_COLOR, outline='white')
+
+            # Composite the overlay onto the scene
+            scene_image = Image.alpha_composite(scene_image, overlay)
+            # We need a new draw context for the composited image
+            scene_draw = ImageDraw.Draw(scene_image)
+
+        # 5. Draw selection outline (only for on-screen display, not for export)
         if self.selected_item and scale == 1.0:
             is_conductor = self.selected_item in self.shapes and self.show_conductors.get()
             is_image = self.selected_item in self.images and self.show_images.get()
@@ -1261,6 +1321,51 @@ class App(tk.Tk):
             self.arc_color_preview.config(bg=color_code[1])
             # Re-run preview to show new arc color
             self.preview_simulation()
+
+    def _update_export_box_from_entries(self):
+        try:
+            x = int(self.export_box_vars['x'].get())
+            y = int(self.export_box_vars['y'].get())
+            w = int(self.export_box_vars['w'].get())
+            h = int(self.export_box_vars['h'].get())
+
+            if w <= 0 or h <= 0:
+                messagebox.showwarning("輸入無效", "寬度和高度必須是正數。")
+                return
+
+            self.export_box = {'x': x, 'y': y, 'w': w, 'h': h}
+            self.redraw_canvas()
+        except ValueError:
+            messagebox.showerror("輸入錯誤", "請確保所有匯出區域的欄位都是有效的整數。")
+
+    def _update_export_box_entries(self):
+        """Updates the UI Entry widgets from the self.export_box dictionary."""
+        for key, var in self.export_box_vars.items():
+            var.set(str(int(self.export_box[key])))
+
+    def _get_export_box_handle_at(self, x, y):
+        """Checks if a click is on a resize handle of the export box."""
+        if not self.show_export_box.get():
+            return None
+        box = self.export_box
+        handle_size = HANDLE_RADIUS * 2
+
+        # Bottom-right handle
+        br_x = box['x'] + box['w']
+        br_y = box['y'] + box['h']
+        if (br_x - handle_size/2 <= x <= br_x + handle_size/2) and \
+           (br_y - handle_size/2 <= y <= br_y + handle_size/2):
+            return 'br'
+
+        return None
+
+    def _is_in_export_box(self, x, y):
+        """Checks if a click is inside the export box body."""
+        if not self.show_export_box.get() or self._get_export_box_handle_at(x,y):
+            return False
+        box = self.export_box
+        return (box['x'] < x < box['x'] + box['w']) and \
+               (box['y'] < y < box['y'] + box['h'])
 
     def on_canvas_right_click(self, event):
         if self.is_creating_arbitrary_shape: self.cancel_creation_mode(event); return
@@ -1310,6 +1415,16 @@ class App(tk.Tk):
         for img in self.top_images: img.set_layer('front')
 
     def on_canvas_press(self, event):
+        # --- 【新增】匯出框互動邏輯 ---
+        if self.show_export_box.get():
+            handle_type = self._get_export_box_handle_at(event.x, event.y)
+            if handle_type:
+                self.drag_data = {'type': 'export_box_resize', 'handle': handle_type, 'start_x': event.x, 'start_y': event.y}
+                return
+            if self._is_in_export_box(event.x, event.y):
+                self.drag_data = {'type': 'export_box_move', 'start_x': event.x, 'start_y': event.y, 'orig_box': self.export_box.copy()}
+                return
+
         if self.is_creating_arbitrary_shape:
             x, y = event.x, event.y
             if self.current_polygon_points and math.hypot(x - self.current_polygon_points[0][0], y - self.current_polygon_points[0][1]) < HANDLE_RADIUS * 2:
@@ -1351,6 +1466,37 @@ class App(tk.Tk):
             self.closing_line_id = self.canvas.create_line(event.x, event.y, sx, sy, fill=SELECTED_OUTLINE_COLOR, dash=(4,4))
 
     def on_canvas_drag(self, event):
+        drag_type = self.drag_data.get('type')
+
+        # --- 【新增】匯出框拖曳/縮放邏輯 ---
+        if drag_type == 'export_box_move':
+            dx = event.x - self.drag_data['start_x']
+            dy = event.y - self.drag_data['start_y']
+            orig_box = self.drag_data['orig_box']
+            self.export_box['x'] = orig_box['x'] + dx
+            self.export_box['y'] = orig_box['y'] + dy
+            self._update_export_box_entries()
+            self.redraw_canvas()
+            return
+        elif drag_type == 'export_box_resize':
+            dx = event.x - self.drag_data['start_x']
+            dy = event.y - self.drag_data['start_y']
+
+            # For a bottom-right handle
+            self.export_box['w'] += dx
+            self.export_box['h'] += dy
+
+            # Add constraints
+            if self.export_box['w'] < 20: self.export_box['w'] = 20
+            if self.export_box['h'] < 20: self.export_box['h'] = 20
+
+            self.drag_data['start_x'] = event.x
+            self.drag_data['start_y'] = event.y
+
+            self._update_export_box_entries()
+            self.redraw_canvas()
+            return
+
         # This temporary drawing for rod creation still needs the canvas.
         if self.is_creating_rod and 'x1' in self.drag_data:
             if self.drag_data.get('line_id'): self.canvas.delete(self.drag_data['line_id'])
@@ -1372,6 +1518,12 @@ class App(tk.Tk):
                     self._preview_job = self.after(50, self.preview_simulation)
 
     def on_canvas_release(self, event):
+        # --- 【新增】匯出框互動邏輯 ---
+        drag_type = self.drag_data.get('type')
+        if drag_type in ['export_box_move', 'export_box_resize']:
+            self.drag_data.clear()
+            return
+
         if self.is_creating_arbitrary_shape: return
         self.canvas.config(cursor="")
         if self.add_shape_mode:
@@ -1642,6 +1794,70 @@ class App(tk.Tk):
         finally:
             # 確保進度條視窗總是會被關閉
             progress_win.destroy()
+
+    def export_region_as_image(self):
+        """Exports a single, high-resolution image of the area defined by the export box."""
+        if not self.show_export_box.get():
+            messagebox.showwarning("無效操作", "請先勾選 '顯示/啟用匯出框' 並設定您想匯出的區域。")
+            return
+
+        if not self.last_simulation_data:
+            messagebox.showwarning("無資料", "沒有可匯出的模擬資料。請先執行一次模擬以產生畫面。")
+            return
+
+        filepath = filedialog.asksaveasfilename(
+            parent=self,
+            title="匯出選取區域為...",
+            defaultextension=".png",
+            filetypes=[("PNG 圖片", "*.png"), ("JPEG 圖片", "*.jpg")]
+        )
+        if not filepath:
+            return
+
+        try:
+            # 1. Get export box dimensions
+            box = self.export_box
+            box_w, box_h = box['w'], box['h']
+            if box_w <= 0 or box_h <= 0:
+                messagebox.showerror("錯誤", "匯出框的寬度和高度必須大於 0。")
+                return
+
+            # 2. Calculate scale to fit the BOX into 4K resolution
+            target_width, target_height = 3840, 2160
+            render_scale = min(target_width / box_w, target_height / box_h)
+
+            # 3. Get all arc data from the final frame of the simulation
+            cumulative_arc_data = []
+            for frame_segments in self.last_simulation_data:
+                cumulative_arc_data.extend(frame_segments)
+
+            # 4. Render the entire scene at the high resolution
+            full_image = self._render_scene_to_pillow(cumulative_arc_data, scale=render_scale)
+            if full_image is None:
+                messagebox.showerror("渲染錯誤", "無法渲染場景。")
+                return
+
+            # 5. Define the crop area in the scaled coordinates
+            crop_x1 = int(box['x'] * render_scale)
+            crop_y1 = int(box['y'] * render_scale)
+            crop_x2 = int((box['x'] + box['w']) * render_scale)
+            crop_y2 = int((box['y'] + box['h']) * render_scale)
+
+            # 6. Crop the image
+            cropped_image = full_image.crop((crop_x1, crop_y1, crop_x2, crop_y2))
+
+            # 7. Save the final image
+            file_format = 'PNG' if filepath.lower().endswith('.png') else 'JPEG'
+            if file_format == 'JPEG':
+                 # PIL needs an RGB image to save as JPEG
+                cropped_image = cropped_image.convert('RGB')
+
+            cropped_image.save(filepath, file_format, dpi=(300, 300))
+            messagebox.showinfo("成功", f"已成功匯出選取區域圖片至:\n{filepath}")
+
+        except Exception as e:
+            messagebox.showerror("匯出錯誤", f"匯出過程中發生錯誤:\n{e}")
+
 
     def _build_frame_map(self, points, total_original_frames):
         if not points or total_original_frames == 0: return []
