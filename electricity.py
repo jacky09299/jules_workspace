@@ -1524,10 +1524,10 @@ class App(tk.Tk):
             messagebox.showerror("匯出失敗", "無法建立影片檔案。請檢查路徑權限或編碼器是否支援。")
             return
 
-        # 執行寫入 (在下個步驟中完成)
-        self._write_video_frames(video_writer)
+        # 執行寫入
+        self._write_video_frames(video_writer, filepath)
 
-    def _write_video_frames(self, video_writer):
+    def _write_video_frames(self, video_writer, filepath):
         """Renders each frame and writes it to the video file, with a progress bar."""
         points = self.speed_control_graph.get_points()
         animation_frame_map = self._build_frame_map(points, self.total_frames)
@@ -1559,7 +1559,7 @@ class App(tk.Tk):
                 video_writer.write(frame_bgr)
                 progress_win.update_progress(i + 1)
 
-            messagebox.showinfo("匯出成功", f"影片已成功儲存至:\n{video_writer.get_filename()}")
+            messagebox.showinfo("匯出成功", f"影片已成功儲存至:\n{filepath}")
 
         except Exception as e:
             messagebox.showerror("匯出錯誤", f"在寫入影片幀時發生錯誤: {e}")
