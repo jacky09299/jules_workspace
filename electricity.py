@@ -4,8 +4,6 @@ from PIL import Image, ImageTk, ImageDraw
 import math
 import random
 import itertools
-import imageio
-import numpy as np
 
 # --- 常數設定 ---
 HV_COLOR = "#FF4136"  # 高壓顏色 (紅色)
@@ -729,12 +727,13 @@ class ArcRenderer:
 
     def _draw_arc_segment(self, segment_data):
         p1, p2 = segment_data['p1'], segment_data['p2']
-        thickness, life = segment_data['thickness'], segment_data['life']
+        thickness_ratio, life = segment_data['thickness_ratio'], segment_data['life']
 
-        if thickness < 0.2: return
+        base_thickness = self.params['arc_max_thickness'] * thickness_ratio
+        if base_thickness < 0.2: return
 
         life_factor = max(0, min(1, life / self.params['arc_max_life']))
-        core_thickness = thickness * (0.2 + life_factor * 0.8)
+        core_thickness = base_thickness * (0.2 + life_factor * 0.8)
         if core_thickness < 0.2: return
 
         segment_color = self._interpolate_color(self.params['arc_color'], "#FFFFFF", life_factor)
@@ -847,7 +846,7 @@ class Simulator:
                 initial_direction = (ex/mag, ey/mag) if mag > 1e-9 else (1, 0)
                 self.active_arcs.append({
                     'current': best_start_point, 'direction': initial_direction,
-                    'thickness': self.params['arc_max_thickness'], 'life': self.params['arc_max_life']
+                    'thickness_ratio': 1.0, 'life': self.params['arc_max_life']
                 })
 
         if not self.active_arcs:
@@ -861,9 +860,9 @@ class Simulator:
 
             for arc_data in self.active_arcs:
                 current_point, current_direction = arc_data['current'], arc_data['direction']
-                thickness, life = arc_data['thickness'], arc_data['life']
+                thickness_ratio, life = arc_data['thickness_ratio'], arc_data['life']
 
-                if life <= 0 or thickness < 0.5: continue
+                if life <= 0 or thickness_ratio < 0.01: continue
 
                 ex, ey = self._calculate_electric_field_at(*current_point)
                 field_strength = math.hypot(ex, ey)
@@ -881,7 +880,7 @@ class Simulator:
                             if dist_sq < min_dist_sq:
                                 min_dist_sq, closest_point = dist_sq, p
                     if closest_point:
-                        current_frame_segments.append({'p1': current_point, 'p2': closest_point, 'thickness': thickness * 1.5, 'life': life})
+                        current_frame_segments.append({'p1': current_point, 'p2': closest_point, 'thickness_ratio': thickness_ratio * 1.5, 'life': life})
                         jump_occurred = True
                 
                 if jump_occurred: continue
@@ -893,15 +892,15 @@ class Simulator:
                 next_point, next_direction = self._get_next_point(current_point, current_direction)
                 if next_point is None: continue
 
-                current_frame_segments.append({'p1': current_point, 'p2': next_point, 'thickness': thickness, 'life': life})
-                next_active_arcs.append({'current': next_point, 'direction': next_direction, 'thickness': thickness, 'life': life - 1})
+                current_frame_segments.append({'p1': current_point, 'p2': next_point, 'thickness_ratio': thickness_ratio, 'life': life})
+                next_active_arcs.append({'current': next_point, 'direction': next_direction, 'thickness_ratio': thickness_ratio, 'life': life - 1})
 
                 if random.random() < self.params['fork_chance']:
                     fork_point, fork_direction = self._get_next_point(current_point, current_direction)
                     if fork_point:
-                        fork_thickness = thickness * 0.7
-                        current_frame_segments.append({'p1': current_point, 'p2': fork_point, 'thickness': fork_thickness, 'life': life})
-                        next_active_arcs.append({'current': fork_point, 'direction': fork_direction, 'thickness': fork_thickness, 'life': life - 1})
+                        fork_thickness_ratio = thickness_ratio * 0.7
+                        current_frame_segments.append({'p1': current_point, 'p2': fork_point, 'thickness_ratio': fork_thickness_ratio, 'life': life})
+                        next_active_arcs.append({'current': fork_point, 'direction': fork_direction, 'thickness_ratio': fork_thickness_ratio, 'life': life - 1})
 
             self.active_arcs = next_active_arcs
             self.simulation_data.append(current_frame_segments)
@@ -1064,8 +1063,6 @@ class App(tk.Tk):
         tk.Button(sim_frame, text="預覽上次模擬", command=self.preview_simulation).pack(fill=tk.X, pady=3)
         tk.Button(sim_frame, text="清除電弧", command=self.clear_simulation).pack(fill=tk.X, pady=3)
         tk.Button(sim_frame, text="清除所有", command=self.clear_all).pack(fill=tk.X, pady=3)
-        ttk.Separator(sim_frame).pack(fill='x', pady=5)
-        tk.Button(sim_frame, text="儲存動畫...", command=self.open_export_dialog).pack(fill=tk.X, pady=3)
 
         speed_control_frame = ttk.LabelFrame(scrollable_frame, text="速率曲線控制")
         speed_control_frame.pack(fill=tk.X, padx=10, pady=10)
@@ -1380,12 +1377,6 @@ class App(tk.Tk):
         if self.speed_control_graph:
             self.speed_control_graph.reset(0)
 
-    def open_export_dialog(self):
-        if not self.last_simulation_data:
-            messagebox.showerror("錯誤", "沒有可以匯出的模擬數據。\n請先『執行新模擬』。")
-            return
-        VideoExportDialog(self, "匯出動畫", self)
-
     def _build_frame_map(self, points, total_original_frames):
         if not points or total_original_frames == 0: return []
         points.sort(key=lambda p: p[0])
@@ -1417,211 +1408,6 @@ class App(tk.Tk):
             final_map.append(total_original_frames - 1)
         return final_map
 
-    def export_video(self, settings, progress_var, status_label):
-        filepath = settings['filepath']
-        if not filepath:
-            messagebox.showerror("錯誤", "未指定檔案路徑。")
-            status_label.config(text="錯誤: 未指定路徑")
-            return
-
-        frame_map = self._build_frame_map(settings['speed_points'], len(self.last_simulation_data))
-        total_new_frames = len(frame_map)
-        if total_new_frames == 0:
-            messagebox.showerror("錯誤", "根據目前的分段速率設定，沒有足夠的畫格可以匯出。")
-            status_label.config(text="錯誤: 速率設定問題")
-            return
-
-        writer = imageio.get_writer(filepath, fps=60, format=settings['format'], codec='libx264' if settings['format'] == 'mp4' else None)
-        appearance_params = self._get_current_appearance_params()
-        bg_color = settings['bg_color']
-        img_mode = 'RGBA' if settings['format'] == 'gif' and settings['transparent_bg'] else 'RGB'
-        bg = (0,0,0,0) if img_mode == 'RGBA' else bg_color
-        w, h = self.canvas.winfo_width(), self.canvas.winfo_height()
-        
-        try:
-            last_original_frame_index = -1
-            for i, original_frame_index in enumerate(frame_map):
-                # 【修改】每一幀都重新繪製背景和物件，以支援背景變化
-                img = Image.new(img_mode, (w, h), bg)
-                draw = ImageDraw.Draw(img, 'RGBA')
-                if settings['include_images']: self._draw_images_on_pil(img)
-                if settings['include_conductors']: self._draw_conductors_on_pil(draw)
-
-                frames_to_render = range(last_original_frame_index + 1, original_frame_index + 1)
-                for frame_idx_to_draw in frames_to_render:
-                    if frame_idx_to_draw < len(self.last_simulation_data):
-                        frame_data = self.last_simulation_data[frame_idx_to_draw]
-                        img = self._draw_arcs_on_pil(draw, frame_data, appearance_params, img)
-                last_original_frame_index = original_frame_index
-                final_frame_pil = img.convert('RGB') if img_mode == 'RGB' else img
-                if settings['format'] == 'mp4':
-                    fw, fh = final_frame_pil.size
-                    macro_block_size = 16
-                    if fw % macro_block_size != 0 or fh % macro_block_size != 0:
-                        new_w = (fw + macro_block_size - 1) // macro_block_size * macro_block_size
-                        new_h = (fh + macro_block_size - 1) // macro_block_size * macro_block_size
-                        padded_img = Image.new(final_frame_pil.mode, (new_w, new_h), (0,0,0))
-                        padded_img.paste(final_frame_pil, (0,0))
-                        final_frame_pil = padded_img
-                final_frame = np.array(final_frame_pil)
-                writer.append_data(final_frame)
-                progress = (i + 1) / total_new_frames * 100
-                progress_var.set(progress)
-                status_label.config(text=f"正在匯出... {i+1}/{total_new_frames}")
-                self.update_idletasks()
-            messagebox.showinfo("完成", f"動畫已成功儲存至:\n{filepath}")
-            status_label.config(text="匯出完成！")
-        except Exception as e:
-            messagebox.showerror("匯出失敗", f"匯出過程中發生錯誤:\n{e}")
-            status_label.config(text="匯出失敗！")
-        finally:
-            writer.close()
-
-    def _draw_conductors_on_pil(self, draw):
-        for shape in self.shapes:
-            color = HV_COLOR if shape.voltage >= 0 else GND_COLOR
-            if shape.shape_type == "Needle":
-                coords = (shape.x - shape.radius, shape.y - shape.radius, shape.x + shape.radius, shape.y + shape.radius)
-                draw.ellipse(coords, fill=color, outline="white", width=1)
-            elif shape.shape_type == "Rod":
-                draw.line((shape.x1, shape.y1, shape.x2, shape.y2), fill=color, width=int(shape.thickness))
-            elif shape.shape_type in ["Plate", "Arbitrary"]:
-                draw.polygon(shape.points, fill=color, outline="white", width=1)
-
-    def _draw_images_on_pil(self, base_image):
-        # 【修改】根據畫布上的順序繪製圖片
-        all_canvas_items = self.canvas.find_all()
-        sorted_images = sorted(self.images, key=lambda i: all_canvas_items.index(i.id) if i.id in all_canvas_items else -1)
-        
-        for img_obj in sorted_images:
-            if not hasattr(img_obj, 'pil_image_original'): continue
-            rotated_img = img_obj.pil_image_original.rotate(img_obj.angle, resample=Image.Resampling.BICUBIC, expand=True)
-            w, h = rotated_img.size
-            new_size = (int(w * img_obj.scale), int(h * img_obj.scale))
-            if new_size[0] < 1 or new_size[1] < 1: continue
-            scaled_img = rotated_img.resize(new_size, Image.Resampling.LANCZOS)
-            paste_x, paste_y = int(img_obj.x - new_size[0] / 2), int(img_obj.y - new_size[1] / 2)
-            if scaled_img.mode == 'RGBA': base_image.paste(scaled_img, (paste_x, paste_y), scaled_img)
-            else: base_image.paste(scaled_img, (paste_x, paste_y))
-
-    def _draw_arcs_on_pil(self, draw, frame_data, params, background_img):
-        def _interpolate_color(c1, c2, f):
-            try:
-                c1_rgb = tuple(int(c1.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
-                c2_rgb = tuple(int(c2.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
-                rgb = [int(c1_rgb[i] + (c2_rgb[i] - c1_rgb[i]) * f) for i in range(3)]
-                return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
-            except: return c1
-        def _get_glow_alpha(dist, points):
-            dist = max(0, min(1, dist))
-            for i in range(len(points) - 1):
-                p1, p2 = points[i], points[i+1]
-                if p1[0] <= dist <= p2[0]:
-                    r = p2[0] - p1[0]
-                    return p1[1] + ((dist - p1[0]) / r) * (p2[1] - p1[1]) if r != 0 else p1[1]
-            return points[-1][1]
-
-        if background_img.mode != 'RGBA': background_img = background_img.convert('RGBA')
-        core_line_overlay = Image.new('RGBA', background_img.size, (0,0,0,0))
-        core_draw = ImageDraw.Draw(core_line_overlay)
-
-        for segment in frame_data:
-            p1, p2, thickness, life = segment['p1'], segment['p2'], segment['thickness'], segment['life']
-            if thickness < 0.2: continue
-            life_factor = max(0, min(1, life / params['arc_max_life']))
-            core_thickness = thickness * (0.2 + life_factor * 0.8)
-            if core_thickness < 0.5: continue
-            segment_color = _interpolate_color(params['arc_color'], "#FFFFFF", life_factor)
-            dx, dy = p2[0] - p1[0], p2[1] - p1[1]
-            length = math.hypot(dx, dy)
-            if length < 1e-6: continue
-            nx, ny = -dy / length, dx / length
-
-            if params['arc_glow_strength'] > 0:
-                max_glow_radius = core_thickness / 2 * (1 + params['arc_glow_strength'] * 3.0)
-                glow_points = params['glow_falloff_points']
-                glow_color_rgb = tuple(int(params['arc_color'].lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
-                for i in range(15, 0, -1):
-                    dist = i / 15
-                    alpha = _get_glow_alpha(dist, glow_points)
-                    if alpha <= 0.01: continue
-                    layer_width = max_glow_radius * dist * 2
-                    p1a = (p1[0] + nx * layer_width/2, p1[1] + ny * layer_width/2)
-                    p2a = (p2[0] + nx * layer_width/2, p2[1] + ny * layer_width/2)
-                    p2b = (p2[0] - nx * layer_width/2, p2[1] - ny * layer_width/2)
-                    p1b = (p1[0] - nx * layer_width/2, p1[1] - ny * layer_width/2)
-                    poly_img = Image.new('RGBA', background_img.size, (0,0,0,0))
-                    poly_draw = ImageDraw.Draw(poly_img)
-                    poly_draw.polygon([p1a, p2a, p2b, p1b], fill=glow_color_rgb + (int(alpha*255),))
-                    background_img = Image.alpha_composite(background_img, poly_img)
-
-            core_draw.line([p1[0], p1[1], p2[0], p2[1]], fill=segment_color, width=int(core_thickness))
-            r = core_thickness / 2
-            if r > 0: core_draw.ellipse([p2[0]-r, p2[1]-r, p2[0]+r, p2[1]+r], fill=segment_color)
-        
-        background_img = Image.alpha_composite(background_img, core_line_overlay)
-        return background_img
-
-
-class VideoExportDialog(simpledialog.Dialog):
-    def __init__(self, parent, title, app_ref):
-        self.app = app_ref
-        super().__init__(parent, title)
-
-    def body(self, master):
-        master.pack_configure(padx=10, pady=10)
-        path_frame = ttk.LabelFrame(master, text="儲存位置與格式"); path_frame.pack(fill=tk.X, pady=5); path_frame.columnconfigure(1, weight=1)
-        self.path_var = tk.StringVar(); tk.Entry(path_frame, textvariable=self.path_var).grid(row=0, column=1, sticky="ew", padx=5, pady=5)
-        tk.Button(path_frame, text="瀏覽...", command=self._browse_file).grid(row=0, column=2, padx=5)
-        self.format_var = tk.StringVar(value="mp4"); tk.Radiobutton(path_frame, text="MP4", variable=self.format_var, value="mp4", command=self._on_format_change).grid(row=1, column=1, sticky='w', padx=5)
-        tk.Radiobutton(path_frame, text="GIF", variable=self.format_var, value="gif", command=self._on_format_change).grid(row=1, column=2, sticky='w', padx=5)
-        content_frame = ttk.LabelFrame(master, text="內容與背景"); content_frame.pack(fill=tk.X, pady=5)
-        self.include_conductors = tk.BooleanVar(value=True); self.include_images = tk.BooleanVar(value=True)
-        tk.Checkbutton(content_frame, text="包含導體", variable=self.include_conductors).pack(side=tk.LEFT, padx=5)
-        tk.Checkbutton(content_frame, text="包含圖片", variable=self.include_images).pack(side=tk.LEFT, padx=5)
-        self.bg_color_var = tk.StringVar(value=BACKGROUND_COLOR); tk.Button(content_frame, text="背景顏色", command=self._choose_bg_color).pack(side=tk.LEFT, padx=10)
-        self.bg_preview = tk.Frame(content_frame, width=24, height=24, bg=self.bg_color_var.get(), relief=tk.SUNKEN, borderwidth=1); self.bg_preview.pack(side=tk.LEFT)
-        self.transparent_bg = tk.BooleanVar(value=False); self.transparent_check = tk.Checkbutton(content_frame, text="透明背景 (GIF)", variable=self.transparent_bg, state=tk.DISABLED); self.transparent_check.pack(side=tk.LEFT, padx=5)
-
-        progress_frame = ttk.LabelFrame(master, text="進度"); progress_frame.pack(fill=tk.X, pady=10)
-        self.status_label = tk.Label(progress_frame, text="準備就緒"); self.status_label.pack(fill=tk.X, padx=5, pady=2)
-        self.progress_var = tk.DoubleVar(); progress_bar = ttk.Progressbar(progress_frame, variable=self.progress_var, maximum=100); progress_bar.pack(fill=tk.X, padx=5, pady=5)
-        return None
-
-    def buttonbox(self):
-        box = tk.Frame(self)
-        self.ok_button = tk.Button(box, text="開始匯出", width=10, command=self.ok_pressed, default=tk.ACTIVE)
-        self.ok_button.pack(side=tk.LEFT, padx=5, pady=5)
-        cancel_button = tk.Button(box, text="關閉", width=10, command=self.cancel)
-        cancel_button.pack(side=tk.LEFT, padx=5, pady=5)
-        self.bind("<Return>", lambda e: self.ok_pressed())
-        box.pack()
-
-    def _browse_file(self):
-        fmt = self.format_var.get(); filetypes = [("MP4 video", "*.mp4"), ("GIF animation", "*.gif"), ("All files", "*.*")]; defaultextension = f".{fmt}"
-        filepath = filedialog.asksaveasfilename(parent=self, title="儲存為", defaultextension=defaultextension, filetypes=filetypes)
-        if filepath: self.path_var.set(filepath)
-    def _choose_bg_color(self):
-        color_code = colorchooser.askcolor(title="選擇背景顏色", initialcolor=self.bg_color_var.get())
-        if color_code and color_code[1]: self.bg_color_var.set(color_code[1]); self.bg_preview.config(bg=color_code[1])
-    def _on_format_change(self):
-        self.transparent_check.config(state=tk.NORMAL if self.format_var.get() == 'gif' else tk.DISABLED)
-        if self.format_var.get() != 'gif': self.transparent_bg.set(False)
-
-    def ok_pressed(self):
-        # The app now manages the speed segments. The dialog just uses them.
-        # The app's refresh logic already fills gaps, so we can use the segments directly.
-        # The app's _build_frame_map now expects points, not segments.
-        # The export_video function will call _build_frame_map itself.
-        self.settings = {
-            'filepath': self.path_var.get(), 'format': self.format_var.get(),
-            'include_conductors': self.include_conductors.get(), 'include_images': self.include_images.get(),
-            'bg_color': self.bg_color_var.get(), 'transparent_bg': self.transparent_bg.get(),
-            'speed_points': self.app.speed_control_graph.get_points()
-        }
-        self.ok_button.config(state=tk.DISABLED)
-        self.app.export_video(self.settings, self.progress_var, self.status_label)
-        self.ok_button.config(state=tk.NORMAL)
 
 if __name__ == "__main__":
     app = App()
