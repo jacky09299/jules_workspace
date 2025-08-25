@@ -78,16 +78,27 @@ class ParameterDialog(simpledialog.Dialog):
 
 # --- 幾何物體基底類別 ---
 class Shape:
-    def __init__(self, canvas, voltage):
-        self.canvas = canvas
+    # Constructor now takes the main app instance instead of the canvas
+    def __init__(self, app, voltage):
+        self.app = app
+        self.canvas = app.canvas
         self.voltage = voltage
+        # These properties are now obsolete with the new rendering engine
         self.id = None
         self.outline_id = None
         self.handles = []
         self.shape_type = "Shape"
 
-    def draw(self): raise NotImplementedError
+    def draw(self):
+        """This method is now obsolete. Drawing is handled by draw_to_pillow."""
+        pass # Obsolete
+    def draw_to_pillow(self, draw): raise NotImplementedError
+
+    def draw_selection_to_pillow(self, draw):
+        """Draws the selection outline and handles on a Pillow ImageDraw context."""
+        pass
     def contains(self, px, py): raise NotImplementedError
+
     def move(self, dx, dy): raise NotImplementedError
     def get_handle_at(self, x, y): return None
     def move_handle(self, handle_index, new_x, new_y): pass
@@ -95,50 +106,32 @@ class Shape:
     def get_emission_points(self, num_points=20): raise NotImplementedError
     
     def select(self):
-        self.deselect()
-        self.outline_id = self.canvas.create_polygon(
-            self.get_outline_points(), outline=SELECTED_OUTLINE_COLOR, 
-            width=2, fill='', dash=(4, 4)
-        )
-        self._create_handles()
+        """This method is now obsolete. Selection is handled by the renderer."""
+        pass # Obsolete
 
     def deselect(self):
-        if self.outline_id:
-            self.canvas.delete(self.outline_id)
-            self.outline_id = None
-        self._delete_handles()
+        """This method is now obsolete. Selection is handled by the renderer."""
+        pass # Obsolete
 
-    def _create_handles(self): pass
-    def _delete_handles(self):
-        for handle in self.handles: self.canvas.delete(handle)
-        self.handles.clear()
+    def _create_handles(self): pass # Obsolete
+    def _delete_handles(self): pass # Obsolete
 
     def update_color(self):
-        color = HV_COLOR if self.voltage >= 0 else GND_COLOR
-        self.canvas.itemconfig(self.id, fill=color)
+        """This method is now obsolete. Color is determined during rendering."""
+        pass # Obsolete
 
     def update_params(self, **kwargs):
         if 'voltage' in kwargs:
             self.voltage = kwargs['voltage']
-            self.update_color()
-        self.draw()
-        if self.outline_id: self.select()
+        # Trigger a redraw instead of calling obsolete methods
+        self.app.redraw_canvas()
 
 # --- 各種形狀的具體實現 ---
 class Needle(Shape):
-    def __init__(self, canvas, x, y, voltage=10000, radius=10):
-        super().__init__(canvas, voltage)
+    def __init__(self, app, x, y, voltage=10000, radius=10):
+        super().__init__(app, voltage)
         self.x, self.y, self.radius = x, y, radius
         self.shape_type = "Needle"
-        self.draw()
-
-    def draw(self):
-        if self.id: self.canvas.delete(self.id)
-        color = HV_COLOR if self.voltage >= 0 else GND_COLOR
-        self.id = self.canvas.create_oval(
-            self.x - self.radius, self.y - self.radius,
-            self.x + self.radius, self.y + self.radius,
-            fill=color, outline="white", width=1)
 
     def contains(self, px, py):
         return (px - self.x)**2 + (py - self.y)**2 <= self.radius**2
@@ -146,10 +139,11 @@ class Needle(Shape):
     def move(self, dx, dy):
         self.x += dx
         self.y += dy
-        self.canvas.move(self.id, dx, dy)
+        self.app.redraw_canvas()
 
     def get_outline_points(self):
-        return self.canvas.coords(self.id)
+        # This method no longer reads from canvas, but calculates based on geometry
+        return [self.x - self.radius, self.y - self.radius, self.x + self.radius, self.y + self.radius]
     
     def get_center(self): return (self.x, self.y)
 
@@ -166,20 +160,24 @@ class Needle(Shape):
         if 'radius' in kwargs: self.radius = kwargs['radius']
         super().update_params(**kwargs)
 
+    def draw_to_pillow(self, draw):
+        """Draws the shape on a Pillow ImageDraw context."""
+        color = HV_COLOR if self.voltage >= 0 else GND_COLOR
+        bbox = self.get_outline_points()
+        draw.ellipse(bbox, fill=color, outline="white", width=1)
+
+    def draw_selection_to_pillow(self, draw):
+        """Draws the selection outline and handles on a Pillow ImageDraw context."""
+        bbox = self.get_outline_points()
+        draw.ellipse(bbox, fill=None, outline=SELECTED_OUTLINE_COLOR, width=2)
+        # Needle has no handles.
+
 class Rod(Shape):
-    def __init__(self, canvas, x1, y1, x2, y2, voltage=10000, thickness=5):
-        super().__init__(canvas, voltage)
+    def __init__(self, app, x1, y1, x2, y2, voltage=10000, thickness=5):
+        super().__init__(app, voltage)
         self.x1, self.y1, self.x2, self.y2 = x1, y1, x2, y2
         self.thickness = thickness
         self.shape_type = "Rod"
-        self.draw()
-
-    def draw(self):
-        if self.id: self.canvas.delete(self.id)
-        color = HV_COLOR if self.voltage >= 0 else GND_COLOR
-        self.id = self.canvas.create_line(
-            self.x1, self.y1, self.x2, self.y2, 
-            fill=color, width=self.thickness, capstyle=tk.ROUND)
 
     def contains(self, px, py):
         dx, dy = self.x2 - self.x1, self.y2 - self.y1
@@ -193,22 +191,14 @@ class Rod(Shape):
     def move(self, dx, dy):
         self.x1 += dx; self.y1 += dy
         self.x2 += dx; self.y2 += dy
-        self.canvas.coords(self.id, self.x1, self.y1, self.x2, self.y2)
+        self.app.redraw_canvas()
     
     def get_outline_points(self):
         return (self.x1, self.y1, self.x2, self.y2)
 
-    def _create_handles(self):
-        for x, y in [(self.x1, self.y1), (self.x2, self.y2)]:
-            h_id = self.canvas.create_oval(x-HANDLE_RADIUS, y-HANDLE_RADIUS, 
-                                           x+HANDLE_RADIUS, y+HANDLE_RADIUS,
-                                           fill=HANDLE_COLOR, outline='white')
-            self.handles.append(h_id)
-
     def get_handle_at(self, x, y):
-        for i, h_id in enumerate(self.handles):
-            hx, hy, _, _ = self.canvas.coords(h_id)
-            hx += HANDLE_RADIUS; hy += HANDLE_RADIUS
+        # This logic no longer uses canvas items but pure geometry
+        for i, (hx, hy) in enumerate([(self.x1, self.y1), (self.x2, self.y2)]):
             if (x - hx)**2 + (y - hy)**2 < HANDLE_RADIUS**2:
                 return i
         return None
@@ -218,8 +208,7 @@ class Rod(Shape):
             self.x1, self.y1 = new_x, new_y
         else:
             self.x2, self.y2 = new_x, new_y
-        self.draw()
-        self.select()
+        self.app.redraw_canvas()
     
     def get_center(self): return ((self.x1+self.x2)/2, (self.y1+self.y2)/2)
 
@@ -238,20 +227,27 @@ class Rod(Shape):
             self.x2, self.y2 = kwargs['points'][1]
         super().update_params(**kwargs)
 
+    def draw_to_pillow(self, draw):
+        """Draws the shape on a Pillow ImageDraw context."""
+        color = HV_COLOR if self.voltage >= 0 else GND_COLOR
+        draw.line(
+            (self.x1, self.y1, self.x2, self.y2),
+            fill=color, width=int(self.thickness)
+        )
+
+    def draw_selection_to_pillow(self, draw):
+        """Draws the selection outline and handles on a Pillow ImageDraw context."""
+        draw.line((self.x1, self.y1, self.x2, self.y2), fill=SELECTED_OUTLINE_COLOR, width=3)
+        for x, y in [(self.x1, self.y1), (self.x2, self.y2)]:
+            r = HANDLE_RADIUS
+            draw.ellipse([x-r, y-r, x+r, y+r], fill=HANDLE_COLOR, outline='white')
+
 class Plate(Shape):
-    def __init__(self, canvas, x, y, voltage=0, width=150, height=30):
-        super().__init__(canvas, voltage)
+    def __init__(self, app, x, y, voltage=0, width=150, height=30):
+        super().__init__(app, voltage)
         w, h = width/2, height/2
         self.points = [(x-w, y-h), (x+w, y-h), (x+w, y+h), (x-w, y+h)]
         self.shape_type = "Plate"
-        self.draw()
-
-    def draw(self):
-        if self.id: self.canvas.delete(self.id)
-        color = HV_COLOR if self.voltage >= 0 else GND_COLOR
-        flat_points = [coord for point in self.points for coord in point]
-        self.id = self.canvas.create_polygon(
-            flat_points, fill=color, outline="white", width=1)
         
     def contains(self, px, py):
         inside = False
@@ -268,30 +264,20 @@ class Plate(Shape):
 
     def move(self, dx, dy):
         self.points = [(p[0]+dx, p[1]+dy) for p in self.points]
-        self.draw()
+        self.app.redraw_canvas()
 
     def get_outline_points(self):
         return [coord for point in self.points for coord in point]
 
-    def _create_handles(self):
-        for x, y in self.points:
-            h_id = self.canvas.create_oval(x-HANDLE_RADIUS, y-HANDLE_RADIUS, 
-                                           x+HANDLE_RADIUS, y+HANDLE_RADIUS,
-                                           fill=HANDLE_COLOR, outline='white')
-            self.handles.append(h_id)
-
     def get_handle_at(self, x, y):
-        for i, h_id in enumerate(self.handles):
-            hx, hy, _, _ = self.canvas.coords(h_id)
-            hx += HANDLE_RADIUS; hy += HANDLE_RADIUS
+        for i, (hx, hy) in enumerate(self.points):
             if (x - hx)**2 + (y - hy)**2 < HANDLE_RADIUS**2:
                 return i
         return None
 
     def move_handle(self, handle_index, new_x, new_y):
         self.points[handle_index] = (new_x, new_y)
-        self.draw()
-        self.select()
+        self.app.redraw_canvas()
 
     def get_center(self):
         cx = sum(p[0] for p in self.points) / len(self.points)
@@ -316,19 +302,39 @@ class Plate(Shape):
             self.points = kwargs['points']
         super().update_params(**kwargs)
 
+    def draw_to_pillow(self, draw):
+        """Draws the shape on a Pillow ImageDraw context."""
+        color = HV_COLOR if self.voltage >= 0 else GND_COLOR
+        if len(self.points) > 1:
+            draw.polygon(self.points, fill=color, outline="white", width=1)
+
+    def draw_selection_to_pillow(self, draw):
+        """Draws the selection outline and handles on a Pillow ImageDraw context."""
+        # Dashed line is not supported, so we draw a solid polygon outline.
+        if len(self.points) > 1:
+            draw.polygon(self.points, fill=None, outline=SELECTED_OUTLINE_COLOR, width=2)
+        # Draw handles
+        for x, y in self.points:
+            r = HANDLE_RADIUS
+            draw.ellipse([x-r, y-r, x+r, y+r], fill=HANDLE_COLOR, outline='white')
+
+    def draw_to_pillow(self, draw):
+        """Draws the shape on a Pillow ImageDraw context."""
+        color = HV_COLOR if self.voltage >= 0 else GND_COLOR
+        draw.polygon(self.points, fill=color, outline="white", width=1)
+
+    def draw_selection_to_pillow(self, draw):
+        """Draws the selection outline and handles on a Pillow ImageDraw context."""
+        draw.polygon(self.points, fill=None, outline=SELECTED_OUTLINE_COLOR, width=2)
+        for x, y in self.points:
+            r = HANDLE_RADIUS
+            draw.ellipse([x-r, y-r, x+r, y+r], fill=HANDLE_COLOR, outline='white')
+
 class ArbitraryShape(Shape):
-    def __init__(self, canvas, points, voltage=0):
-        super().__init__(canvas, voltage)
+    def __init__(self, app, points, voltage=0):
+        super().__init__(app, voltage)
         self.points = points 
         self.shape_type = "Arbitrary"
-        self.draw()
-
-    def draw(self):
-        if self.id: self.canvas.delete(self.id)
-        color = HV_COLOR if self.voltage >= 0 else GND_COLOR
-        flat_points = [coord for point in self.points for coord in point]
-        self.id = self.canvas.create_polygon(
-            flat_points, fill=color, outline="white", width=1)
         
     def contains(self, px, py):
         inside = False
@@ -345,30 +351,20 @@ class ArbitraryShape(Shape):
 
     def move(self, dx, dy):
         self.points = [(p[0]+dx, p[1]+dy) for p in self.points]
-        self.draw()
+        self.app.redraw_canvas()
 
     def get_outline_points(self):
         return [coord for point in self.points for coord in point]
 
-    def _create_handles(self):
-        for x, y in self.points:
-            h_id = self.canvas.create_oval(x-HANDLE_RADIUS, y-HANDLE_RADIUS, 
-                                           x+HANDLE_RADIUS, y+HANDLE_RADIUS,
-                                           fill=HANDLE_COLOR, outline='white')
-            self.handles.append(h_id)
-
     def get_handle_at(self, x, y):
-        for i, h_id in enumerate(self.handles):
-            hx, hy, _, _ = self.canvas.coords(h_id)
-            hx += HANDLE_RADIUS; hy += HANDLE_RADIUS
+        for i, (hx, hy) in enumerate(self.points):
             if (x - hx)**2 + (y - hy)**2 < HANDLE_RADIUS**2:
                 return i
         return None
 
     def move_handle(self, handle_index, new_x, new_y):
         self.points[handle_index] = (new_x, new_y)
-        self.draw()
-        self.select()
+        self.app.redraw_canvas()
 
     def get_center(self):
         if not self.points: return (0, 0)
@@ -412,6 +408,11 @@ class DecorativeImage:
         self.draw()
 
     def draw(self):
+        """This method is now obsolete. Drawing is handled by draw_to_pillow."""
+        pass
+
+    def get_transformed_image(self):
+        """Applies rotation and scaling to the original PIL image and returns a new PIL image."""
         # 1. 旋轉: expand=True可確保旋轉後圖片不被裁切
         rotated_img = self.pil_image_original.rotate(self.angle, resample=Image.Resampling.BICUBIC, expand=True)
 
@@ -420,11 +421,48 @@ class DecorativeImage:
         new_size = (int(w * self.scale), int(h * self.scale))
         # 使用LANCZOS以獲得較好的縮放品質
         scaled_img = rotated_img.resize(new_size, Image.Resampling.LANCZOS)
+        return scaled_img
 
-        # 3. 轉換為Tkinter格式並繪製
-        self.tk_image = ImageTk.PhotoImage(scaled_img)
-        if self.id: self.canvas.delete(self.id)
-        self.id = self.canvas.create_image(self.x, self.y, image=self.tk_image, tags="image")
+    def draw_to_pillow(self, main_image):
+        """Renders the transformed image onto the main Pillow image context."""
+        transformed_img = self.get_transformed_image()
+        # The position (self.x, self.y) is the center, so we need to calculate the top-left corner for pasting.
+        w, h = transformed_img.size
+        paste_x = int(self.x - w / 2)
+        paste_y = int(self.y - h / 2)
+        # The image might have RGBA transparency, so we should use it as the mask for pasting.
+        if transformed_img.mode == 'RGBA':
+            main_image.paste(transformed_img, (paste_x, paste_y), transformed_img)
+        else:
+            main_image.paste(transformed_img, (paste_x, paste_y))
+
+    def draw_selection_to_pillow(self, draw):
+        """Draws the selection outline and handles on a Pillow ImageDraw context."""
+        w, h = self.pil_image_original.size
+
+        # 1. Draw outline
+        w_scaled, h_scaled = w * self.scale / 2, h * self.scale / 2
+        local_points = [(-w_scaled, -h_scaled), (w_scaled, -h_scaled), (w_scaled, h_scaled), (-w_scaled, h_scaled)]
+        rad = math.radians(self.angle)
+        cos_a, sin_a = math.cos(rad), math.sin(rad)
+
+        world_points = []
+        for p_x, p_y in local_points:
+            world_x = (p_x * cos_a - p_y * sin_a) + self.x
+            world_y = (p_x * sin_a + p_y * cos_a) + self.y
+            world_points.append((world_x, world_y))
+
+        draw.polygon(world_points, fill=None, outline=SELECTED_OUTLINE_COLOR, width=2)
+
+        # 2. Draw handles
+        w_s, h_s = w * self.scale, h * self.scale
+        handle_positions = { 'scale': (w_s / 2, h_s / 2), 'rotate': (w_s / 2, -h_s / 2) }
+
+        for name, (p_x, p_y) in handle_positions.items():
+            world_x = (p_x * cos_a - p_y * sin_a) + self.x
+            world_y = (p_x * sin_a + p_y * cos_a) + self.y
+            r = HANDLE_RADIUS
+            draw.ellipse([world_x-r, world_y-r, world_x+r, world_y+r], fill=HANDLE_COLOR, outline='white')
 
     def contains(self, px, py):
         # 使用旋轉後的邊界框進行點選偵測
@@ -445,76 +483,39 @@ class DecorativeImage:
     def move(self, dx, dy):
         self.x += dx
         self.y += dy
-        self.canvas.move(self.id, dx, dy)
-        if self.outline_id:
-            self.canvas.move(self.outline_id, dx, dy)
-            for handle in self.handles.values():
-                self.canvas.move(handle, dx, dy)
+        self.app.redraw_canvas()
 
     def select(self):
-        self.deselect()
-
-        w, h = self.pil_image_original.size
-        w_scaled, h_scaled = w * self.scale / 2, h * self.scale / 2
-
-        # 定義本地座標中的四個角點
-        points = [(-w_scaled, -h_scaled), (w_scaled, -h_scaled),
-                  (w_scaled, h_scaled), (-w_scaled, h_scaled)]
-
-        rad = math.radians(self.angle)
-        cos_a, sin_a = math.cos(rad), math.sin(rad)
-
-        rotated_points = []
-        for p_x, p_y in points:
-            # 旋轉角點並加上中心點座標
-            world_x = (p_x * cos_a - p_y * sin_a) + self.x
-            world_y = (p_x * sin_a + p_y * cos_a) + self.y
-            rotated_points.extend([world_x, world_y])
-
-        self.outline_id = self.canvas.create_polygon(
-            rotated_points, outline=SELECTED_OUTLINE_COLOR,
-            width=2, fill='', dash=(4, 4), tags="selection")
-        self._create_handles()
+        """This method is now obsolete. Selection is handled by the renderer."""
+        pass
 
     def deselect(self):
-        if self.outline_id:
-            self.canvas.delete(self.outline_id)
-            self.outline_id = None
-        self._delete_handles()
+        """This method is now obsolete. Selection is handled by the renderer."""
+        pass
 
     def _create_handles(self):
-        self._delete_handles()
+        """This method is now obsolete."""
+        pass
 
+    def _delete_handles(self):
+        """This method is now obsolete."""
+        pass
+
+    def get_handle_at(self, x, y):
+        # This logic is now based on pure geometry, not canvas items.
         w, h = self.pil_image_original.size
         w_s, h_s = w * self.scale, h * self.scale
-
-        # 定義控制點在本地座標的位置 (右下角:縮放, 右上角:旋轉)
         handle_positions = {
             'scale': (w_s / 2, h_s / 2),
             'rotate': (w_s / 2, -h_s / 2)
         }
-
         rad = math.radians(self.angle)
         cos_a, sin_a = math.cos(rad), math.sin(rad)
 
         for name, (p_x, p_y) in handle_positions.items():
             world_x = (p_x * cos_a - p_y * sin_a) + self.x
             world_y = (p_x * sin_a + p_y * cos_a) + self.y
-
-            h_id = self.canvas.create_oval(world_x - HANDLE_RADIUS, world_y - HANDLE_RADIUS,
-                                           world_x + HANDLE_RADIUS, world_y + HANDLE_RADIUS,
-                                           fill=HANDLE_COLOR, outline='white', tags="selection")
-            self.handles[name] = h_id
-
-    def _delete_handles(self):
-        for handle_id in self.handles.values():
-            self.canvas.delete(handle_id)
-        self.handles.clear()
-
-    def get_handle_at(self, x, y):
-        for name, h_id in self.handles.items():
-            hx1, hy1, hx2, hy2 = self.canvas.coords(h_id)
-            if hx1 <= x <= hx2 and hy1 <= y <= hy2:
+            if (x - world_x)**2 + (y - world_y)**2 < HANDLE_RADIUS**2:
                 return name
         return None
 
@@ -539,18 +540,15 @@ class DecorativeImage:
             mouse_angle_rad = math.atan2(dy, dx)
             self.angle = math.degrees(mouse_angle_rad - base_angle_rad)
 
-        self.draw()
-        self.select()
+        self.app.redraw_canvas()
 
     def set_layer(self, layer):
         if layer == 'front':
-            self.canvas.tag_raise(self.id)
-            self.canvas.tag_raise("selection") # 同時提高選取框和控制點
             self.app.top_images.add(self)
         elif layer == 'back':
-            self.canvas.tag_lower(self.id)
             if self in self.app.top_images:
                 self.app.top_images.remove(self)
+        self.app.redraw_canvas()
 
 # --- 【新增】速率控制圖表 (線性內插版本) ---
 class SpeedControlGraph(tk.Canvas):
@@ -697,22 +695,30 @@ class SpeedControlGraph(tk.Canvas):
         """Returns a sorted list of control points."""
         return sorted(self.points, key=lambda p: p[0])
 
-# --- 【新增】電弧彩現器 ---
-class ArcRenderer:
-    def __init__(self, canvas, appearance_params):
-        self.canvas = canvas
-        self.params = appearance_params
+# --- 【新增】電弧彩現器 (Pillow版本) ---
+def hex_to_rgb(hex_color):
+    """Converts a hex color string to an (r, g, b) tuple."""
+    hex_color = hex_color.lstrip('#')
+    if len(hex_color) != 6:
+        return (0, 0, 0) # Return black on error
+    try:
+        return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return (0, 0, 0)
 
-    def _interpolate_color(self, color1, color2, factor):
-        try:
-            r1, g1, b1 = int(color1[1:3], 16), int(color1[3:5], 16), int(color1[5:7], 16)
-            r2, g2, b2 = int(color2[1:3], 16), int(color2[3:5], 16), int(color2[5:7], 16)
-            r = int(r1 + (r2 - r1) * factor)
-            g = int(g1 + (g2 - g1) * factor)
-            b = int(b1 + (b2 - b1) * factor)
-            return f"#{r:02x}{g:02x}{b:02x}"
-        except (ValueError, IndexError):
-            return color1
+class ArcRenderer:
+    def __init__(self, appearance_params):
+        self.params = appearance_params
+        self.arc_rgb = hex_to_rgb(self.params.get('arc_color', '#7FDBFF'))
+        self.white_rgb = (255, 255, 255)
+
+    def _interpolate_rgb(self, rgb1, rgb2, factor):
+        """Linearly interpolates between two RGB tuples."""
+        factor = max(0.0, min(1.0, factor))
+        r = int(rgb1[0] + (rgb2[0] - rgb1[0]) * factor)
+        g = int(rgb1[1] + (rgb2[1] - rgb1[1]) * factor)
+        b = int(rgb1[2] + (rgb2[2] - rgb1[2]) * factor)
+        return (r, g, b)
 
     def _get_glow_alpha_from_profile(self, normalized_dist, glow_falloff_points):
         normalized_dist = max(0, min(1, normalized_dist))
@@ -725,48 +731,45 @@ class ArcRenderer:
                 return p1[1] + local_factor * (p2[1] - p1[1])
         return glow_falloff_points[-1][1]
 
-    def _draw_arc_segment(self, segment_data):
+    def _draw_arc_segment(self, segment_data, draw_context):
         p1, p2 = segment_data['p1'], segment_data['p2']
         thickness_ratio, life = segment_data['thickness_ratio'], segment_data['life']
 
-        base_thickness = self.params['arc_max_thickness'] * thickness_ratio
+        base_thickness = self.params.get('arc_max_thickness', 2.0) * thickness_ratio
         if base_thickness < 0.2: return
 
-        life_factor = max(0, min(1, life / self.params['arc_max_life']))
+        max_life = self.params.get('arc_max_life', 200)
+        life_factor = max(0, min(1, life / max_life if max_life > 0 else 0))
         core_thickness = base_thickness * (0.2 + life_factor * 0.8)
         if core_thickness < 0.2: return
 
-        segment_color = self._interpolate_color(self.params['arc_color'], "#FFFFFF", life_factor)
+        r_glow, g_glow, b_glow = self.arc_rgb
 
-        dx, dy = p2[0] - p1[0], p2[1] - p1[1]
-        length = math.hypot(dx, dy)
-        if length < 1e-6: return
-        nx, ny = -dy / length, dx / length
-
-        if self.params['arc_glow_strength'] > 0:
+        if self.params.get('arc_glow_strength', 0.4) > 0:
             num_glow_layers = 15
-            max_glow_radius = core_thickness / 2 * (1 + self.params['arc_glow_strength'] * 3.0)
-            glow_falloff_points = self.params['glow_falloff_points']
+            max_glow_radius = core_thickness / 2 * (1 + self.params.get('arc_glow_strength', 0.4) * 3.0)
+            glow_falloff_points = self.params.get('glow_falloff_points', [])
 
             for i in range(num_glow_layers, 0, -1):
                 normalized_dist = i / num_glow_layers
                 alpha = self._get_glow_alpha_from_profile(normalized_dist, glow_falloff_points)
                 if alpha <= 0.01: continue
 
-                layer_color = self._interpolate_color(BACKGROUND_COLOR, self.params['arc_color'], alpha)
+                layer_color_rgba = (r_glow, g_glow, b_glow, int(alpha * 255))
                 layer_width = max_glow_radius * normalized_dist * 2
 
-                p1a = (p1[0] + nx * layer_width/2, p1[1] + ny * layer_width/2)
-                p2a = (p2[0] + nx * layer_width/2, p2[1] + ny * layer_width/2)
-                p2b = (p2[0] - nx * layer_width/2, p2[1] - ny * layer_width/2)
-                p1b = (p1[0] - nx * layer_width/2, p1[1] - ny * layer_width/2)
-                self.canvas.create_polygon(p1a, p2a, p2b, p1b, fill=layer_color, outline="", tags="arc")
+                if layer_width >= 1:
+                    draw_context.line([p1, p2], fill=layer_color_rgba, width=int(layer_width))
 
-        self.canvas.create_line(*p1, *p2, fill=segment_color, width=core_thickness, tags="arc", capstyle=tk.ROUND)
+        # Draw the core of the arc
+        core_rgb = self._interpolate_rgb(self.arc_rgb, self.white_rgb, life_factor)
+        core_color_rgba = (*core_rgb, 255) # Opaque core
+        if core_thickness >= 1:
+            draw_context.line((*p1, *p2), fill=core_color_rgba, width=int(core_thickness))
 
-    def render_frame_data(self, frame_data):
+    def render_frame_data(self, frame_data, draw_context):
         for segment in frame_data:
-            self._draw_arc_segment(segment)
+            self._draw_arc_segment(segment, draw_context)
 
 # --- 模擬器 (V9.0 - 資料導向模型) ---
 class Simulator:
@@ -1076,31 +1079,73 @@ class App(tk.Tk):
         self.canvas.bind("<Motion>", self.on_canvas_motion); self.canvas.bind("<Button-3>", self.on_canvas_right_click)
         self.bind("<Escape>", self.cancel_creation_mode)
 
-    # --- 【新】方法: 更新畫布顯示 ---
+    # --- 【新】方法: 更新畫布顯示 (Pillow渲染引擎) ---
+    def redraw_canvas(self, arc_data_for_frame=None):
+        """Redraws the entire canvas using the Pillow off-screen rendering engine."""
+        if arc_data_for_frame is None:
+            arc_data_for_frame = []
+
+        w, h = self.canvas.winfo_width(), self.canvas.winfo_height()
+        if w < 1 or h < 1: return
+
+        # 1. Create scene image and draw context
+        bg_color = self.background_color_str.get()
+        try:
+            scene_image = Image.new('RGBA', (w, h), bg_color)
+        except ValueError: # Handle invalid color strings during input
+            scene_image = Image.new('RGBA', (w, h), BACKGROUND_COLOR)
+
+        scene_draw = ImageDraw.Draw(scene_image)
+
+        # 2. Z-ordered drawing of objects
+        # This logic determines the drawing order: bottom images, shapes, then top images.
+        bottom_images = [img for img in self.images if img not in self.top_images]
+
+        if self.show_images.get():
+            for image in bottom_images:
+                image.draw_to_pillow(scene_image)
+
+        if self.show_conductors.get():
+            for shape in self.shapes:
+                shape.draw_to_pillow(scene_draw)
+
+        if self.show_images.get():
+            for image in self.top_images:
+                image.draw_to_pillow(scene_image)
+
+        # 3. Render arcs if any data is provided
+        if arc_data_for_frame:
+            glow_layer = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+            glow_draw = ImageDraw.Draw(glow_layer)
+
+            appearance_params = self._get_current_appearance_params()
+            arc_renderer = ArcRenderer(appearance_params)
+            arc_renderer.render_frame_data(arc_data_for_frame, glow_draw)
+
+            scene_image = Image.alpha_composite(scene_image, glow_layer)
+            # Re-create scene_draw for drawing selections on the composited image
+            scene_draw = ImageDraw.Draw(scene_image)
+
+        # 4. Draw selection outline and handles on top
+        if self.selected_item:
+            # Check if the selected item should be visible
+            is_conductor = self.selected_item in self.shapes and self.show_conductors.get()
+            is_image = self.selected_item in self.images and self.show_images.get()
+            if is_conductor or is_image:
+                 self.selected_item.draw_selection_to_pillow(scene_draw)
+
+        # 5. Display the final rendered image on the canvas
+        self.tk_render_image = ImageTk.PhotoImage(scene_image)
+        if not hasattr(self, 'canvas_image_id') or not self.canvas.winfo_exists() or not self.canvas.find_withtag(self.canvas_image_id):
+            self.canvas.delete("all")
+            self.canvas_image_id = self.canvas.create_image(0, 0, anchor='nw', image=self.tk_render_image)
+        else:
+            self.canvas.itemconfig(self.canvas_image_id, image=self.tk_render_image)
+
     def update_display(self):
-        # 更新背景顏色
-        self.canvas.config(bg=self.background_color_str.get())
+        # This method now just triggers a full redraw.
         self.bg_preview.config(bg=self.background_color_str.get())
-
-        # 更新導體可見性
-        conductor_state = 'normal' if self.show_conductors.get() else 'hidden'
-        for shape in self.shapes:
-            self.canvas.itemconfig(shape.id, state=conductor_state)
-            # 選取框和控制點也需要同步
-            if shape.outline_id:
-                self.canvas.itemconfig(shape.outline_id, state=conductor_state)
-            for handle in shape.handles:
-                self.canvas.itemconfig(handle, state=conductor_state)
-
-        # 更新圖片可見性
-        image_state = 'normal' if self.show_images.get() else 'hidden'
-        for image in self.images:
-            self.canvas.itemconfig(image.id, state=image_state)
-            # 選取框和控制點也需要同步
-            if image.outline_id:
-                self.canvas.itemconfig(image.outline_id, state=image_state)
-            for handle in image.handles.values():
-                self.canvas.itemconfig(handle, state=image_state)
+        self.redraw_canvas()
 
     # --- 【新】方法: 選擇主畫布背景顏色 ---
     def _choose_main_bg_color(self):
@@ -1108,12 +1153,16 @@ class App(tk.Tk):
         if color_code and color_code[1]:
             self.background_color_str.set(color_code[1])
             self.update_display()
+            # If a simulation exists, re-preview it with the new background
+            if self.last_simulation_data:
+                self.preview_simulation()
 
     def _choose_arc_color(self):
         color_code = colorchooser.askcolor(title="選擇電弧顏色", initialcolor=self.sim_params['arc_color'])
         if color_code and color_code[1]:
             self.sim_params['arc_color'] = color_code[1]
             self.arc_color_preview.config(bg=color_code[1])
+            # Re-run preview to show new arc color
             self.preview_simulation()
 
     def on_canvas_right_click(self, event):
@@ -1205,20 +1254,22 @@ class App(tk.Tk):
             self.closing_line_id = self.canvas.create_line(event.x, event.y, sx, sy, fill=SELECTED_OUTLINE_COLOR, dash=(4,4))
 
     def on_canvas_drag(self, event):
+        # This temporary drawing for rod creation still needs the canvas.
         if self.is_creating_rod and 'x1' in self.drag_data:
             if self.drag_data.get('line_id'): self.canvas.delete(self.drag_data['line_id'])
             self.drag_data['line_id'] = self.canvas.create_line(self.drag_data['x1'], self.drag_data['y1'], event.x, event.y, fill=SELECTED_OUTLINE_COLOR, width=3, dash=(4,4))
             return
+
         if 'item' in self.drag_data:
             item = self.drag_data['item']
             if self.drag_data['type'] == 'body':
                 dx, dy = event.x - self.drag_data['x'], event.y - self.drag_data['y']
-                item.move(dx, dy)
+                item.move(dx, dy) # This now triggers a redraw internally
                 self.drag_data['x'], self.drag_data['y'] = event.x, event.y
             elif self.drag_data['type'] == 'handle': 
-                item.move_handle(self.drag_data['index'], event.x, event.y)
-                # 【新增】拖動控制點時即時預覽電弧
-                if 'arc' in self.sim_params:
+                item.move_handle(self.drag_data['index'], event.x, event.y) # This also triggers a redraw
+                # The live preview of the arc is now implicit, as every change causes a redraw
+                if self.last_simulation_data:
                     if hasattr(self, '_preview_job'):
                         self.after_cancel(self._preview_job)
                     self._preview_job = self.after(50, self.preview_simulation)
@@ -1228,22 +1279,25 @@ class App(tk.Tk):
         self.canvas.config(cursor="")
         if self.add_shape_mode:
             shape = None
-            if self.add_shape_mode == "Needle": shape = Needle(self.canvas, event.x, event.y)
-            elif self.add_shape_mode == "Plate": shape = Plate(self.canvas, event.x, event.y)
+            # Shape constructors now take the app instance 'self'
+            if self.add_shape_mode == "Needle": shape = Needle(self, event.x, event.y)
+            elif self.add_shape_mode == "Plate": shape = Plate(self, event.x, event.y)
             elif self.is_creating_rod:
                 if self.drag_data.get('line_id'): self.canvas.delete(self.drag_data['line_id'])
                 x1, y1 = self.drag_data['x1'], self.drag_data['y1']
-                if math.hypot(event.x - x1, event.y - y1) > 10: shape = Rod(self.canvas, x1, y1, event.x, event.y)
+                if math.hypot(event.x - x1, event.y - y1) > 10: shape = Rod(self, x1, y1, event.x, event.y)
+
             if shape: 
                 self.shapes.append(shape)
                 self.select_item(shape)
-                self.update_display() # 確保新導體符合顯示設定
             self.add_shape_mode, self.is_creating_rod = None, False
         self.drag_data.clear()
+        self.redraw_canvas() # Redraw after action finishes
 
     def on_canvas_double_click(self, event):
         if self.is_creating_arbitrary_shape: self.finalize_arbitrary_shape(); return
-        # 【修改】只在可見的導體中尋找
+
+        # The logic to find the item is still valid.
         if self.show_conductors.get():
             item_found = next((s for s in reversed(self.shapes) if s.contains(event.x, event.y)), None)
             if item_found and hasattr(item_found, 'voltage'):
@@ -1253,30 +1307,29 @@ class App(tk.Tk):
     def finalize_arbitrary_shape(self):
         if not self.is_creating_arbitrary_shape or len(self.current_polygon_points) < 3:
             messagebox.showwarning("創建錯誤", "一個有效的封閉導體至少需要3個頂點。"); self.cancel_creation_mode(); return
-        shape = ArbitraryShape(self.canvas, self.current_polygon_points.copy())
+
+        # Pass 'self' to the constructor
+        shape = ArbitraryShape(self, self.current_polygon_points.copy())
         self.shapes.append(shape)
         self.cancel_creation_mode()
         self.select_item(shape)
-        self.update_display() # 確保新導體符合顯示設定
 
     def select_item(self, item):
-        if self.selected_item and self.selected_item != item: self.selected_item.deselect()
-        if item and self.selected_item != item: 
-            item.select()
-            self.selected_item = item
-        elif not item: 
-            if self.selected_item:
-                self.selected_item.deselect()
-            self.selected_item = None
-        self.update_display() # 確保選取框也更新
+        # Selection is now just a state change followed by a redraw.
+        # No more direct canvas manipulation.
+        self.selected_item = item
+        self.redraw_canvas()
 
     def delete_selected(self):
         if not self.selected_item: return
-        item = self.selected_item; item.deselect(); self.canvas.delete(item.id)
+
+        item = self.selected_item
         if item in self.shapes: self.shapes.remove(item)
         elif item in self.images:
             self.images.remove(item)
             if item in self.top_images: self.top_images.remove(item)
+
+        # Deselect and redraw the canvas to make it disappear.
         self.select_item(None)
 
     def _get_current_appearance_params(self):
@@ -1326,56 +1379,77 @@ class App(tk.Tk):
             self.clear_simulation()
             return
 
-        self.clear_simulation()
+        # Cancel any previous animation
+        if self.animation_job:
+            self.after_cancel(self.animation_job)
+            self.animation_job = None
+
         points = self.speed_control_graph.get_points()
         self.animation_frame_map = self._build_frame_map(points, self.total_frames)
         if not self.animation_frame_map:
+            self.redraw_canvas() # Redraw scene without arcs
             return
 
-        appearance_params = self._get_current_appearance_params()
-        self.arc_renderer = ArcRenderer(self.canvas, appearance_params)
         self.animation_frame_index = 0
-        self.last_preview_frame_index = -1
         self.play_simulation_animation()
 
     def play_simulation_animation(self):
-        if self.animation_frame_index < len(self.animation_frame_map):
-            original_frame_index = self.animation_frame_map[self.animation_frame_index]
-            frames_to_render = range(self.last_preview_frame_index + 1, original_frame_index + 1)
-            for frame_idx_to_draw in frames_to_render:
-                if frame_idx_to_draw < len(self.last_simulation_data):
-                     frame_data = self.last_simulation_data[frame_idx_to_draw]
-                     self.arc_renderer.render_frame_data(frame_data)
-            self.last_preview_frame_index = original_frame_index
-            self.raise_top_images()
-            self.animation_frame_index += 1
-            self.animation_job = self.after(15, self.play_simulation_animation)
-        else:
-            self.animation_job = None
+        if self.animation_job:
+            self.after_cancel(self.animation_job)
+        self.animation_job = None
+
+        if self.animation_frame_index >= len(self.animation_frame_map):
+            return # Animation finished
+
+        original_frame_index = self.animation_frame_map[self.animation_frame_index]
+
+        # Get all arc segments up to the current frame to simulate growth
+        all_segments_to_render = []
+        for i in range(original_frame_index + 1):
+            if i < len(self.last_simulation_data):
+                all_segments_to_render.extend(self.last_simulation_data[i])
+
+        self.redraw_canvas(all_segments_to_render)
+
+        self.animation_frame_index += 1
+        self.animation_job = self.after(15, self.play_simulation_animation)
 
     def clear_simulation(self):
-        if self.animation_job: self.after_cancel(self.animation_job); self.animation_job = None
-        self.canvas.delete("arc")
+        if self.animation_job:
+            self.after_cancel(self.animation_job)
+            self.animation_job = None
+
+        # Redrawing the canvas without arc data effectively clears the simulation visuals
+        self.redraw_canvas()
 
     def clear_all(self):
-        self.clear_simulation()
+        if self.animation_job:
+            self.after_cancel(self.animation_job)
+        self.animation_job = None
+
         self.last_simulation_data = None
         self.select_item(None)
+
+        # The old .deselect() method deleted canvas items, which are no longer used for selection.
+        # We still call it to clear the state, but it won't do much visually.
         for item in self.shapes + self.images: 
             item.deselect()
-            self.canvas.delete(item.id)
+
         self.shapes.clear()
         self.images.clear()
+        self.top_images.clear()
         
         # 重置顯示設定
         self.show_conductors.set(True)
         self.show_images.set(True)
         self.background_color_str.set(BACKGROUND_COLOR)
-        self.update_display()
 
         self.total_frames = 0
         if self.speed_control_graph:
             self.speed_control_graph.reset(0)
+
+        # Finally, trigger a redraw of the now-empty canvas
+        self.redraw_canvas()
 
     def _build_frame_map(self, points, total_original_frames):
         if not points or total_original_frames == 0: return []
