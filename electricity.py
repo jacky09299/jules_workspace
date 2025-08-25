@@ -1030,6 +1030,7 @@ class App(tk.Tk):
         self.show_conductors = tk.BooleanVar(value=True)
         self.show_images = tk.BooleanVar(value=True)
         self.background_color_str = tk.StringVar(value=BACKGROUND_COLOR)
+        self.is_bg_transparent = tk.BooleanVar(value=False) # 【新】匯出透明背景選項
 
         # --- 【新增】匯出框相關變數 ---
         self.export_box = {'x': 50, 'y': 50, 'w': 400, 'h': 300}
@@ -1102,10 +1103,12 @@ class App(tk.Tk):
         display_frame.pack(fill=tk.X, padx=10, pady=10)
         tk.Checkbutton(display_frame, text="顯示導體", variable=self.show_conductors, command=self.update_display, bg=CONTROL_PANEL_BG).pack(anchor="w")
         tk.Checkbutton(display_frame, text="顯示圖片", variable=self.show_images, command=self.update_display, bg=CONTROL_PANEL_BG).pack(anchor="w")
-        
+        tk.Checkbutton(display_frame, text="匯出為透明背景", variable=self.is_bg_transparent, command=self._on_toggle_transparent_bg, bg=CONTROL_PANEL_BG).pack(anchor="w")
+
         bg_frame = tk.Frame(display_frame, bg=CONTROL_PANEL_BG)
         bg_frame.pack(fill='x', pady=(5,0))
-        tk.Button(bg_frame, text="背景顏色", command=self._choose_main_bg_color).pack(side=tk.LEFT)
+        self.bg_color_button = tk.Button(bg_frame, text="背景顏色", command=self._choose_main_bg_color)
+        self.bg_color_button.pack(side=tk.LEFT)
         self.bg_preview = tk.Frame(bg_frame, width=24, height=24, bg=self.background_color_str.get(), relief=tk.SUNKEN, borderwidth=1)
         self.bg_preview.pack(side=tk.LEFT, padx=5)
 
@@ -1204,7 +1207,7 @@ class App(tk.Tk):
         self.bind("<Escape>", self.cancel_creation_mode)
 
     # --- 【新】方法: 更新畫布顯示 (Pillow渲染引擎) ---
-    def _render_scene_to_pillow(self, arc_data_for_frame=None, scale=1.0):
+    def _render_scene_to_pillow(self, arc_data_for_frame=None, scale=1.0, for_export=False):
         """Renders the current scene to a Pillow image, optionally scaled."""
         if arc_data_for_frame is None:
             arc_data_for_frame = []
@@ -1215,10 +1218,15 @@ class App(tk.Tk):
         w_scaled, h_scaled = int(w * scale), int(h * scale)
 
         # 1. Create scene image and draw context
-        bg_color = self.background_color_str.get()
+        if for_export and self.is_bg_transparent.get():
+            bg_color = (0, 0, 0, 0) # RGBA transparent
+        else:
+            bg_color = self.background_color_str.get()
+
         try:
             scene_image = Image.new('RGBA', (w_scaled, h_scaled), bg_color)
         except ValueError:
+            # Fallback for invalid color string
             scene_image = Image.new('RGBA', (w_scaled, h_scaled), BACKGROUND_COLOR)
 
         scene_draw = ImageDraw.Draw(scene_image)
@@ -1313,6 +1321,16 @@ class App(tk.Tk):
             # If a simulation exists, re-preview it with the new background
             if self.last_simulation_data:
                 self.preview_simulation()
+
+    def _on_toggle_transparent_bg(self):
+        """當「匯出為透明背景」核取方塊被點擊時呼叫。"""
+        is_transparent = self.is_bg_transparent.get()
+        if is_transparent:
+            self.bg_color_button.config(state=tk.DISABLED)
+            self.bg_preview.config(bg="#808080") # 使用灰色表示透明/無效狀態
+        else:
+            self.bg_color_button.config(state=tk.NORMAL)
+            self.bg_preview.config(bg=self.background_color_str.get())
 
     def _choose_arc_color(self):
         color_code = colorchooser.askcolor(title="選擇電弧顏色", initialcolor=self.sim_params['arc_color'])
@@ -1860,7 +1878,7 @@ class App(tk.Tk):
                 cumulative_arc_data.extend(frame_segments)
 
                 # Render the scene for the current cumulative frame
-                image_to_save = self._render_scene_to_pillow(cumulative_arc_data, scale=scale)
+                image_to_save = self._render_scene_to_pillow(cumulative_arc_data, scale=scale, for_export=True)
 
                 if image_to_save is None:
                     print(f"警告: 第 {i} 幀渲染失敗，跳過。")
@@ -1939,7 +1957,7 @@ class App(tk.Tk):
                 cumulative_arc_data.extend(frame_segments)
 
                 # Render the entire scene at high resolution for the current frame
-                full_image = self._render_scene_to_pillow(cumulative_arc_data, scale=render_scale)
+                full_image = self._render_scene_to_pillow(cumulative_arc_data, scale=render_scale, for_export=True)
                 if full_image is None:
                     print(f"警告: 第 {i} 幀渲染失敗，跳過。")
                     continue
