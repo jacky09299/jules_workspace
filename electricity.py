@@ -1739,28 +1739,44 @@ class App(tk.Tk):
         progress_win.update()
         return progress_win, progress_bar, progress_label
 
-    def _create_video_from_frames(self, output_dir, num_frames):
+    def _create_video_from_frames(self, output_dir, num_frames, is_transparent=False):
         """Runs ffmpeg to create a video from the exported frames."""
-        video_filename = "outputfile.mp4"
-        # The user provided a complex command, let's build it carefully.
-        # Note: The user's original command had `-frames:v 100`, which is now dynamic.
-        ffmpeg_command = [
-            'ffmpeg',
-            '-r', '24',
-            '-start_number', '1',
-            '-i', 'frame_%04d.png',
-            '-pix_fmt', 'yuv420p',
-            '-vf', 'scale=in_color_matrix=bt709:out_color_matrix=bt709',
-            '-frames:v', str(num_frames),
-            '-c:v', 'libx264',
-            '-preset', 'slower',
-            '-color_range', 'tv',
-            '-colorspace', 'bt709',
-            '-color_primaries', 'bt709',
-            '-color_trc', 'iec61966-2-1',
-            '-movflags', 'faststart',
-            video_filename
-        ]
+        video_filename = "output.webm" if is_transparent else "output.mp4"
+
+        if is_transparent:
+            # Command for WebM with transparency using VP9 codec
+            ffmpeg_command = [
+                'ffmpeg', '-y',
+                '-r', '24',
+                '-start_number', '1',
+                '-i', 'frame_%04d.png',
+                '-c:v', 'libvpx-vp9',
+                '-pix_fmt', 'yuva420p',
+                '-b:v', '0',
+                '-crf', '20',
+                '-frames:v', str(num_frames),
+                '-auto-alt-ref', '0',
+                video_filename
+            ]
+        else:
+            # Original command for opaque MP4
+            ffmpeg_command = [
+                'ffmpeg', '-y',
+                '-r', '24',
+                '-start_number', '1',
+                '-i', 'frame_%04d.png',
+                '-pix_fmt', 'yuv420p',
+                '-vf', 'scale=in_color_matrix=bt709:out_color_matrix=bt709',
+                '-frames:v', str(num_frames),
+                '-c:v', 'libx264',
+                '-preset', 'slower',
+                '-color_range', 'tv',
+                '-colorspace', 'bt709',
+                '-color_primaries', 'bt709',
+                '-color_trc', 'iec61966-2-1',
+                '-movflags', 'faststart',
+                video_filename
+            ]
 
         # Create a simple "Encoding..." window
         encoding_win = tk.Toplevel(self)
@@ -1790,7 +1806,7 @@ class App(tk.Tk):
                 errors='replace' # Handle potential encoding errors in ffmpeg output
             )
             encoding_win.destroy() # Close the encoding window on success
-            messagebox.showinfo("影片建立成功", f"影片已成功儲存至:\n{os.path.join(output_dir, video_filename)}")
+            messagebox.showinfo("影片建立成功", f"影片 '{video_filename}' 已成功儲存至:\n{output_dir}")
 
         except FileNotFoundError:
             if encoding_win.winfo_exists(): encoding_win.destroy()
@@ -1900,7 +1916,7 @@ class App(tk.Tk):
             progress_win.destroy()
 
             # 6. Call ffmpeg to create video
-            self._create_video_from_frames(output_dir, num_frames)
+            self._create_video_from_frames(output_dir, num_frames, self.is_bg_transparent.get())
 
         except Exception as e:
             messagebox.showerror("匯出錯誤", f"匯出過程中發生錯誤:\n{e}")
@@ -1985,7 +2001,7 @@ class App(tk.Tk):
             progress_win.destroy()
 
             # Call ffmpeg to create video
-            self._create_video_from_frames(output_dir, num_frames)
+            self._create_video_from_frames(output_dir, num_frames, self.is_bg_transparent.get())
 
         except Exception as e:
             messagebox.showerror("匯出錯誤", f"匯出過程中發生錯誤:\n{e}")
