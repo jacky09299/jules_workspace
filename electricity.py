@@ -1185,8 +1185,7 @@ class App(tk.Tk):
         sim_frame.pack(fill=tk.X, padx=10, pady=10)
         tk.Button(sim_frame, text="執行新模擬", command=self.start_new_simulation).pack(fill=tk.X, pady=3)
         tk.Button(sim_frame, text="預覽上次模擬", command=self.preview_simulation).pack(fill=tk.X, pady=3)
-        tk.Button(sim_frame, text="匯出完整動畫", command=self.export_image).pack(fill=tk.X, pady=3)
-        tk.Button(sim_frame, text="匯出選取區域 (動畫)", command=self.export_region_as_animation).pack(fill=tk.X, pady=3)
+        tk.Button(sim_frame, text="匯出動畫", command=self.dispatch_export_animation).pack(fill=tk.X, pady=3)
         ttk.Separator(sim_frame, orient='horizontal').pack(fill='x', pady=5)
         tk.Button(sim_frame, text="清除電弧", command=self.clear_simulation).pack(fill=tk.X, pady=3)
         tk.Button(sim_frame, text="清除所有", command=self.clear_all).pack(fill=tk.X, pady=3)
@@ -1874,6 +1873,12 @@ class App(tk.Tk):
         finally:
             progress_win.destroy()
 
+    def dispatch_export_animation(self):
+        """Dispatches to the correct export method based on the export box checkbox."""
+        if self.show_export_box.get():
+            self.export_region_as_animation()
+        else:
+            self.export_image()
 
     def _build_frame_map(self, points, total_original_frames):
         if not points or total_original_frames == 0: return []
