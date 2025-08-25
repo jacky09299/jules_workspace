@@ -5,11 +5,6 @@ import math
 import random
 import itertools
 import numpy as np
-try:
-    import cv2
-except ImportError:
-    messagebox.showerror("缺少相依套件", "需要 OpenCV 函式庫來匯出影片。\n請執行 'pip install opencv-python' 來安裝。")
-    cv2 = None
 
 
 # --- 常數設定 ---
@@ -917,31 +912,6 @@ class Simulator:
 
         return self.simulation_data
 
-# --- 【新】匯出進度視窗 ---
-class ProgressWindow(tk.Toplevel):
-    def __init__(self, parent, total_frames):
-        super().__init__(parent)
-        self.title("匯出中...")
-        self.geometry("300x100")
-        self.parent = parent
-        self.total_frames = total_frames
-
-        self.progress_var = tk.DoubleVar()
-        self.label = tk.Label(self, text="正在準備匯出...", padx=20, pady=10)
-        self.label.pack()
-
-        self.progress_bar = ttk.Progressbar(self, orient="horizontal", length=250, mode="determinate", variable=self.progress_var)
-        self.progress_bar.pack(pady=10)
-
-        self.grab_set() # 鎖定焦點
-        self.protocol("WM_DELETE_WINDOW", lambda: None) # 禁止關閉視窗
-        self.update()
-
-    def update_progress(self, current_frame):
-        progress = (current_frame / self.total_frames) * 100
-        self.progress_var.set(progress)
-        self.label.config(text=f"正在處理第 {current_frame} / {self.total_frames} 幀...")
-        self.update_idletasks() # 更新UI
 
 # --- 主應用程式 GUI (V11.0 - 影片匯出) ---
 class App(tk.Tk):
@@ -1097,7 +1067,7 @@ class App(tk.Tk):
         sim_frame.pack(fill=tk.X, padx=10, pady=10)
         tk.Button(sim_frame, text="執行新模擬", command=self.start_new_simulation).pack(fill=tk.X, pady=3)
         tk.Button(sim_frame, text="預覽上次模擬", command=self.preview_simulation).pack(fill=tk.X, pady=3)
-        tk.Button(sim_frame, text="匯出影片", command=self.export_video).pack(fill=tk.X, pady=3) # Placeholder for now
+        tk.Button(sim_frame, text="匯出圖片", command=self.export_image).pack(fill=tk.X, pady=3)
         ttk.Separator(sim_frame, orient='horizontal').pack(fill='x', pady=5)
         tk.Button(sim_frame, text="清除電弧", command=self.clear_simulation).pack(fill=tk.X, pady=3)
         tk.Button(sim_frame, text="清除所有", command=self.clear_all).pack(fill=tk.X, pady=3)
@@ -1488,85 +1458,48 @@ class App(tk.Tk):
         # Finally, trigger a redraw of the now-empty canvas
         self.redraw_canvas()
 
-    def export_video(self):
-        """Exports the last simulation animation to a video file."""
-        if cv2 is None:
-            messagebox.showerror("缺少相依套件", "匯出功能需要 OpenCV。\n請透過 'pip install opencv-python' 安裝。")
+    def export_image(self):
+        """Exports the current canvas view to an image file."""
+        # Determine arc data to render. We'll render the final state of the last simulation.
+        arc_data = []
+        if self.last_simulation_data:
+            # By collecting all segments from all frames, we get the final composite image.
+            for frame_segments in self.last_simulation_data:
+                arc_data.extend(frame_segments)
+
+        # Render the scene to a Pillow image
+        image_to_save = self._render_scene_to_pillow(arc_data)
+
+        if image_to_save is None:
+            messagebox.showwarning("匯出失敗", "畫布上沒有可匯出的內容。")
             return
 
-        if not self.last_simulation_data:
-            messagebox.showwarning("沒有可匯出的內容", "請先執行一次模擬，再匯出影片。")
-            return
-
+        # Ask user for save location
         filepath = filedialog.asksaveasfilename(
-            title="匯出影片為...",
-            defaultextension=".mp4",
-            filetypes=[("MP4 影片", "*.mp4"), ("AVI 影片", "*.avi")]
+            title="匯出圖片為...",
+            defaultextension=".png",
+            filetypes=[("PNG 圖片", "*.png"), ("JPEG 圖片", "*.jpg"), ("BMP 圖片", "*.bmp")]
         )
         if not filepath:
             return
 
-        w, h = self.canvas.winfo_width(), self.canvas.winfo_height()
-        if w < 2 or h < 2:
-            messagebox.showerror("錯誤", "無法取得有效的畫布尺寸。")
-            return
-
-        # 根據副檔名選擇 FourCC
-        if filepath.lower().endswith('.avi'):
-            fourcc = cv2.VideoWriter_fourcc(*'XVID')
-        else: # 預設為 MP4
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-
-        fps = 30  # 設定影片幀率
-        video_writer = cv2.VideoWriter(filepath, fourcc, fps, (w, h))
-
-        if not video_writer.isOpened():
-            messagebox.showerror("匯出失敗", "無法建立影片檔案。請檢查路徑權限或編碼器是否支援。")
-            return
-
-        # 執行寫入
-        self._write_video_frames(video_writer, filepath)
-
-    def _write_video_frames(self, video_writer, filepath):
-        """Renders each frame and writes it to the video file, with a progress bar."""
-        points = self.speed_control_graph.get_points()
-        animation_frame_map = self._build_frame_map(points, self.total_frames)
-        total_export_frames = len(animation_frame_map)
-
-        progress_win = ProgressWindow(self, total_export_frames)
-
+        # Save the image
         try:
-            all_segments_for_frame = []
-            last_original_frame_index = -1
+            # Handle formats that don't support transparency (like JPEG)
+            if filepath.lower().endswith(('.jpg', '.jpeg')):
+                # Create a new image with the background color and paste the rendered image onto it
+                bg_color = self.background_color_str.get()
+                final_image = Image.new('RGB', image_to_save.size, bg_color)
+                # Paste using the alpha channel of the source image as a mask
+                final_image.paste(image_to_save, mask=image_to_save.split()[3])
+                final_image.save(filepath)
+            else:
+                # PNG and BMP can be saved directly
+                image_to_save.save(filepath)
 
-            for i, original_frame_index in enumerate(animation_frame_map):
-                # 為了效率，只加入新出現的幀的電弧數據
-                if original_frame_index > last_original_frame_index:
-                    for frame_num in range(last_original_frame_index + 1, original_frame_index + 1):
-                        if frame_num < len(self.last_simulation_data):
-                            all_segments_for_frame.extend(self.last_simulation_data[frame_num])
-                last_original_frame_index = original_frame_index
-
-                # 使用 Pillow 渲染目前幀
-                pillow_image = self._render_scene_to_pillow(all_segments_for_frame)
-                if pillow_image is None: continue
-
-                # 將 Pillow (RGBA) 影像轉換為 OpenCV (BGR) 格式
-                frame_rgb = pillow_image.convert('RGB')
-                frame_numpy = np.array(frame_rgb)
-                frame_bgr = cv2.cvtColor(frame_numpy, cv2.COLOR_RGB2BGR)
-
-                video_writer.write(frame_bgr)
-                progress_win.update_progress(i + 1)
-
-            messagebox.showinfo("匯出成功", f"影片已成功儲存至:\n{filepath}")
-
+            messagebox.showinfo("匯出成功", f"圖片已成功儲存至:\n{filepath}")
         except Exception as e:
-            messagebox.showerror("匯出錯誤", f"在寫入影片幀時發生錯誤: {e}")
-        finally:
-            progress_win.destroy()
-            video_writer.release()
-
+            messagebox.showerror("匯出失敗", f"儲存圖片時發生錯誤:\n{e}")
 
     def _build_frame_map(self, points, total_original_frames):
         if not points or total_original_frames == 0: return []
