@@ -4,6 +4,13 @@ from PIL import Image, ImageTk, ImageDraw
 import math
 import random
 import itertools
+import numpy as np
+try:
+    import cv2
+except ImportError:
+    messagebox.showerror("缺少相依套件", "需要 OpenCV 函式庫來匯出影片。\n請執行 'pip install opencv-python' 來安裝。")
+    cv2 = None
+
 
 # --- 常數設定 ---
 HV_COLOR = "#FF4136"  # 高壓顏色 (紅色)
@@ -910,7 +917,33 @@ class Simulator:
 
         return self.simulation_data
 
-# --- 主應用程式 GUI (V10.0 - 影片匯出) ---
+# --- 【新】匯出進度視窗 ---
+class ProgressWindow(tk.Toplevel):
+    def __init__(self, parent, total_frames):
+        super().__init__(parent)
+        self.title("匯出中...")
+        self.geometry("300x100")
+        self.parent = parent
+        self.total_frames = total_frames
+
+        self.progress_var = tk.DoubleVar()
+        self.label = tk.Label(self, text="正在準備匯出...", padx=20, pady=10)
+        self.label.pack()
+
+        self.progress_bar = ttk.Progressbar(self, orient="horizontal", length=250, mode="determinate", variable=self.progress_var)
+        self.progress_bar.pack(pady=10)
+
+        self.grab_set() # 鎖定焦點
+        self.protocol("WM_DELETE_WINDOW", lambda: None) # 禁止關閉視窗
+        self.update()
+
+    def update_progress(self, current_frame):
+        progress = (current_frame / self.total_frames) * 100
+        self.progress_var.set(progress)
+        self.label.config(text=f"正在處理第 {current_frame} / {self.total_frames} 幀...")
+        self.update_idletasks() # 更新UI
+
+# --- 主應用程式 GUI (V11.0 - 影片匯出) ---
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -1064,6 +1097,8 @@ class App(tk.Tk):
         sim_frame.pack(fill=tk.X, padx=10, pady=10)
         tk.Button(sim_frame, text="執行新模擬", command=self.start_new_simulation).pack(fill=tk.X, pady=3)
         tk.Button(sim_frame, text="預覽上次模擬", command=self.preview_simulation).pack(fill=tk.X, pady=3)
+        tk.Button(sim_frame, text="匯出影片", command=self.export_video).pack(fill=tk.X, pady=3) # Placeholder for now
+        ttk.Separator(sim_frame, orient='horizontal').pack(fill='x', pady=5)
         tk.Button(sim_frame, text="清除電弧", command=self.clear_simulation).pack(fill=tk.X, pady=3)
         tk.Button(sim_frame, text="清除所有", command=self.clear_all).pack(fill=tk.X, pady=3)
 
@@ -1080,25 +1115,24 @@ class App(tk.Tk):
         self.bind("<Escape>", self.cancel_creation_mode)
 
     # --- 【新】方法: 更新畫布顯示 (Pillow渲染引擎) ---
-    def redraw_canvas(self, arc_data_for_frame=None):
-        """Redraws the entire canvas using the Pillow off-screen rendering engine."""
+    def _render_scene_to_pillow(self, arc_data_for_frame=None):
+        """Renders the current scene to a Pillow image and returns it."""
         if arc_data_for_frame is None:
             arc_data_for_frame = []
 
         w, h = self.canvas.winfo_width(), self.canvas.winfo_height()
-        if w < 1 or h < 1: return
+        if w < 1 or h < 1: return None
 
         # 1. Create scene image and draw context
         bg_color = self.background_color_str.get()
         try:
             scene_image = Image.new('RGBA', (w, h), bg_color)
-        except ValueError: # Handle invalid color strings during input
+        except ValueError:
             scene_image = Image.new('RGBA', (w, h), BACKGROUND_COLOR)
 
         scene_draw = ImageDraw.Draw(scene_image)
 
         # 2. Z-ordered drawing of objects
-        # This logic determines the drawing order: bottom images, shapes, then top images.
         bottom_images = [img for img in self.images if img not in self.top_images]
 
         if self.show_images.get():
@@ -1113,28 +1147,31 @@ class App(tk.Tk):
             for image in self.top_images:
                 image.draw_to_pillow(scene_image)
 
-        # 3. Render arcs if any data is provided
+        # 3. Render arcs
         if arc_data_for_frame:
             glow_layer = Image.new('RGBA', (w, h), (0, 0, 0, 0))
             glow_draw = ImageDraw.Draw(glow_layer)
-
             appearance_params = self._get_current_appearance_params()
             arc_renderer = ArcRenderer(appearance_params)
             arc_renderer.render_frame_data(arc_data_for_frame, glow_draw)
-
             scene_image = Image.alpha_composite(scene_image, glow_layer)
-            # Re-create scene_draw for drawing selections on the composited image
             scene_draw = ImageDraw.Draw(scene_image)
 
-        # 4. Draw selection outline and handles on top
+        # 4. Draw selection outline
         if self.selected_item:
-            # Check if the selected item should be visible
             is_conductor = self.selected_item in self.shapes and self.show_conductors.get()
             is_image = self.selected_item in self.images and self.show_images.get()
             if is_conductor or is_image:
                  self.selected_item.draw_selection_to_pillow(scene_draw)
 
-        # 5. Display the final rendered image on the canvas
+        return scene_image
+
+    def redraw_canvas(self, arc_data_for_frame=None):
+        """Redraws the entire canvas using the Pillow off-screen rendering engine."""
+        scene_image = self._render_scene_to_pillow(arc_data_for_frame)
+        if scene_image is None: return
+
+        # Display the final rendered image on the canvas
         self.tk_render_image = ImageTk.PhotoImage(scene_image)
         if not hasattr(self, 'canvas_image_id') or not self.canvas.winfo_exists() or not self.canvas.find_withtag(self.canvas_image_id):
             self.canvas.delete("all")
@@ -1450,6 +1487,86 @@ class App(tk.Tk):
 
         # Finally, trigger a redraw of the now-empty canvas
         self.redraw_canvas()
+
+    def export_video(self):
+        """Exports the last simulation animation to a video file."""
+        if cv2 is None:
+            messagebox.showerror("缺少相依套件", "匯出功能需要 OpenCV。\n請透過 'pip install opencv-python' 安裝。")
+            return
+
+        if not self.last_simulation_data:
+            messagebox.showwarning("沒有可匯出的內容", "請先執行一次模擬，再匯出影片。")
+            return
+
+        filepath = filedialog.asksaveasfilename(
+            title="匯出影片為...",
+            defaultextension=".mp4",
+            filetypes=[("MP4 影片", "*.mp4"), ("AVI 影片", "*.avi")]
+        )
+        if not filepath:
+            return
+
+        w, h = self.canvas.winfo_width(), self.canvas.winfo_height()
+        if w < 2 or h < 2:
+            messagebox.showerror("錯誤", "無法取得有效的畫布尺寸。")
+            return
+
+        # 根據副檔名選擇 FourCC
+        if filepath.lower().endswith('.avi'):
+            fourcc = cv2.VideoWriter_fourcc(*'XVID')
+        else: # 預設為 MP4
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+
+        fps = 30  # 設定影片幀率
+        video_writer = cv2.VideoWriter(filepath, fourcc, fps, (w, h))
+
+        if not video_writer.isOpened():
+            messagebox.showerror("匯出失敗", "無法建立影片檔案。請檢查路徑權限或編碼器是否支援。")
+            return
+
+        # 執行寫入 (在下個步驟中完成)
+        self._write_video_frames(video_writer)
+
+    def _write_video_frames(self, video_writer):
+        """Renders each frame and writes it to the video file, with a progress bar."""
+        points = self.speed_control_graph.get_points()
+        animation_frame_map = self._build_frame_map(points, self.total_frames)
+        total_export_frames = len(animation_frame_map)
+
+        progress_win = ProgressWindow(self, total_export_frames)
+
+        try:
+            all_segments_for_frame = []
+            last_original_frame_index = -1
+
+            for i, original_frame_index in enumerate(animation_frame_map):
+                # 為了效率，只加入新出現的幀的電弧數據
+                if original_frame_index > last_original_frame_index:
+                    for frame_num in range(last_original_frame_index + 1, original_frame_index + 1):
+                        if frame_num < len(self.last_simulation_data):
+                            all_segments_for_frame.extend(self.last_simulation_data[frame_num])
+                last_original_frame_index = original_frame_index
+
+                # 使用 Pillow 渲染目前幀
+                pillow_image = self._render_scene_to_pillow(all_segments_for_frame)
+                if pillow_image is None: continue
+
+                # 將 Pillow (RGBA) 影像轉換為 OpenCV (BGR) 格式
+                frame_rgb = pillow_image.convert('RGB')
+                frame_numpy = np.array(frame_rgb)
+                frame_bgr = cv2.cvtColor(frame_numpy, cv2.COLOR_RGB2BGR)
+
+                video_writer.write(frame_bgr)
+                progress_win.update_progress(i + 1)
+
+            messagebox.showinfo("匯出成功", f"影片已成功儲存至:\n{video_writer.get_filename()}")
+
+        except Exception as e:
+            messagebox.showerror("匯出錯誤", f"在寫入影片幀時發生錯誤: {e}")
+        finally:
+            progress_win.destroy()
+            video_writer.release()
+
 
     def _build_frame_map(self, points, total_original_frames):
         if not points or total_original_frames == 0: return []
