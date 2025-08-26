@@ -1744,15 +1744,20 @@ class App(tk.Tk):
         video_filename = "output.mov" if is_transparent else "output.mp4"
 
         if is_transparent:
-            # Command for MOV with transparency using ProRes codec
+            # Command for MOV with transparency using ProRes codec, based on user's detailed parameters
             ffmpeg_command = [
                 'ffmpeg', '-y',
-                '-r', '24',
+                '-framerate', '24',
                 '-start_number', '1',
                 '-i', 'frame_%04d.png',
+                '-vf', 'scale=in_color_matrix=bt709:out_color_matrix=bt709,format=yuva444p10le',
                 '-c:v', 'prores_ks',
-                '-pix_fmt', 'yuva444p10le',
                 '-profile:v', '4444',
+                '-pix_fmt', 'yuva444p10le',
+                '-color_range', 'tv',
+                '-colorspace', 'bt709',
+                '-color_primaries', 'bt709',
+                '-color_trc', 'iec61966-2-1',
                 '-frames:v', str(num_frames),
                 video_filename
             ]
