@@ -1031,6 +1031,7 @@ class App(tk.Tk):
         self.show_images = tk.BooleanVar(value=True)
         self.background_color_str = tk.StringVar(value=BACKGROUND_COLOR)
         self.is_bg_transparent = tk.BooleanVar(value=False) # 【新】匯出透明背景選項
+        self.keep_image_frames = tk.BooleanVar(value=False) # 【新】影片匯出後保留圖片
 
         # --- 【新增】匯出框相關變數 ---
         self.export_box = {'x': 50, 'y': 50, 'w': 400, 'h': 300}
@@ -1190,6 +1191,7 @@ class App(tk.Tk):
         tk.Button(sim_frame, text="執行新模擬", command=self.start_new_simulation).pack(fill=tk.X, pady=3)
         tk.Button(sim_frame, text="預覽上次模擬", command=self.preview_simulation).pack(fill=tk.X, pady=3)
         tk.Button(sim_frame, text="匯出動畫", command=self.dispatch_export_animation).pack(fill=tk.X, pady=3)
+        tk.Checkbutton(sim_frame, text="保留圖片檔案", variable=self.keep_image_frames, bg=CONTROL_PANEL_BG).pack(anchor="w", padx=5)
         ttk.Separator(sim_frame, orient='horizontal').pack(fill='x', pady=5)
         tk.Button(sim_frame, text="清除電弧", command=self.clear_simulation).pack(fill=tk.X, pady=3)
         tk.Button(sim_frame, text="清除所有", command=self.clear_all).pack(fill=tk.X, pady=3)
@@ -1810,6 +1812,29 @@ class App(tk.Tk):
             )
             encoding_win.destroy() # Close the encoding window on success
             messagebox.showinfo("影片建立成功", f"影片 '{video_filename}' 已成功儲存至:\n{output_dir}")
+
+            # --- 【新增】根據勾選框狀態刪除圖片 ---
+            if not self.keep_image_frames.get():
+                # 顯示一個短暫的訊息
+                delete_msg_win = tk.Toplevel(self)
+                delete_msg_win.title("清理中")
+                delete_msg_win.geometry("300x80")
+                delete_msg_win.transient(self)
+                delete_msg_win.grab_set()
+                tk.Label(delete_msg_win, text="正在刪除暫存圖片檔案...").pack(pady=10)
+                self.update_idletasks() # 強制更新UI
+
+                try:
+                    for i in range(1, num_frames + 1):
+                        filename = f"frame_{i:04d}.png"
+                        filepath = os.path.join(output_dir, filename)
+                        if os.path.exists(filepath):
+                            os.remove(filepath)
+                    # print(f"已成功刪除 {num_frames} 個圖片檔案。")
+                except Exception as e:
+                    messagebox.showwarning("刪除失敗", f"刪除圖片時發生錯誤：\n{e}")
+                finally:
+                    delete_msg_win.destroy()
 
         except FileNotFoundError:
             if encoding_win.winfo_exists(): encoding_win.destroy()
