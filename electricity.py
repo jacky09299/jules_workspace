@@ -9,6 +9,9 @@ import os
 import subprocess
 from datetime import datetime
 import time
+import json
+import zipfile
+import io
 
 
 # --- 常數設定 ---
@@ -782,6 +785,11 @@ class SpeedControlGraph(tk.Canvas):
         """Returns a sorted list of control points."""
         return sorted(self.points, key=lambda p: p[0])
 
+    def set_points(self, points):
+        """Sets the control points for the graph and redraws."""
+        self.points = sorted(points, key=lambda p: p[0])
+        self.draw()
+
 # --- 【新增】電弧彩現器 (Pillow版本) ---
 def hex_to_rgb(hex_color):
     """Converts a hex color string to an (r, g, b) tuple."""
@@ -1192,6 +1200,12 @@ class App(tk.Tk):
         tk.Button(sim_frame, text="預覽上次模擬", command=self.preview_simulation).pack(fill=tk.X, pady=3)
         tk.Button(sim_frame, text="匯出動畫", command=self.dispatch_export_animation).pack(fill=tk.X, pady=3)
         tk.Checkbutton(sim_frame, text="保留圖片檔案", variable=self.keep_image_frames, bg=CONTROL_PANEL_BG).pack(anchor="w", padx=5)
+        ttk.Separator(sim_frame, orient='horizontal').pack(fill='x', pady=5)
+        # 【新增】儲存與載入按鈕
+        io_frame = tk.Frame(sim_frame, bg=CONTROL_PANEL_BG)
+        io_frame.pack(fill=tk.X, pady=2)
+        tk.Button(io_frame, text="儲存場景", command=self.save_scene).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 2))
+        tk.Button(io_frame, text="載入場景", command=self.load_scene).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(2, 0))
         ttk.Separator(sim_frame, orient='horizontal').pack(fill='x', pady=5)
         tk.Button(sim_frame, text="清除電弧", command=self.clear_simulation).pack(fill=tk.X, pady=3)
         tk.Button(sim_frame, text="清除所有", command=self.clear_all).pack(fill=tk.X, pady=3)
@@ -2117,6 +2131,212 @@ class App(tk.Tk):
         if total_original_frames > 0 and total_original_frames - 1 not in seen:
             final_map.append(total_original_frames - 1)
         return final_map
+
+    def save_scene(self):
+        filepath = filedialog.asksaveasfilename(
+            title="儲存場景檔案",
+            defaultextension=".zip",
+            filetypes=[("放電模擬場景", "*.zip"), ("所有檔案", "*.*")]
+        )
+        if not filepath:
+            return
+
+        scene_data = {}
+
+        # 1. Shapes
+        scene_data['shapes'] = []
+        for shape in self.shapes:
+            shape_dict = {
+                'shape_type': shape.shape_type,
+                'voltage': shape.voltage,
+            }
+            if shape.shape_type == "Needle":
+                shape_dict.update({'x': shape.x, 'y': shape.y, 'radius': shape.radius})
+            elif shape.shape_type == "Rod":
+                shape_dict.update({'x1': shape.x1, 'y1': shape.y1, 'x2': shape.x2, 'y2': shape.y2, 'thickness': shape.thickness})
+            elif shape.shape_type in ["Plate", "ArbitraryShape"]: # Corrected from "Arbitrary"
+                shape_dict['points'] = shape.points
+            scene_data['shapes'].append(shape_dict)
+
+        # 2. Images
+        scene_data['images'] = []
+        image_files = {}
+        for i, img_obj in enumerate(self.images):
+            img_filename = f"images/image_{i}.png"
+            img_dict = {
+                'path': img_filename,
+                'x': img_obj.x,
+                'y': img_obj.y,
+                'scale': img_obj.scale,
+                'angle': img_obj.angle,
+                'is_top': img_obj in self.top_images
+            }
+            scene_data['images'].append(img_dict)
+            image_files[img_filename] = img_obj.pil_image_original
+
+        # 3. Simulation Parameters
+        scene_data['sim_params'] = self.sim_params
+
+        # 4. Display Settings
+        scene_data['display_settings'] = {
+            'show_conductors': self.show_conductors.get(),
+            'show_images': self.show_images.get(),
+            'background_color': self.background_color_str.get(),
+            'is_bg_transparent': self.is_bg_transparent.get(),
+        }
+
+        # 5. Export Box
+        scene_data['export_box'] = {
+            'box': self.export_box,
+            'show': self.show_export_box.get()
+        }
+
+        # 6. Speed Control Graph
+        if self.speed_control_graph:
+            scene_data['speed_graph_points'] = self.speed_control_graph.get_points()
+        else:
+            scene_data['speed_graph_points'] = []
+
+        # 7. Last Simulation Data
+        scene_data['last_simulation_data'] = self.last_simulation_data
+
+        # Now, write everything to a zip file
+        try:
+            with zipfile.ZipFile(filepath, 'w', zipfile.ZIP_DEFLATED) as zf:
+                # Write scene.json
+                # Using a custom encoder to handle numpy types if they appear
+                class NpEncoder(json.JSONEncoder):
+                    def default(self, obj):
+                        if isinstance(obj, np.integer):
+                            return int(obj)
+                        if isinstance(obj, np.floating):
+                            return float(obj)
+                        if isinstance(obj, np.ndarray):
+                            return obj.tolist()
+                        return super(NpEncoder, self).default(obj)
+
+                json_str = json.dumps(scene_data, indent=2, cls=NpEncoder)
+                zf.writestr('scene.json', json_str)
+
+                # Write image files
+                for img_path, pil_img in image_files.items():
+                    # Use an in-memory buffer to save the image without creating a temp file on disk
+                    img_buffer = io.BytesIO()
+                    pil_img.save(img_buffer, format="PNG")
+                    img_buffer.seek(0)
+                    zf.writestr(img_path, img_buffer.read())
+
+            # messagebox.showinfo("儲存成功", f"場景已成功儲存至:\n{filepath}")
+
+        except Exception as e:
+            messagebox.showerror("儲存失敗", f"儲存場景時發生錯誤:\n{e}")
+
+    def load_scene(self):
+        filepath = filedialog.askopenfilename(
+            title="載入場景檔案",
+            filetypes=[("放電模擬場景", "*.zip"), ("所有檔案", "*.*")]
+        )
+        if not filepath:
+            return
+
+        try:
+            with zipfile.ZipFile(filepath, 'r') as zf:
+                if 'scene.json' not in zf.namelist():
+                    messagebox.showerror("載入失敗", "無效的場景檔案：找不到 scene.json。")
+                    return
+
+                self.clear_all()
+
+                with zf.open('scene.json') as f:
+                    scene_data = json.load(f)
+
+                # 1. Restore Images
+                if 'images' in scene_data:
+                    for img_dict in scene_data['images']:
+                        with zf.open(img_dict['path']) as img_file:
+                            img_data = io.BytesIO(img_file.read())
+                            pil_image = Image.open(img_data)
+                            pil_image.load()
+
+                            img_obj = DecorativeImage(self.canvas, img_dict['x'], img_dict['y'], pil_image, self)
+                            img_obj.scale = img_dict.get('scale', 1.0)
+                            img_obj.angle = img_dict.get('angle', 0.0)
+                            self.images.append(img_obj)
+                            if img_dict.get('is_top', False):
+                                self.top_images.add(img_obj)
+
+                # 2. Restore Shapes
+                if 'shapes' in scene_data:
+                    for shape_dict in scene_data['shapes']:
+                        shape_type = shape_dict['shape_type']
+                        voltage = shape_dict.get('voltage', 0)
+                        shape = None
+                        if shape_type == "Needle":
+                            shape = Needle(self, shape_dict['x'], shape_dict['y'], voltage, shape_dict['radius'])
+                        elif shape_type == "Rod":
+                            shape = Rod(self, shape_dict['x1'], shape_dict['y1'], shape_dict['x2'], shape_dict['y2'], voltage, shape_dict['thickness'])
+                        elif shape_type == "Plate":
+                            shape = Plate(self, 0, 0, voltage)
+                            shape.points = shape_dict['points']
+                        elif shape_type == "ArbitraryShape":
+                            shape = ArbitraryShape(self, shape_dict['points'], voltage)
+
+                        if shape:
+                            self.shapes.append(shape)
+
+                # 3. Restore Simulation Parameters
+                if 'sim_params' in scene_data:
+                    self.sim_params.update(scene_data['sim_params'])
+                    for key, value in self.sim_params.items():
+                        var_name = f"var_{key}"
+                        if hasattr(self, var_name):
+                            getattr(self, var_name).set(value)
+                    if 'arc_color' in self.sim_params:
+                        self.arc_color_preview.config(bg=self.sim_params['arc_color'])
+
+                # 4. Restore Display Settings
+                if 'display_settings' in scene_data:
+                    settings = scene_data['display_settings']
+                    self.show_conductors.set(settings.get('show_conductors', True))
+                    self.show_images.set(settings.get('show_images', True))
+                    self.background_color_str.set(settings.get('background_color', BACKGROUND_COLOR))
+                    self.is_bg_transparent.set(settings.get('is_bg_transparent', False))
+                    self._on_toggle_transparent_bg()
+
+                # 5. Restore Export Box
+                if 'export_box' in scene_data:
+                    self.export_box = scene_data['export_box'].get('box', {'x': 50, 'y': 50, 'w': 400, 'h': 300})
+                    self.show_export_box.set(scene_data['export_box'].get('show', False))
+                    self._update_export_box_entries()
+
+                # Restore simulation data *before* speed graph to set total_frames
+                self.last_simulation_data = scene_data.get('last_simulation_data', None)
+                if self.last_simulation_data:
+                    self.total_frames = len(self.last_simulation_data)
+                else:
+                    self.total_frames = 0
+
+                # 6. Restore Speed Control Graph (now that total_frames is known)
+                if self.speed_control_graph:
+                    self.speed_control_graph.reset(self.total_frames)
+                    if 'speed_graph_points' in scene_data:
+                        self.speed_control_graph.set_points(scene_data['speed_graph_points'])
+
+                # 7. Final Redraw and Preview
+                if self.last_simulation_data:
+                    self.preview_simulation()
+                else:
+                    self.redraw_canvas()
+
+        except FileNotFoundError:
+            messagebox.showerror("載入失敗", f"檔案不存在: {filepath}")
+        except zipfile.BadZipFile:
+            messagebox.showerror("載入失敗", "檔案不是一個有效的 ZIP 壓縮檔。")
+        except json.JSONDecodeError:
+            messagebox.showerror("載入失敗", "場景檔案中的 scene.json 格式錯誤或已損壞。")
+        except Exception as e:
+            messagebox.showerror("載入失敗", f"載入場景時發生未預期的錯誤:\n{e}")
+            self.clear_all()
 
 
 if __name__ == "__main__":
