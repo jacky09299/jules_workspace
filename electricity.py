@@ -1741,21 +1741,19 @@ class App(tk.Tk):
 
     def _create_video_from_frames(self, output_dir, num_frames, is_transparent=False):
         """Runs ffmpeg to create a video from the exported frames."""
-        video_filename = "output.webm" if is_transparent else "output.mp4"
+        video_filename = "output.mov" if is_transparent else "output.mp4"
 
         if is_transparent:
-            # Command for WebM with transparency using VP9 codec
+            # Command for MOV with transparency using ProRes codec
             ffmpeg_command = [
                 'ffmpeg', '-y',
                 '-r', '24',
                 '-start_number', '1',
                 '-i', 'frame_%04d.png',
-                '-c:v', 'libvpx-vp9',
-                '-pix_fmt', 'yuva420p',
-                '-b:v', '0',
-                '-crf', '20',
+                '-c:v', 'prores_ks',
+                '-pix_fmt', 'yuva444p10le',
+                '-profile:v', '4444',
                 '-frames:v', str(num_frames),
-                '-auto-alt-ref', '0',
                 video_filename
             ]
         else:
