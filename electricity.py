@@ -1881,6 +1881,16 @@ class App(tk.Tk):
             messagebox.showwarning("無資料", "沒有可匯出的模擬資料。請先執行一次模擬。")
             return
 
+        # --- NEW: Build frame map based on speed curve ---
+        points = self.speed_control_graph.get_points()
+        total_original_frames = len(self.last_simulation_data)
+        frame_map = self._build_frame_map(points, total_original_frames)
+        num_output_frames = len(frame_map)
+
+        if num_output_frames == 0:
+            messagebox.showinfo("資訊", "根據速率曲線，沒有可匯出的幀。")
+            return
+
         # 1. 自動計算縮放比例以符合 3840x2160 解析度
         target_width, target_height = 3840, 2160
         canvas_width = self.canvas.winfo_width()
@@ -1911,24 +1921,35 @@ class App(tk.Tk):
             messagebox.showerror("建立資料夾失敗", f"無法建立資料夾:\n{output_dir}\n錯誤: {e}")
             return
 
-        # 3. 建立並顯示進度條
-        num_frames = len(self.last_simulation_data)
-        progress_win, progress_bar, progress_label = self._create_progress_window("匯出中...", num_frames)
+        # 3. 建立並顯示進度條 (use new frame count)
+        progress_win, progress_bar, progress_label = self._create_progress_window("匯出中...", num_output_frames)
 
-        # 4. 迴圈匯出每一幀
+        # --- NEW: Pre-calculate cumulative arc data for all original frames ---
+        all_cumulative_frames = []
+        cumulative_data = []
+        if self.last_simulation_data:
+            for frame_segments in self.last_simulation_data:
+                cumulative_data.extend(frame_segments)
+                all_cumulative_frames.append(list(cumulative_data)) # Make a copy
+
+        # 4. 迴圈匯出每一幀 (using the new frame_map)
         try:
-            cumulative_arc_data = []
-            for i, frame_segments in enumerate(self.last_simulation_data):
-                cumulative_arc_data.extend(frame_segments)
+            for i, original_frame_index in enumerate(frame_map):
+                # Get the pre-calculated data for the target original frame
+                # Add a check to prevent index out of bounds if frame_map is faulty
+                if original_frame_index >= len(all_cumulative_frames):
+                    print(f"警告: original_frame_index {original_frame_index} 超出範圍，跳過。")
+                    continue
+                arc_data_to_render = all_cumulative_frames[original_frame_index]
 
                 # Render the scene for the current cumulative frame
-                image_to_save = self._render_scene_to_pillow(cumulative_arc_data, scale=scale, for_export=True)
+                image_to_save = self._render_scene_to_pillow(arc_data_to_render, scale=scale, for_export=True)
 
                 if image_to_save is None:
-                    print(f"警告: 第 {i} 幀渲染失敗，跳過。")
+                    print(f"警告: 第 {i} 幀 (原始幀 {original_frame_index}) 渲染失敗，跳過。")
                     continue
 
-                # Define filename and path
+                # Define filename and path (using the new sequential index 'i')
                 filename = f"frame_{i+1:04d}.png"
                 filepath = os.path.join(output_dir, filename)
 
@@ -1937,14 +1958,14 @@ class App(tk.Tk):
 
                 # Update progress bar
                 progress_bar['value'] = i + 1
-                progress_label.config(text=f"{i + 1} / {num_frames}")
+                progress_label.config(text=f"{i + 1} / {num_output_frames}")
                 progress_win.update() # Process UI events
 
             # 5. Destroy the progress window for frames
             progress_win.destroy()
 
-            # 6. Call ffmpeg to create video
-            self._create_video_from_frames(output_dir, num_frames, self.is_bg_transparent.get())
+            # 6. Call ffmpeg to create video (use new frame count)
+            self._create_video_from_frames(output_dir, num_output_frames, self.is_bg_transparent.get())
 
         except Exception as e:
             messagebox.showerror("匯出錯誤", f"匯出過程中發生錯誤:\n{e}")
@@ -1961,6 +1982,16 @@ class App(tk.Tk):
 
         if not self.last_simulation_data:
             messagebox.showwarning("無資料", "沒有可匯出的模擬資料。請先執行一次模擬以產生畫面。")
+            return
+
+        # --- NEW: Build frame map based on speed curve ---
+        points = self.speed_control_graph.get_points()
+        total_original_frames = len(self.last_simulation_data)
+        frame_map = self._build_frame_map(points, total_original_frames)
+        num_output_frames = len(frame_map)
+
+        if num_output_frames == 0:
+            messagebox.showinfo("資訊", "根據速率曲線，沒有可匯出的幀。")
             return
 
         # 1. Get export box dimensions and calculate scale
@@ -1991,19 +2022,30 @@ class App(tk.Tk):
             messagebox.showerror("建立資料夾失敗", f"無法建立資料夾:\n{output_dir}\n錯誤: {e}")
             return
 
-        # 4. Create and show progress bar
-        num_frames = len(self.last_simulation_data)
-        progress_win, progress_bar, progress_label = self._create_progress_window("匯出區域動畫中...", num_frames)
+        # 4. Create and show progress bar (use new frame count)
+        progress_win, progress_bar, progress_label = self._create_progress_window("匯出區域動畫中...", num_output_frames)
+
+        # --- NEW: Pre-calculate cumulative arc data ---
+        all_cumulative_frames = []
+        cumulative_data = []
+        if self.last_simulation_data:
+            for frame_segments in self.last_simulation_data:
+                cumulative_data.extend(frame_segments)
+                all_cumulative_frames.append(list(cumulative_data))
 
         try:
-            cumulative_arc_data = []
-            for i, frame_segments in enumerate(self.last_simulation_data):
-                cumulative_arc_data.extend(frame_segments)
+            # --- NEW: Loop using frame_map ---
+            for i, original_frame_index in enumerate(frame_map):
+                if original_frame_index >= len(all_cumulative_frames):
+                    print(f"警告: original_frame_index {original_frame_index} 超出範圍，跳過。")
+                    continue
+
+                arc_data_to_render = all_cumulative_frames[original_frame_index]
 
                 # Render the entire scene at high resolution for the current frame
-                full_image = self._render_scene_to_pillow(cumulative_arc_data, scale=render_scale, for_export=True)
+                full_image = self._render_scene_to_pillow(arc_data_to_render, scale=render_scale, for_export=True)
                 if full_image is None:
-                    print(f"警告: 第 {i} 幀渲染失敗，跳過。")
+                    print(f"警告: 第 {i} 幀 (原始幀 {original_frame_index}) 渲染失敗，跳過。")
                     continue
 
                 # Define the crop area in scaled coordinates
@@ -2022,14 +2064,14 @@ class App(tk.Tk):
 
                 # Update progress bar
                 progress_bar['value'] = i + 1
-                progress_label.config(text=f"{i + 1} / {num_frames}")
+                progress_label.config(text=f"{i + 1} / {num_output_frames}")
                 progress_win.update()
 
             # Destroy the progress window for frames
             progress_win.destroy()
 
-            # Call ffmpeg to create video
-            self._create_video_from_frames(output_dir, num_frames, self.is_bg_transparent.get())
+            # Call ffmpeg to create video (use new frame count)
+            self._create_video_from_frames(output_dir, num_output_frames, self.is_bg_transparent.get())
 
         except Exception as e:
             messagebox.showerror("匯出錯誤", f"匯出過程中發生錯誤:\n{e}")
