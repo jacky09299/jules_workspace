@@ -1755,9 +1755,10 @@ class App(tk.Tk):
         progress_win.update()
         return progress_win, progress_bar, progress_label
 
-    def _create_video_from_frames(self, output_dir, num_frames, is_transparent=False):
+    def _create_video_from_frames(self, output_dir, num_frames, video_filename, is_transparent=False):
         """Runs ffmpeg to create a video from the exported frames."""
-        video_filename = "output.mov" if is_transparent else "output.mp4"
+        # video_filename now includes the full path, so we just need the basename for the command
+        final_video_name = os.path.basename(video_filename)
 
         if is_transparent:
             # Command for MOV with transparency using ProRes codec, based on user's detailed parameters
@@ -1775,7 +1776,7 @@ class App(tk.Tk):
                 '-color_primaries', 'bt709',
                 '-color_trc', 'iec61966-2-1',
                 '-frames:v', str(num_frames),
-                video_filename
+                final_video_name
             ]
         else:
             # Original command for opaque MP4
@@ -1794,7 +1795,7 @@ class App(tk.Tk):
                 '-color_primaries', 'bt709',
                 '-color_trc', 'iec61966-2-1',
                 '-movflags', 'faststart',
-                video_filename
+                final_video_name
             ]
 
         # Create a simple "Encoding..." window
@@ -1825,7 +1826,7 @@ class App(tk.Tk):
                 errors='replace' # Handle potential encoding errors in ffmpeg output
             )
             encoding_win.destroy() # Close the encoding window on success
-            messagebox.showinfo("影片建立成功", f"影片 '{video_filename}' 已成功儲存至:\n{output_dir}")
+            messagebox.showinfo("影片建立成功", f"影片 '{final_video_name}' 已成功儲存至:\n{output_dir}")
 
             # --- 【新增】根據勾選框狀態刪除圖片 ---
             if not self.keep_image_frames.get():
@@ -1889,7 +1890,7 @@ class App(tk.Tk):
             if encoding_win.winfo_exists():
                 encoding_win.destroy()
 
-    def export_image(self):
+    def export_image(self, output_dir, video_filepath):
         """匯出上次模擬的動畫幀序列到一個新資料夾。"""
         if not self.last_simulation_data:
             messagebox.showwarning("無資料", "沒有可匯出的模擬資料。請先執行一次模擬。")
@@ -1921,18 +1922,6 @@ class App(tk.Tk):
 
         if scale <= 0:
             messagebox.showerror("錯誤", "計算出的縮放比例無效。")
-            return
-
-        parent_dir = filedialog.askdirectory(parent=self, title="請選擇儲存匯出資料夾的父目錄")
-        if not parent_dir: return
-
-        # 2. 建立時間戳記資料夾
-        timestamp_folder_name = f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        output_dir = os.path.join(parent_dir, timestamp_folder_name)
-        try:
-            os.makedirs(output_dir, exist_ok=True)
-        except OSError as e:
-            messagebox.showerror("建立資料夾失敗", f"無法建立資料夾:\n{output_dir}\n錯誤: {e}")
             return
 
         # 3. 建立並顯示進度條 (use new frame count)
@@ -1979,7 +1968,7 @@ class App(tk.Tk):
             progress_win.destroy()
 
             # 6. Call ffmpeg to create video (use new frame count)
-            self._create_video_from_frames(output_dir, num_output_frames, self.is_bg_transparent.get())
+            self._create_video_from_frames(output_dir, num_output_frames, video_filepath, self.is_bg_transparent.get())
 
         except Exception as e:
             messagebox.showerror("匯出錯誤", f"匯出過程中發生錯誤:\n{e}")
@@ -1988,7 +1977,7 @@ class App(tk.Tk):
             if progress_win.winfo_exists():
                 progress_win.destroy()
 
-    def export_region_as_animation(self):
+    def export_region_as_animation(self, output_dir, video_filepath):
         """Exports an animation of the area defined by the export box."""
         if not self.show_export_box.get():
             messagebox.showwarning("無效操作", "請先勾選 '顯示/啟用匯出框' 並設定您想匯出的區域。")
@@ -2020,20 +2009,6 @@ class App(tk.Tk):
         render_scale = min(target_width / box_w, target_height / box_h)
         if render_scale <= 0:
             messagebox.showerror("錯誤", "計算出的縮放比例無效。")
-            return
-
-        # 2. Ask for output directory
-        parent_dir = filedialog.askdirectory(parent=self, title="請選擇儲存匯出資料夾的父目錄")
-        if not parent_dir:
-            return
-
-        # 3. Create timestamped folder
-        timestamp_folder_name = f"export_region_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        output_dir = os.path.join(parent_dir, timestamp_folder_name)
-        try:
-            os.makedirs(output_dir, exist_ok=True)
-        except OSError as e:
-            messagebox.showerror("建立資料夾失敗", f"無法建立資料夾:\n{output_dir}\n錯誤: {e}")
             return
 
         # 4. Create and show progress bar (use new frame count)
@@ -2085,7 +2060,7 @@ class App(tk.Tk):
             progress_win.destroy()
 
             # Call ffmpeg to create video (use new frame count)
-            self._create_video_from_frames(output_dir, num_output_frames, self.is_bg_transparent.get())
+            self._create_video_from_frames(output_dir, num_output_frames, video_filepath, self.is_bg_transparent.get())
 
         except Exception as e:
             messagebox.showerror("匯出錯誤", f"匯出過程中發生錯誤:\n{e}")
@@ -2095,11 +2070,60 @@ class App(tk.Tk):
                 progress_win.destroy()
 
     def dispatch_export_animation(self):
-        """Dispatches to the correct export method based on the export box checkbox."""
+        """
+        Handles the entire export process, including asking for a filename,
+        creating a directory, auto-saving the scene, and calling the
+        appropriate rendering method.
+        """
+        if not self.last_simulation_data:
+            messagebox.showwarning("無資料", "沒有可匯出的模擬資料。請先執行一次模擬。")
+            return
+
+        # 1. Ask user for the desired video file path
+        is_transparent = self.is_bg_transparent.get()
+        default_ext = ".mov" if is_transparent else ".mp4"
+        file_types = [("QuickTime Movie", "*.mov"), ("MP4 Video", "*.mp4")] if is_transparent else [("MP4 Video", "*.mp4"), ("QuickTime Movie", "*.mov")]
+
+        video_filepath = filedialog.asksaveasfilename(
+            title="選擇影片儲存路徑與檔名",
+            defaultextension=default_ext,
+            filetypes=file_types
+        )
+
+        if not video_filepath:
+            return # User cancelled
+
+        # 2. Parse the path to create the output directory and filenames
+        try:
+            parent_dir = os.path.dirname(video_filepath)
+            full_filename = os.path.basename(video_filepath)
+            base_filename, _ = os.path.splitext(full_filename)
+
+            # The main output directory will have the same name as the video
+            output_dir = os.path.join(parent_dir, base_filename)
+            os.makedirs(output_dir, exist_ok=True)
+
+            # The final video will be placed inside this new directory
+            final_video_path = os.path.join(output_dir, full_filename)
+
+            # The auto-saved scene file will also be in this directory
+            scene_zip_path = os.path.join(output_dir, base_filename + ".zip")
+
+        except OSError as e:
+            messagebox.showerror("建立資料夾失敗", f"無法建立資料夾:\n{output_dir}\n錯誤: {e}")
+            return
+        except Exception as e:
+            messagebox.showerror("路徑錯誤", f"處理檔案路徑時發生錯誤:\n{e}")
+            return
+
+        # 3. Auto-save the scene to the new directory
+        self.save_scene(filepath=scene_zip_path)
+
+        # 4. Dispatch to the correct rendering method
         if self.show_export_box.get():
-            self.export_region_as_animation()
+            self.export_region_as_animation(output_dir, final_video_path)
         else:
-            self.export_image()
+            self.export_image(output_dir, final_video_path)
 
     def _build_frame_map(self, points, total_original_frames):
         if not points or total_original_frames == 0: return []
@@ -2132,12 +2156,19 @@ class App(tk.Tk):
             final_map.append(total_original_frames - 1)
         return final_map
 
-    def save_scene(self):
-        filepath = filedialog.asksaveasfilename(
-            title="儲存場景檔案",
-            defaultextension=".zip",
-            filetypes=[("放電模擬場景", "*.zip"), ("所有檔案", "*.*")]
-        )
+    def save_scene(self, filepath=None):
+        """
+        Saves the current scene to a .zip file.
+        If filepath is provided, it saves directly to that path.
+        Otherwise, it opens a dialog to ask the user for a path.
+        """
+        if filepath is None:
+            filepath = filedialog.asksaveasfilename(
+                title="儲存場景檔案",
+                defaultextension=".zip",
+                filetypes=[("放電模擬場景", "*.zip"), ("所有檔案", "*.*")]
+            )
+
         if not filepath:
             return
 
