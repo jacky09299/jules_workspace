@@ -1,0 +1,880 @@
+1
+00:00:00,000 --> 00:00:01,040
+Have you ever wondered what's
+
+2
+00:00:01,040 --> 00:00:02,660
+really happening inside a company?
+
+3
+00:00:03,140 --> 00:00:04,040
+You know, beyond the slick
+
+4
+00:00:04,040 --> 00:00:05,160
+marketing and the cheerful press
+
+5
+00:00:05,160 --> 00:00:07,160
+releases? Well, the real story, the
+
+6
+00:00:07,160 --> 00:00:09,100
+actual truth, is usually hiding in
+
+7
+00:00:09,100 --> 00:00:10,760
+plain sight, tucked away in its
+
+8
+00:00:10,760 --> 00:00:12,680
+financial reports. So today, we're
+
+9
+00:00:12,680 --> 00:00:14,040
+gonna learn how to read them and
+
+10
+00:00:14,040 --> 00:00:15,240
+uncover a company's financial
+
+11
+00:00:15,240 --> 00:00:17,820
+secrets. You gotta love this quote
+
+12
+00:00:17,820 --> 00:00:19,780
+from Warren Buffett. It's so true.
+
+13
+00:00:20,100 --> 00:00:21,860
+When the economy is booming, pretty
+
+14
+00:00:21,860 --> 00:00:23,420
+much any company can look like a
+
+15
+00:00:23,420 --> 00:00:24,900
+winner. But it's when things get
+
+16
+00:00:24,900 --> 00:00:26,600
+tough that you see who's built on a
+
+17
+00:00:26,600 --> 00:00:28,920
+rock-solid foundation and who's
+
+18
+00:00:28,920 --> 00:00:31,360
+been cut in corners. These reports,
+
+19
+00:00:31,540 --> 00:00:32,980
+there are a chance to check the
+
+20
+00:00:32,980 --> 00:00:34,560
+water level before that tide goes
+
+21
+00:00:34,560 --> 00:00:36,840
+out. I mean, just think about
+
+22
+00:00:36,840 --> 00:00:39,040
+Enron. Back in 2000, they were the
+
+23
+00:00:39,040 --> 00:00:40,480
+darlings of Wall Street, this
+
+24
+00:00:40,480 --> 00:00:42,540
+innovative corporate giant. Turns
+
+25
+00:00:42,540 --> 00:00:44,240
+out, it was all a house of cards.
+
+26
+00:00:44,620 --> 00:00:46,400
+When investigators finally dug in,
+
+27
+00:00:46,580 --> 00:00:49,320
+they found that a mind-boggling 96%
+
+28
+00:00:49,320 --> 00:00:50,840
+of Enron's reported earnings in
+
+29
+00:00:50,840 --> 00:00:53,240
+2000 were basically made up through
+
+30
+00:00:53,240 --> 00:00:54,840
+accounting tricks. The clues are
+
+31
+00:00:54,840 --> 00:00:56,120
+right there, but you had to know
+
+32
+00:00:56,120 --> 00:00:59,480
+what to look for. Okay, so let's do
+
+33
+00:00:59,480 --> 00:01:01,000
+this. Let's become financial
+
+34
+00:01:01,000 --> 00:01:02,500
+detectives. We're gonna treat this
+
+35
+00:01:02,500 --> 00:01:04,300
+like an investigation. Our mission
+
+36
+00:01:04,300 --> 00:01:05,740
+is to crack the code of corporate
+
+37
+00:01:05,740 --> 00:01:07,720
+finance by examining three key
+
+38
+00:01:07,720 --> 00:01:09,040
+pieces of evidence that every
+
+39
+00:01:09,040 --> 00:01:11,960
+public company has to show us. That
+
+40
+00:01:11,960 --> 00:01:14,300
+is exactly our goal today. By the
+
+41
+00:01:14,300 --> 00:01:15,520
+time we're done here, you'll have
+
+42
+00:01:15,520 --> 00:01:17,240
+the basic toolkit to look at these
+
+43
+00:01:17,240 --> 00:01:19,600
+reports and actually understand the
+
+44
+00:01:19,600 --> 00:01:21,060
+story they're telling, the good,
+
+45
+00:01:21,240 --> 00:01:23,440
+the bad, and sometimes the really
+
+46
+00:01:23,440 --> 00:01:26,120
+ugly. So, our first piece of
+
+47
+00:01:26,120 --> 00:01:27,380
+evidence in the case file is
+
+48
+00:01:27,380 --> 00:01:28,860
+something called the balance sheet.
+
+49
+00:01:29,240 --> 00:01:30,360
+The best way to think about it,
+
+50
+00:01:30,360 --> 00:01:31,920
+it's like a financial photograph.
+
+51
+00:01:32,880 --> 00:01:34,420
+See, the balance sheet isn't
+
+52
+00:01:34,420 --> 00:01:35,640
+showing you what happened over a
+
+53
+00:01:35,640 --> 00:01:37,720
+whole year, nope. It's a snapshot,
+
+54
+00:01:37,900 --> 00:01:39,780
+frozen in time, of a company's
+
+55
+00:01:39,780 --> 00:01:41,960
+health on one specific day, like
+
+56
+00:01:41,960 --> 00:01:44,360
+December 31st. It has two sides.
+
+57
+00:01:44,740 --> 00:01:46,660
+One side lists all the company's
+
+58
+00:01:46,660 --> 00:01:48,520
+assets, you know, the stuff it owns
+
+59
+00:01:48,520 --> 00:01:50,380
+that has value. The other side
+
+60
+00:01:50,380 --> 00:01:52,080
+lists its liabilities, all the
+
+61
+00:01:52,080 --> 00:01:54,320
+stuff it owes to other people. And
+
+62
+00:01:54,320 --> 00:01:56,780
+here is the absolute golden rule of
+
+63
+00:01:56,780 --> 00:01:59,460
+accounting. Those two sides have to
+
+64
+00:01:59,460 --> 00:02:01,660
+balance, always. Think about it
+
+65
+00:02:01,660 --> 00:02:03,300
+this way. It's just common sense.
+
+66
+00:02:03,940 --> 00:02:05,700
+Everything a company owns was paid
+
+67
+00:02:05,700 --> 00:02:08,000
+for one of two ways, either with
+
+68
+00:02:08,000 --> 00:02:09,100
+borrowed money, which is a
+
+69
+00:02:09,100 --> 00:02:11,080
+liability, or with the owner's own
+
+70
+00:02:11,080 --> 00:02:12,360
+cash, which is stockholders'
+
+71
+00:02:12,620 --> 00:02:14,900
+equity. So, what you own has to
+
+72
+00:02:14,900 --> 00:02:16,400
+equal what you owe plus what you
+
+73
+00:02:16,400 --> 00:02:18,180
+put in yourself. It just has to.
+
+74
+00:02:18,680 --> 00:02:20,640
+But here's a super important catch.
+
+75
+00:02:20,640 --> 00:02:22,520
+The balance sheet tells you the
+
+76
+00:02:22,520 --> 00:02:24,100
+book value of assets, which is
+
+77
+00:02:24,100 --> 00:02:25,440
+usually what the company paid for
+
+78
+00:02:25,440 --> 00:02:27,580
+them way back when. The market
+
+79
+00:02:27,580 --> 00:02:29,460
+value, what investors think the
+
+80
+00:02:29,460 --> 00:02:31,180
+company is actually worth today,
+
+81
+00:02:31,480 --> 00:02:33,140
+can be completely different. And
+
+82
+00:02:33,140 --> 00:02:35,220
+you might ask, why? Well, it's
+
+83
+00:02:35,220 --> 00:02:36,940
+because market value is all about
+
+84
+00:02:36,940 --> 00:02:39,120
+the future. It's a bet on how much
+
+85
+00:02:39,120 --> 00:02:40,480
+profit that company is going to
+
+86
+00:02:40,480 --> 00:02:42,300
+make down the road. That's why a
+
+87
+00:02:42,300 --> 00:02:43,580
+hot tech company might be worth
+
+88
+00:02:43,580 --> 00:02:45,320
+way, way more than the cost of its
+
+89
+00:02:45,320 --> 00:02:47,900
+computers and desks. Okay, let's
+
+90
+00:02:47,900 --> 00:02:50,160
+grab our second clue. Now, if the
+
+91
+00:02:50,160 --> 00:02:51,920
+balance sheet was a snapshot, then
+
+92
+00:02:51,920 --> 00:02:53,540
+our next document, the income
+
+93
+00:02:53,540 --> 00:02:55,220
+statement, is more like the movie.
+
+94
+00:02:55,660 --> 00:02:56,960
+It tells the story of whether a
+
+95
+00:02:56,960 --> 00:02:58,840
+company actually made money or lost
+
+96
+00:02:58,840 --> 00:03:00,820
+money over a period of time, like a
+
+97
+00:03:00,820 --> 00:03:03,200
+quarter or a full year. The income
+
+98
+00:03:03,200 --> 00:03:04,760
+statement is really just a simple
+
+99
+00:03:04,760 --> 00:03:06,680
+story told with subtraction. You
+
+100
+00:03:06,680 --> 00:03:08,100
+start at the very top with a big
+
+101
+00:03:08,100 --> 00:03:09,780
+number, total sales, or revenue.
+
+102
+00:03:09,980 --> 00:03:11,620
+Then you chip away at it. First,
+
+103
+00:03:11,640 --> 00:03:13,060
+you take out the direct cost of
+
+104
+00:03:13,060 --> 00:03:14,560
+what you sold, and that leaves you
+
+105
+00:03:14,560 --> 00:03:15,980
+with gross profit. Then you
+
+106
+00:03:15,980 --> 00:03:17,220
+subtract all the other costs of
+
+107
+00:03:17,220 --> 00:03:18,520
+being in business, marketing,
+
+108
+00:03:18,660 --> 00:03:20,600
+salaries, rent, and now you have
+
+109
+00:03:20,600 --> 00:03:22,280
+operating income. Finally, after
+
+110
+00:03:22,280 --> 00:03:23,480
+you pay the bank its interest and
+
+111
+00:03:23,480 --> 00:03:24,380
+the government its taxes,
+
+112
+00:03:24,720 --> 00:03:26,240
+whatever's left over, that's the
+
+113
+00:03:26,240 --> 00:03:28,860
+famous bottom line, net income. So
+
+114
+00:03:28,860 --> 00:03:30,180
+this all seems pretty simple,
+
+115
+00:03:30,340 --> 00:03:31,800
+right? You see a company with a
+
+116
+00:03:31,800 --> 00:03:33,620
+massive net income, and you think,
+
+117
+00:03:33,740 --> 00:03:35,240
+wow, they must be absolutely
+
+118
+00:03:35,240 --> 00:03:37,140
+rolling in cash. It's profitable,
+
+119
+00:03:37,140 --> 00:03:38,600
+so its bank account must be getting
+
+120
+00:03:38,600 --> 00:03:41,440
+fatter by the second. Well, not so
+
+121
+00:03:41,440 --> 00:03:43,480
+fast. Actually, this is one of the
+
+122
+00:03:43,480 --> 00:03:45,000
+biggest misconceptions out there,
+
+123
+00:03:45,100 --> 00:03:46,720
+and it's where the most clever
+
+124
+00:03:46,720 --> 00:03:48,820
+financial secrets get hidden. A
+
+125
+00:03:48,820 --> 00:03:50,220
+company can be reporting huge
+
+126
+00:03:50,220 --> 00:03:52,380
+profits, and believe it or not, be
+
+127
+00:03:52,380 --> 00:03:53,920
+just weeks away from running out of
+
+128
+00:03:53,920 --> 00:03:56,040
+money. And that brings us to our
+
+129
+00:03:56,040 --> 00:03:57,960
+third, and maybe our most important
+
+130
+00:03:57,960 --> 00:04:00,060
+piece of evidence, the statement of
+
+131
+00:04:00,060 --> 00:04:01,900
+cash flows. This is the one that
+
+132
+00:04:01,900 --> 00:04:03,600
+doesn't lie. It cuts through all
+
+133
+00:04:03,600 --> 00:04:05,040
+the accounting jargon and just
+
+134
+00:04:05,040 --> 00:04:07,080
+tells you one thing. Where did the
+
+135
+00:04:07,080 --> 00:04:09,360
+cold, hard cash actually come from,
+
+136
+00:04:09,480 --> 00:04:12,280
+and where did it go? So why on
+
+137
+00:04:12,280 --> 00:04:14,060
+earth isn't profit the same as
+
+138
+00:04:14,060 --> 00:04:16,660
+cash? Well, a few big reasons. For
+
+139
+00:04:16,660 --> 00:04:18,360
+one, the income statement includes
+
+140
+00:04:18,360 --> 00:04:20,500
+weird expenses that aren't actually
+
+141
+00:04:20,500 --> 00:04:22,660
+cash, like depreciation. That's
+
+142
+00:04:22,660 --> 00:04:24,200
+just an accountant reducing the
+
+143
+00:04:24,200 --> 00:04:26,300
+value of an asset on paper. No
+
+144
+00:04:26,300 --> 00:04:27,680
+money actually leaves the bank.
+
+145
+00:04:28,180 --> 00:04:29,540
+Second, the income statement
+
+146
+00:04:29,540 --> 00:04:31,840
+totally ignores huge uses of cash,
+
+147
+00:04:32,140 --> 00:04:33,460
+like buying a billion dollar
+
+148
+00:04:33,460 --> 00:04:35,440
+factory. And third, a company
+
+149
+00:04:35,440 --> 00:04:37,280
+records a sale as revenue the
+
+150
+00:04:37,280 --> 00:04:39,260
+second the invoice is sent, even if
+
+151
+00:04:39,260 --> 00:04:40,500
+the customer doesn't actually pay
+
+152
+00:04:40,500 --> 00:04:42,740
+them for another two months. This
+
+153
+00:04:42,740 --> 00:04:44,280
+WorldCom scandal is the perfect
+
+154
+00:04:44,280 --> 00:04:46,360
+example. The company took almost $4
+
+155
+00:04:46,360 --> 00:04:48,440
+billion of everyday expenses and
+
+156
+00:04:48,440 --> 00:04:49,980
+lied, calling them long-term
+
+157
+00:04:49,980 --> 00:04:52,020
+investments. What did that do? It
+
+158
+00:04:52,020 --> 00:04:53,560
+made their net income look amazing,
+
+159
+00:04:53,700 --> 00:04:54,880
+but the one place they couldn't
+
+160
+00:04:54,880 --> 00:04:56,060
+hide it was the cash flow
+
+161
+00:04:56,060 --> 00:04:57,800
+statement. It showed this gigantic
+
+162
+00:04:57,800 --> 00:04:59,180
+geyser of cash going out for
+
+163
+00:04:59,180 --> 00:05:00,780
+capital expenditures that made no
+
+164
+00:05:00,780 --> 00:05:02,500
+sense. For any detective who was
+
+165
+00:05:02,500 --> 00:05:04,140
+watching, that was the smoking gun.
+
+166
+00:05:05,060 --> 00:05:06,540
+All right, we've gathered our three
+
+167
+00:05:06,540 --> 00:05:08,560
+key clues, the balance sheet, the
+
+168
+00:05:08,560 --> 00:05:10,000
+income statement, and the statement
+
+169
+00:05:10,000 --> 00:05:11,920
+of cash flows. Now it's time to
+
+170
+00:05:11,920 --> 00:05:13,480
+open up our toolkit and use some
+
+171
+00:05:13,480 --> 00:05:15,080
+financial ratios to see how all
+
+172
+00:05:15,080 --> 00:05:17,440
+these pieces fit together. Let's
+
+173
+00:05:17,440 --> 00:05:19,100
+just look at two really powerful
+
+174
+00:05:19,100 --> 00:05:21,900
+ones. First is the P-E ratio, price
+
+175
+00:05:21,900 --> 00:05:23,840
+to earnings. Think of this as the
+
+176
+00:05:23,840 --> 00:05:25,360
+hype meter. It tells you how much
+
+177
+00:05:25,360 --> 00:05:27,160
+people are willing to pay for $1 of
+
+178
+00:05:27,160 --> 00:05:28,980
+the company's profit. A really high
+
+179
+00:05:28,980 --> 00:05:30,600
+P-E could mean investors are
+
+180
+00:05:30,600 --> 00:05:33,060
+expecting huge growth, or it could
+
+181
+00:05:33,060 --> 00:05:34,240
+mean the stock is just way
+
+182
+00:05:34,240 --> 00:05:35,820
+overvalued. Then there's the debt
+
+183
+00:05:35,820 --> 00:05:37,840
+to equity ratio. This is your risk
+
+184
+00:05:37,840 --> 00:05:39,280
+meter. It shows you how much the
+
+185
+00:05:39,280 --> 00:05:40,460
+company is relying on borrowed
+
+186
+00:05:40,460 --> 00:05:42,460
+money. A high number here can be a
+
+187
+00:05:42,460 --> 00:05:44,200
+major red flag, especially if that
+
+188
+00:05:44,200 --> 00:05:45,440
+economic tide we talked about
+
+189
+00:05:45,440 --> 00:05:47,820
+starts to go out. So there you have
+
+190
+00:05:47,820 --> 00:05:48,880
+it. After this little
+
+191
+00:05:48,880 --> 00:05:50,520
+investigation, you're now armed
+
+192
+00:05:50,520 --> 00:05:51,980
+with the basic framework you need
+
+193
+00:05:51,980 --> 00:05:53,800
+to start analyzing a company's real
+
+194
+00:05:53,800 --> 00:05:55,780
+financial health. Here's your
+
+195
+00:05:55,780 --> 00:05:57,360
+framework, your detective process.
+
+196
+00:05:57,520 --> 00:05:58,980
+Start with the balance sheet to get
+
+197
+00:05:58,980 --> 00:06:01,200
+that snapshot in time. Then read
+
+198
+00:06:01,200 --> 00:06:02,860
+the income statement to understand
+
+199
+00:06:02,860 --> 00:06:04,540
+the story of their performance. But
+
+200
+00:06:04,540 --> 00:06:06,400
+always, always cross-check it with
+
+201
+00:06:06,400 --> 00:06:08,060
+the cash flow statement to follow
+
+202
+00:06:08,060 --> 00:06:09,800
+the actual money trail. And
+
+203
+00:06:09,800 --> 00:06:11,940
+finally, use ratios to connect the
+
+204
+00:06:11,940 --> 00:06:13,400
+clues and do your analysis.
+
+205
+00:06:13,760 --> 00:06:15,160
+Together, these things give you a
+
+206
+00:06:15,160 --> 00:06:17,440
+really powerful 3D view of any
+
+207
+00:06:17,440 --> 00:06:19,800
+business. And remember, these
+
+208
+00:06:19,800 --> 00:06:21,420
+documents, they're not just for
+
+209
+00:06:21,420 --> 00:06:23,500
+accountants. They are the biography
+
+210
+00:06:23,500 --> 00:06:25,760
+of a company. They tell a story of
+
+211
+00:06:25,760 --> 00:06:28,480
+strategy, of risk, of success, and
+
+212
+00:06:28,480 --> 00:06:30,180
+of failure. You just have to learn
+
+213
+00:06:30,180 --> 00:06:32,260
+how to read the language. Every
+
+214
+00:06:32,260 --> 00:06:33,840
+single quarter, public companies
+
+215
+00:06:33,840 --> 00:06:35,380
+publish these stories for the whole
+
+216
+00:06:35,380 --> 00:06:36,800
+world to see. They're just out
+
+217
+00:06:36,800 --> 00:06:38,000
+there waiting for someone to read
+
+218
+00:06:38,000 --> 00:06:39,420
+them. So now that you know the
+
+219
+00:06:39,420 --> 00:06:41,140
+language, what stories are you
+
+220
+00:06:41,140 --> 00:06:41,640
+gonna uncover?
+

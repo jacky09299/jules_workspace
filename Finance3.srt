@@ -1,0 +1,860 @@
+1
+00:00:00,000 --> 00:00:02,320
+Alright, let's talk about one of
+
+2
+00:00:02,320 --> 00:00:04,280
+the biggest challenges in all of
+
+3
+00:00:04,280 --> 00:00:06,480
+finance, valuation. You know, how
+
+4
+00:00:06,480 --> 00:00:08,200
+do you figure out what something, a
+
+5
+00:00:08,200 --> 00:00:10,020
+stock, a project, an entire
+
+6
+00:00:10,020 --> 00:00:12,980
+company, is actually worth? To make
+
+7
+00:00:12,980 --> 00:00:14,380
+this real, I want you to picture
+
+8
+00:00:14,380 --> 00:00:16,060
+this. You're in a high-stakes,
+
+9
+00:00:16,380 --> 00:00:18,000
+final round job interview. This is
+
+10
+00:00:18,000 --> 00:00:19,740
+for your dream job, an equity
+
+11
+00:00:19,740 --> 00:00:21,780
+analyst at a top firm. The pressure
+
+12
+00:00:21,780 --> 00:00:24,620
+is absolutely on. They sit you down
+
+13
+00:00:24,620 --> 00:00:25,920
+at a computer and drop the
+
+14
+00:00:25,920 --> 00:00:27,580
+assignment on you. Your task?
+
+15
+00:00:27,900 --> 00:00:29,380
+Analyze two totally different
+
+16
+00:00:29,380 --> 00:00:32,240
+beasts, Ford and Microsoft. Oh, and
+
+17
+00:00:32,240 --> 00:00:34,620
+you've only got 90 minutes. The
+
+18
+00:00:34,620 --> 00:00:36,460
+clock starts ticking. And you're
+
+19
+00:00:36,460 --> 00:00:38,120
+just staring at a mountain of data,
+
+20
+00:00:38,260 --> 00:00:40,180
+right? Financial reports, stock
+
+21
+00:00:40,180 --> 00:00:42,200
+charts, news articles. So
+
+22
+00:00:42,200 --> 00:00:44,000
+seriously, where do you even begin?
+
+23
+00:00:44,300 --> 00:00:46,020
+How do you possibly cut through all
+
+24
+00:00:46,020 --> 00:00:48,740
+that noise? I mean, look at this to
+
+25
+00:00:48,740 --> 00:00:50,260
+-do list. It's kind of insane.
+
+26
+00:00:50,580 --> 00:00:52,240
+You've got to download years of
+
+27
+00:00:52,240 --> 00:00:54,220
+financials, calculate a whole bunch
+
+28
+00:00:54,220 --> 00:00:55,920
+of different ratios, benchmark
+
+29
+00:00:55,920 --> 00:00:58,020
+them, and then somehow magically
+
+30
+00:00:58,020 --> 00:01:00,300
+interpret what it all means. It's
+
+31
+00:01:00,300 --> 00:01:01,800
+designed to be overwhelming. And
+
+32
+00:01:01,800 --> 00:01:03,320
+without a solid framework, you are
+
+33
+00:01:03,320 --> 00:01:05,440
+going to be completely lost. So
+
+34
+00:01:05,440 --> 00:01:06,220
+that's what we're going to build
+
+35
+00:01:06,220 --> 00:01:08,740
+today, the framework. So the very
+
+36
+00:01:08,740 --> 00:01:10,680
+first tool in our toolkit is what
+
+37
+00:01:10,680 --> 00:01:12,380
+we call the valuation principle.
+
+38
+00:01:12,840 --> 00:01:14,680
+This is the core idea that lets us
+
+39
+00:01:14,680 --> 00:01:16,100
+compare things that seem totally
+
+40
+00:01:16,100 --> 00:01:17,640
+different, you know, like apples
+
+41
+00:01:17,640 --> 00:01:19,620
+and oranges, or in this case,
+
+42
+00:01:19,940 --> 00:01:21,860
+silver and gold. Let's make this
+
+43
+00:01:21,860 --> 00:01:23,960
+super concrete. Imagine a jeweler
+
+44
+00:01:23,960 --> 00:01:25,520
+could trade 400 ounces of silver
+
+45
+00:01:25,520 --> 00:01:27,480
+for 10 ounces of gold. Now, just
+
+46
+00:01:27,480 --> 00:01:28,720
+based on weight, that sounds like a
+
+47
+00:01:28,720 --> 00:01:30,580
+terrible deal, right? But you can't
+
+48
+00:01:30,580 --> 00:01:32,480
+compare ounces to ounces. You need
+
+49
+00:01:32,480 --> 00:01:34,260
+a common language. And in finance,
+
+50
+00:01:34,540 --> 00:01:36,740
+that language is cash. Using market
+
+51
+00:01:36,740 --> 00:01:38,420
+prices, that silver is worth 6
+
+52
+00:01:38,420 --> 00:01:40,080
+grand, but the gold is worth 9
+
+53
+00:01:40,080 --> 00:01:41,840
+grand. By making that trade, the
+
+54
+00:01:41,840 --> 00:01:44,000
+jeweler instantly creates $3,000 of
+
+55
+00:01:44,000 --> 00:01:45,860
+value out of thin air. The decision
+
+56
+00:01:45,860 --> 00:01:47,220
+becomes a no-brainer once you
+
+57
+00:01:47,220 --> 00:01:48,640
+translate it into its cash value.
+
+58
+00:01:49,200 --> 00:01:50,600
+And that right there brings us to
+
+59
+00:01:50,600 --> 00:01:52,600
+the formal valuation principle. At
+
+60
+00:01:52,600 --> 00:01:53,980
+the end of the day, the value of
+
+61
+00:01:53,980 --> 00:01:56,080
+any asset is just its competitive
+
+62
+00:01:56,080 --> 00:01:58,160
+market price. That means every
+
+63
+00:01:58,160 --> 00:01:59,560
+single decision comes down to one
+
+64
+00:01:59,560 --> 00:02:01,640
+question. Do the benefits, measured
+
+65
+00:02:01,640 --> 00:02:03,580
+in today's dollars, outweigh the
+
+66
+00:02:03,580 --> 00:02:05,460
+costs? If the answer is yes, you're
+
+67
+00:02:05,460 --> 00:02:07,260
+creating value. Simple as that.
+
+68
+00:02:08,060 --> 00:02:09,260
+Okay, so that's how we compare
+
+69
+00:02:09,260 --> 00:02:11,020
+different things at the same point
+
+70
+00:02:11,020 --> 00:02:13,100
+in time. But what about comparing
+
+71
+00:02:13,100 --> 00:02:15,680
+money across time? This brings us
+
+72
+00:02:15,680 --> 00:02:17,900
+to our second huge concept, the
+
+73
+00:02:17,900 --> 00:02:20,180
+time value of money. And it's this
+
+74
+00:02:20,180 --> 00:02:22,480
+incredibly powerful idea that when
+
+75
+00:02:22,480 --> 00:02:24,500
+you get paid, matters just as much
+
+76
+00:02:24,500 --> 00:02:26,900
+as what you get paid. Look, a
+
+77
+00:02:26,900 --> 00:02:28,660
+dollar today is worth more than a
+
+78
+00:02:28,660 --> 00:02:31,040
+dollar tomorrow, period. And why is
+
+79
+00:02:31,040 --> 00:02:32,680
+that? Because you can invest that
+
+80
+00:02:32,680 --> 00:02:34,700
+dollar today and earn a return on
+
+81
+00:02:34,700 --> 00:02:36,800
+it. So, for example, if you can
+
+82
+00:02:36,800 --> 00:02:38,620
+earn a 7% interest rate, having
+
+83
+00:02:38,620 --> 00:02:40,860
+$100,000 in your hand right now is
+
+84
+00:02:40,860 --> 00:02:42,860
+the exact financial equivalent of
+
+85
+00:02:42,860 --> 00:02:45,520
+being promised $107,000 a year from
+
+86
+00:02:45,520 --> 00:02:47,800
+now. It's the same value, just at
+
+87
+00:02:47,800 --> 00:02:49,680
+different points in time. Now, the
+
+88
+00:02:49,680 --> 00:02:51,120
+tool we use to make these
+
+89
+00:02:51,120 --> 00:02:52,960
+conversions is the risk-free
+
+90
+00:02:52,960 --> 00:02:55,060
+interest rate. And I absolutely
+
+91
+00:02:55,060 --> 00:02:56,520
+love this description from our
+
+92
+00:02:56,520 --> 00:02:58,200
+source material. It's the exchange
+
+93
+00:02:58,200 --> 00:03:00,280
+rate across time. It's basically
+
+94
+00:03:00,280 --> 00:03:01,920
+the market price for moving money
+
+95
+00:03:01,920 --> 00:03:03,860
+from today into the future, or
+
+96
+00:03:03,860 --> 00:03:05,200
+pulling it from the future back to
+
+97
+00:03:05,200 --> 00:03:08,300
+today without any risk. Okay, so we
+
+98
+00:03:08,300 --> 00:03:10,120
+can value different assets, and we
+
+99
+00:03:10,120 --> 00:03:12,040
+can move money through time. Now
+
+100
+00:03:12,040 --> 00:03:13,400
+let's combine these two ideas into
+
+101
+00:03:13,400 --> 00:03:15,600
+one incredibly powerful tool, the
+
+102
+00:03:15,600 --> 00:03:18,160
+Net Present Value Decision Rule, or
+
+103
+00:03:18,160 --> 00:03:20,760
+NPV. This is, and I'm not
+
+104
+00:03:20,760 --> 00:03:22,660
+exaggerating, the golden rule for
+
+105
+00:03:22,660 --> 00:03:24,900
+making financial decisions. And the
+
+106
+00:03:24,900 --> 00:03:26,900
+formula itself, it's actually
+
+107
+00:03:26,900 --> 00:03:28,940
+beautiful in its simplicity. The
+
+108
+00:03:28,940 --> 00:03:30,540
+net present value is just the
+
+109
+00:03:30,540 --> 00:03:32,000
+present value of all the benefits
+
+110
+00:03:32,000 --> 00:03:34,120
+minus the present value of all the
+
+111
+00:03:34,120 --> 00:03:35,660
+costs. You're basically taking
+
+112
+00:03:35,660 --> 00:03:37,620
+every single future cash flow tied
+
+113
+00:03:37,620 --> 00:03:39,540
+to a decision, converting it into
+
+114
+00:03:39,540 --> 00:03:40,980
+what it's worth in today's money,
+
+115
+00:03:41,280 --> 00:03:42,900
+and boiling it all down to a single
+
+116
+00:03:42,900 --> 00:03:44,940
+number. And the rule for using this
+
+117
+00:03:44,940 --> 00:03:47,200
+number is just as easy. When you
+
+118
+00:03:47,200 --> 00:03:48,840
+have a choice to make, you take the
+
+119
+00:03:48,840 --> 00:03:51,180
+option with the highest NPV. That's
+
+120
+00:03:51,180 --> 00:03:53,660
+it. Why? Because choosing that
+
+121
+00:03:53,660 --> 00:03:55,220
+option is literally the same as
+
+122
+00:03:55,220 --> 00:03:57,440
+someone handing you its NPV in cash
+
+123
+00:03:57,440 --> 00:03:59,860
+right here, right now. Let's put
+
+124
+00:03:59,860 --> 00:04:01,760
+this to the test. Imagine you own a
+
+125
+00:04:01,760 --> 00:04:03,100
+web business and you've got three
+
+126
+00:04:03,100 --> 00:04:04,620
+choices. You could sell it right
+
+127
+00:04:04,620 --> 00:04:06,620
+now for 200 grand. Okay, that's
+
+128
+00:04:06,620 --> 00:04:09,560
+easy. The NPV is $200,000. Or you
+
+129
+00:04:09,560 --> 00:04:10,760
+could invest some money now for a
+
+130
+00:04:10,760 --> 00:04:12,420
+bigger payout later. Once we run
+
+131
+00:04:12,420 --> 00:04:13,740
+the numbers and calculate the NPV
+
+132
+00:04:13,740 --> 00:04:15,240
+for all three, the right choice
+
+133
+00:04:15,240 --> 00:04:17,080
+becomes crystal clear. Hiring a
+
+134
+00:04:17,080 --> 00:04:18,280
+manager has the biggest upfront
+
+135
+00:04:18,280 --> 00:04:20,260
+cost, but its NPV is way higher
+
+136
+00:04:20,260 --> 00:04:22,840
+than the others, over $222,000.
+
+137
+00:04:23,320 --> 00:04:24,580
+That's the decision that creates
+
+138
+00:04:24,580 --> 00:04:26,540
+the most value. Now, this all
+
+139
+00:04:26,540 --> 00:04:28,040
+sounds great in theory, but you
+
+140
+00:04:28,040 --> 00:04:29,620
+might be thinking, what makes these
+
+141
+00:04:29,620 --> 00:04:31,760
+market prices so reliable? And that
+
+142
+00:04:31,760 --> 00:04:33,140
+brings us to our final core
+
+143
+00:04:33,140 --> 00:04:35,900
+concept, the law of one price. The
+
+144
+00:04:35,900 --> 00:04:37,440
+basic idea here is that there's no
+
+145
+00:04:37,440 --> 00:04:38,920
+free money just sitting on the
+
+146
+00:04:38,920 --> 00:04:40,080
+street waiting for you to pick it
+
+147
+00:04:40,080 --> 00:04:42,560
+up. To really get this, just
+
+148
+00:04:42,560 --> 00:04:44,140
+imagine a world where this law is
+
+149
+00:04:44,140 --> 00:04:46,120
+broken. Let's say gold is selling
+
+150
+00:04:46,120 --> 00:04:48,640
+for $850 an ounce in New York, but
+
+151
+00:04:48,640 --> 00:04:50,280
+at the exact same second, it's
+
+152
+00:04:50,280 --> 00:04:52,120
+going for $900 an ounce in London.
+
+153
+00:04:52,840 --> 00:04:54,720
+It's the exact same asset, but it
+
+154
+00:04:54,720 --> 00:04:57,340
+has two different prices. So, if
+
+155
+00:04:57,340 --> 00:04:59,880
+you saw that, what would you do? I
+
+156
+00:04:59,880 --> 00:05:02,020
+mean, the answer is pretty obvious,
+
+157
+00:05:02,220 --> 00:05:03,740
+right? This is an opportunity
+
+158
+00:05:03,740 --> 00:05:05,320
+that's just way too good to pass
+
+159
+00:05:05,320 --> 00:05:07,340
+up. You do what's called an
+
+160
+00:05:07,340 --> 00:05:08,960
+arbitrage trade. You would
+
+161
+00:05:08,960 --> 00:05:11,360
+instantly, simultaneously, buy that
+
+162
+00:05:11,360 --> 00:05:12,820
+gold in New York where it's cheap
+
+163
+00:05:12,820 --> 00:05:14,660
+and sell it in London where it's
+
+164
+00:05:14,660 --> 00:05:16,660
+expensive. And you'd pocket a $50
+
+165
+00:05:16,660 --> 00:05:18,940
+per ounce profit with literally
+
+166
+00:05:18,940 --> 00:05:21,460
+zero risk. Of course, you and every
+
+167
+00:05:21,460 --> 00:05:22,500
+other trader on the planet would
+
+168
+00:05:22,500 --> 00:05:24,360
+see this. All that buying in New
+
+169
+00:05:24,360 --> 00:05:25,940
+York would push the price up. All
+
+170
+00:05:25,940 --> 00:05:27,280
+that selling in London would push
+
+171
+00:05:27,280 --> 00:05:29,300
+the price down. And poof, in
+
+172
+00:05:29,300 --> 00:05:30,460
+seconds, the prices would be
+
+173
+00:05:30,460 --> 00:05:32,240
+identical and the opportunity would
+
+174
+00:05:32,240 --> 00:05:34,480
+vanish. And that's what leads us to
+
+175
+00:05:34,480 --> 00:05:36,660
+the formal law of one price. If the
+
+176
+00:05:36,660 --> 00:05:38,240
+same thing is trading in different
+
+177
+00:05:38,240 --> 00:05:40,160
+competitive markets, it has to
+
+178
+00:05:40,160 --> 00:05:41,880
+trade for the same price. This
+
+179
+00:05:41,880 --> 00:05:43,440
+constant hunt for these little risk
+
+180
+00:05:43,440 --> 00:05:45,440
+-free profits is the powerful self
+
+181
+00:05:45,440 --> 00:05:46,920
+-correcting force that makes our
+
+182
+00:05:46,920 --> 00:05:49,020
+entire valuation framework actually
+
+183
+00:05:49,020 --> 00:05:51,040
+work in the real world. So, there
+
+184
+00:05:51,040 --> 00:05:52,260
+you have it. This is the
+
+185
+00:05:52,260 --> 00:05:54,300
+foundational toolkit. The valuation
+
+186
+00:05:54,300 --> 00:05:55,520
+principle lets you compare
+
+187
+00:05:55,520 --> 00:05:57,240
+anything, the time value of money
+
+188
+00:05:57,240 --> 00:05:59,460
+lets you move cash across time, the
+
+189
+00:05:59,460 --> 00:06:01,520
+NPV rule tells you what to do, and
+
+190
+00:06:01,520 --> 00:06:03,140
+the law of one price is the engine
+
+191
+00:06:03,140 --> 00:06:04,880
+that keeps the whole market honest.
+
+192
+00:06:05,480 --> 00:06:07,140
+Okay, so let's circle all the way
+
+193
+00:06:07,140 --> 00:06:08,580
+back to that 90-minute interview.
+
+194
+00:06:08,960 --> 00:06:10,440
+Armed with these tools, you finally
+
+195
+00:06:10,440 --> 00:06:12,340
+have a clear, logical way to attack
+
+196
+00:06:12,340 --> 00:06:13,760
+the problem. And here's the real
+
+197
+00:06:13,760 --> 00:06:15,140
+secret. The interviewer doesn't
+
+198
+00:06:15,140 --> 00:06:16,660
+care if you pick Ford or Microsoft.
+
+199
+00:06:16,820 --> 00:06:18,520
+What they're really testing is your
+
+200
+00:06:18,520 --> 00:06:20,220
+process. The goal isn't to be
+
+201
+00:06:20,220 --> 00:06:21,840
+right, it's to show that you have a
+
+202
+00:06:21,840 --> 00:06:23,380
+sound, repeatable method for
+
+203
+00:06:23,380 --> 00:06:25,660
+evaluating anything. This framework
+
+204
+00:06:25,660 --> 00:06:27,560
+we've built is incredibly powerful.
+
+205
+00:06:27,920 --> 00:06:30,000
+But there's a catch. It works
+
+206
+00:06:30,000 --> 00:06:31,220
+perfectly when we know what the
+
+207
+00:06:31,220 --> 00:06:32,660
+future cash flows are going to be.
+
+208
+00:06:32,660 --> 00:06:34,680
+But that leaves us with one final,
+
+209
+00:06:35,040 --> 00:06:36,880
+huge question. What happens when
+
+210
+00:06:36,880 --> 00:06:38,520
+the future is a complete unknown?
+
+211
+00:06:38,980 --> 00:06:40,480
+How do you value a company when you
+
+212
+00:06:40,480 --> 00:06:42,000
+can't possibly know what it's going
+
+213
+00:06:42,000 --> 00:06:44,520
+to earn next year? Well, that is
+
+214
+00:06:44,520 --> 00:06:45,800
+the next level of the Analyst
+
+215
+00:06:45,800 --> 00:06:46,280
+Challenge.
+

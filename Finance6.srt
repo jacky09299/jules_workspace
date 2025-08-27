@@ -1,0 +1,820 @@
+1
+00:00:00,000 --> 00:00:01,760
+Hey there, and welcome. Today,
+
+2
+00:00:01,780 --> 00:00:03,140
+we're gonna tackle one of the most
+
+3
+00:00:03,140 --> 00:00:04,580
+important, but maybe one of the
+
+4
+00:00:04,580 --> 00:00:06,560
+most misunderstood, parts of the
+
+5
+00:00:06,560 --> 00:00:09,120
+financial world, bonds. Forget all
+
+6
+00:00:09,120 --> 00:00:10,380
+the complicated jargon for a
+
+7
+00:00:10,380 --> 00:00:11,800
+minute. We're just gonna break down
+
+8
+00:00:11,800 --> 00:00:13,580
+how they really work, piece by
+
+9
+00:00:13,580 --> 00:00:15,880
+simple piece. And let's start with
+
+10
+00:00:15,880 --> 00:00:17,540
+just how massive this whole thing
+
+11
+00:00:17,540 --> 00:00:20,220
+is. So, get this, to give you a
+
+12
+00:00:20,220 --> 00:00:22,660
+sense of scale, back in early 2015,
+
+13
+00:00:23,040 --> 00:00:25,200
+the US bond market was worth a jaw
+
+14
+00:00:25,200 --> 00:00:28,080
+-dropping $39 trillion, and that's
+
+15
+00:00:28,080 --> 00:00:29,960
+not just a big number. It was way
+
+16
+00:00:29,960 --> 00:00:31,520
+bigger than the entire US stock
+
+17
+00:00:31,520 --> 00:00:33,120
+market at the time. It is an
+
+18
+00:00:33,120 --> 00:00:34,520
+absolutely enormous part of our
+
+19
+00:00:34,520 --> 00:00:36,900
+economy. All right, so when we're
+
+20
+00:00:36,900 --> 00:00:38,900
+talking about a market that big, it
+
+21
+00:00:38,900 --> 00:00:40,380
+really begs the question, right?
+
+22
+00:00:40,720 --> 00:00:42,180
+What are we even talking about?
+
+23
+00:00:42,640 --> 00:00:45,000
+What is a bond at its most basic
+
+24
+00:00:45,000 --> 00:00:47,280
+level? At its heart, a bond is
+
+25
+00:00:47,280 --> 00:00:49,520
+basically just a fancy IOU. That's
+
+26
+00:00:49,520 --> 00:00:51,340
+it. When you buy a bond, you are
+
+27
+00:00:51,340 --> 00:00:52,780
+lending your money to a big
+
+28
+00:00:52,780 --> 00:00:54,540
+organization, usually a government
+
+29
+00:00:54,540 --> 00:00:56,840
+or a corporation. And in return for
+
+30
+00:00:56,840 --> 00:00:58,580
+your cash today, they promise to
+
+31
+00:00:58,580 --> 00:01:00,280
+pay you back in the future, almost
+
+32
+00:01:00,280 --> 00:01:02,360
+always with a little extra on top.
+
+33
+00:01:03,240 --> 00:01:04,240
+You know what? Every single bond,
+
+34
+00:01:04,420 --> 00:01:05,880
+it doesn't matter how simple or how
+
+35
+00:01:05,880 --> 00:01:08,100
+complex, is really just defined by
+
+36
+00:01:08,100 --> 00:01:10,140
+three key components. If you can
+
+37
+00:01:10,140 --> 00:01:11,220
+get your head around these three
+
+38
+00:01:11,220 --> 00:01:12,600
+things, you're gonna understand
+
+39
+00:01:12,600 --> 00:01:14,640
+everything else. So the first
+
+40
+00:01:14,640 --> 00:01:15,860
+building block is called the face
+
+41
+00:01:15,860 --> 00:01:17,260
+value, or you might hear it called
+
+42
+00:01:17,260 --> 00:01:18,860
+the principal. Just think of this
+
+43
+00:01:18,860 --> 00:01:20,020
+as the sticker price of the loan.
+
+44
+00:01:20,300 --> 00:01:21,580
+It's the amount the issuer promises
+
+45
+00:01:21,580 --> 00:01:22,560
+to hand you back when the whole
+
+46
+00:01:22,560 --> 00:01:24,420
+thing is over. It's usually a nice
+
+47
+00:01:24,420 --> 00:01:25,540
+round number, like a thousand
+
+48
+00:01:25,540 --> 00:01:27,840
+bucks. And then we've got the
+
+49
+00:01:27,840 --> 00:01:29,400
+coupon rate. This is the interest
+
+50
+00:01:29,400 --> 00:01:30,760
+you get for making the loan in the
+
+51
+00:01:30,760 --> 00:01:32,240
+first place. It's an annual
+
+52
+00:01:32,240 --> 00:01:34,180
+percentage of that face value. And
+
+53
+00:01:34,180 --> 00:01:35,560
+those regular payments you get,
+
+54
+00:01:35,820 --> 00:01:36,960
+well, those are called coupons.
+
+55
+00:01:37,220 --> 00:01:38,700
+It's your reward for letting them
+
+56
+00:01:38,700 --> 00:01:41,000
+use your money. And the last piece
+
+57
+00:01:41,000 --> 00:01:42,180
+of this puzzle is the maturity
+
+58
+00:01:42,180 --> 00:01:44,720
+date. This is the finish line. It's
+
+59
+00:01:44,720 --> 00:01:46,240
+the specific day when the issuer
+
+60
+00:01:46,240 --> 00:01:48,060
+pays you back that face value, and
+
+61
+00:01:48,060 --> 00:01:50,820
+the loan is officially done. Okay,
+
+62
+00:01:50,880 --> 00:01:52,160
+so we've got the building blocks
+
+63
+00:01:52,160 --> 00:01:53,920
+down. Let's put them together and
+
+64
+00:01:53,920 --> 00:01:55,660
+build the most basic bond you can
+
+65
+00:01:55,660 --> 00:01:57,340
+find, just to see how this all
+
+66
+00:01:57,340 --> 00:01:59,480
+works in the real world. This is
+
+67
+00:01:59,480 --> 00:02:02,000
+what's known as a zero coupon bond.
+
+68
+00:02:02,260 --> 00:02:03,660
+And it does exactly what it says on
+
+69
+00:02:03,660 --> 00:02:06,720
+the tin. It pays zero coupons. No
+
+70
+00:02:06,720 --> 00:02:08,420
+regular interest payments at all.
+
+71
+00:02:08,680 --> 00:02:10,080
+So you're probably asking, well,
+
+72
+00:02:10,080 --> 00:02:11,840
+how do you make any money? Simple,
+
+73
+00:02:12,160 --> 00:02:14,140
+you buy it at a discount for less
+
+74
+00:02:14,140 --> 00:02:16,100
+than its face value. Your entire
+
+75
+00:02:16,100 --> 00:02:17,900
+profit is baked right into that
+
+76
+00:02:17,900 --> 00:02:19,960
+difference. Let me show you how
+
+77
+00:02:19,960 --> 00:02:22,200
+that actually works. So today, you
+
+78
+00:02:22,200 --> 00:02:24,060
+might pay something like, say, $96
+
+79
+00:02:24,060 --> 00:02:27,580
+,618 for this bond. Then you just
+
+80
+00:02:27,580 --> 00:02:29,220
+wait. One year later on the
+
+81
+00:02:29,220 --> 00:02:30,860
+maturity date, you get the full
+
+82
+00:02:30,860 --> 00:02:33,440
+$100,000 face value. Your entire
+
+83
+00:02:33,440 --> 00:02:34,580
+return is just that difference
+
+84
+00:02:34,580 --> 00:02:35,840
+between what you paid and what you
+
+85
+00:02:35,840 --> 00:02:38,300
+got back. And this brings us to a
+
+86
+00:02:38,300 --> 00:02:40,460
+super important idea, yield to
+
+87
+00:02:40,460 --> 00:02:42,940
+maturity, or YTM. You can just
+
+88
+00:02:42,940 --> 00:02:44,500
+think of this as the bond's true
+
+89
+00:02:44,500 --> 00:02:46,340
+annual return if you buy it and
+
+90
+00:02:46,340 --> 00:02:48,160
+hold it all the way to the end. It
+
+91
+00:02:48,160 --> 00:02:49,680
+is the single best way to measure
+
+92
+00:02:49,680 --> 00:02:51,260
+what a bond is actually paying you.
+
+93
+00:02:51,940 --> 00:02:53,420
+All right, so that's the simplest
+
+94
+00:02:53,420 --> 00:02:55,320
+version. But as you can imagine,
+
+95
+00:02:55,660 --> 00:02:57,460
+most bonds out there aren't quite
+
+96
+00:02:57,460 --> 00:02:59,320
+that basic. They add that other
+
+97
+00:02:59,320 --> 00:03:00,640
+feature we talked about earlier,
+
+98
+00:03:00,880 --> 00:03:03,600
+those regular interest payments. So
+
+99
+00:03:03,600 --> 00:03:05,180
+unlike that zero coupon bond where
+
+100
+00:03:05,180 --> 00:03:06,840
+you just get paid once at the end,
+
+101
+00:03:07,100 --> 00:03:08,620
+most bonds give you this nice,
+
+102
+00:03:09,040 --> 00:03:10,700
+steady stream of income. You get
+
+103
+00:03:10,700 --> 00:03:12,440
+these regular coupon payments, in
+
+104
+00:03:12,440 --> 00:03:14,200
+this example, every year for four
+
+105
+00:03:14,200 --> 00:03:16,620
+years. And then in that fifth and
+
+106
+00:03:16,620 --> 00:03:18,160
+final year, you get your last
+
+107
+00:03:18,160 --> 00:03:20,140
+coupon payment, plus you get that
+
+108
+00:03:20,140 --> 00:03:23,240
+full face value back. Okay, now for
+
+109
+00:03:23,240 --> 00:03:25,100
+what is probably the single most
+
+110
+00:03:25,100 --> 00:03:26,740
+important concept in the entire
+
+111
+00:03:26,740 --> 00:03:28,780
+bond market. Seriously, if you
+
+112
+00:03:28,780 --> 00:03:30,420
+remember just one thing from this
+
+113
+00:03:30,420 --> 00:03:32,980
+whole explainer, make it this, the
+
+114
+00:03:32,980 --> 00:03:34,800
+relationship between a bond's price
+
+115
+00:03:34,800 --> 00:03:37,400
+and its yield. Let me just pose a
+
+116
+00:03:37,400 --> 00:03:39,600
+quick question. Imagine you own a
+
+117
+00:03:39,600 --> 00:03:41,860
+bond and it pays you 3% interest.
+
+118
+00:03:42,240 --> 00:03:44,240
+Then all of a sudden, new bonds
+
+119
+00:03:44,240 --> 00:03:46,560
+start getting issued that pay 4%.
+
+120
+00:03:46,560 --> 00:03:48,980
+Is your older 3% bond more
+
+121
+00:03:48,980 --> 00:03:52,140
+attractive now or less? Well, the
+
+122
+00:03:52,140 --> 00:03:53,580
+relationship is inverse. They
+
+123
+00:03:53,580 --> 00:03:55,460
+literally work like a seesaw. When
+
+124
+00:03:55,460 --> 00:03:57,180
+market interest rates go up, the
+
+125
+00:03:57,180 --> 00:03:58,780
+price of existing bonds with lower
+
+126
+00:03:58,780 --> 00:04:00,900
+rates has to go down. I mean, think
+
+127
+00:04:00,900 --> 00:04:02,460
+about it. Why would anybody pay
+
+128
+00:04:02,460 --> 00:04:04,760
+full price for your old 3% bond
+
+129
+00:04:04,760 --> 00:04:06,060
+when they could just go out and buy
+
+130
+00:04:06,060 --> 00:04:08,320
+a brand new one that pays 4%? For
+
+131
+00:04:08,320 --> 00:04:10,080
+your bond to compete, its price has
+
+132
+00:04:10,080 --> 00:04:12,440
+to drop. And this whole inverse
+
+133
+00:04:12,440 --> 00:04:14,580
+relationship is exactly why we talk
+
+134
+00:04:14,580 --> 00:04:16,200
+about bond prices in a specific
+
+135
+00:04:16,200 --> 00:04:18,520
+way. If a bond's fixed coupon rate
+
+136
+00:04:18,520 --> 00:04:20,140
+is higher than the current market
+
+137
+00:04:20,140 --> 00:04:21,920
+yield, it's more attractive. So it
+
+138
+00:04:21,920 --> 00:04:23,800
+sells for a premium, more than its
+
+139
+00:04:23,800 --> 00:04:25,760
+face value. If the coupon rate is
+
+140
+00:04:25,760 --> 00:04:27,660
+lower, it has to sell at a
+
+141
+00:04:27,660 --> 00:04:29,300
+discount. And if they just happen
+
+142
+00:04:29,300 --> 00:04:31,320
+to be equal, it sells at par, which
+
+143
+00:04:31,320 --> 00:04:33,940
+is just its face value. Now, up
+
+144
+00:04:33,940 --> 00:04:35,300
+until this point, we've kind of
+
+145
+00:04:35,300 --> 00:04:37,060
+been assuming that the borrower is
+
+146
+00:04:37,060 --> 00:04:38,840
+always gonna pay you back. But in
+
+147
+00:04:38,840 --> 00:04:40,660
+the real world, well, there's
+
+148
+00:04:40,660 --> 00:04:42,340
+always a chance they won't. And
+
+149
+00:04:42,340 --> 00:04:44,300
+that introduces our final key
+
+150
+00:04:44,300 --> 00:04:47,700
+concept, risk. We call this credit
+
+151
+00:04:47,700 --> 00:04:49,220
+risk. It's the risk that the
+
+152
+00:04:49,220 --> 00:04:50,760
+company or the government that sold
+
+153
+00:04:50,760 --> 00:04:52,500
+you the bond is going to default
+
+154
+00:04:52,500 --> 00:04:54,260
+and just fail to make its payments.
+
+155
+00:04:54,940 --> 00:04:56,360
+And while some bonds, like US
+
+156
+00:04:56,360 --> 00:04:57,900
+treasuries, are considered pretty
+
+157
+00:04:57,900 --> 00:04:59,920
+much default-free, corporate bonds
+
+158
+00:04:59,920 --> 00:05:02,340
+always, always carry some level of
+
+159
+00:05:02,340 --> 00:05:04,860
+this risk. So how do investors deal
+
+160
+00:05:04,860 --> 00:05:06,860
+with that risk? Well, they demand
+
+161
+00:05:06,860 --> 00:05:08,580
+to be paid more for taking it on,
+
+162
+00:05:08,840 --> 00:05:10,280
+the extra bit of yield that a
+
+163
+00:05:10,280 --> 00:05:12,120
+corporate bond offers over a super
+
+164
+00:05:12,120 --> 00:05:13,600
+safe treasury bond is called the
+
+165
+00:05:13,600 --> 00:05:14,960
+credit spread. It's the
+
+166
+00:05:14,960 --> 00:05:16,440
+compensation you get for taking on
+
+167
+00:05:16,440 --> 00:05:17,560
+that risk that you might not get
+
+168
+00:05:17,560 --> 00:05:19,340
+all your money back. And to help
+
+169
+00:05:19,340 --> 00:05:21,020
+investors figure all this out
+
+170
+00:05:21,020 --> 00:05:22,880
+quickly, there are rating agencies
+
+171
+00:05:22,880 --> 00:05:25,060
+like S&P and Moody's that actually
+
+172
+00:05:25,060 --> 00:05:27,040
+grade bonds. The investment grade
+
+173
+00:05:27,040 --> 00:05:28,820
+bonds are seen as much safer while
+
+174
+00:05:28,820 --> 00:05:31,180
+the speculative or junk bonds have
+
+175
+00:05:31,180 --> 00:05:33,240
+a way higher risk of default. But
+
+176
+00:05:33,240 --> 00:05:34,920
+they also have to offer much higher
+
+177
+00:05:34,920 --> 00:05:36,680
+yields to even attract investors in
+
+178
+00:05:36,680 --> 00:05:38,660
+the first place. And this right
+
+179
+00:05:38,660 --> 00:05:40,400
+here is the final, absolutely
+
+180
+00:05:40,400 --> 00:05:41,920
+critical takeaway when it comes to
+
+181
+00:05:41,920 --> 00:05:44,240
+risk. A super high yield is not a
+
+182
+00:05:44,240 --> 00:05:46,020
+free lunch. If anything, it's a
+
+183
+00:05:46,020 --> 00:05:47,600
+warning sign. The yield is
+
+184
+00:05:47,600 --> 00:05:49,000
+calculated based on the promised
+
+185
+00:05:49,000 --> 00:05:50,760
+payments, but a high yield junk
+
+186
+00:05:50,760 --> 00:05:52,720
+bond might have a very real chance
+
+187
+00:05:52,720 --> 00:05:55,080
+of defaulting. So its high yield is
+
+188
+00:05:55,080 --> 00:05:56,460
+really just a reflection of high
+
+189
+00:05:56,460 --> 00:05:58,420
+risk, not some guarantee of a high
+
+190
+00:05:58,420 --> 00:06:00,900
+return. So we've seen it, right?
+
+191
+00:06:01,040 --> 00:06:02,880
+Every bond is this delicate balance
+
+192
+00:06:02,880 --> 00:06:05,420
+of price, yield and risk. And this
+
+193
+00:06:05,420 --> 00:06:07,160
+isn't just theory. This is the
+
+194
+00:06:07,160 --> 00:06:08,580
+stuff that sets the interest rates
+
+195
+00:06:08,580 --> 00:06:10,360
+on your mortgage, on your car loan,
+
+196
+00:06:10,520 --> 00:06:12,020
+and it determines the health of
+
+197
+00:06:12,020 --> 00:06:13,340
+retirement funds all over the
+
+198
+00:06:13,340 --> 00:06:15,320
+world. That seesaw we talked about
+
+199
+00:06:15,320 --> 00:06:17,200
+is always moving, shaping the
+
+200
+00:06:17,200 --> 00:06:18,900
+entire economy. So the real
+
+201
+00:06:18,900 --> 00:06:20,400
+question is, now that you know the
+
+202
+00:06:20,400 --> 00:06:22,020
+rules of the game, how does it
+
+203
+00:06:22,020 --> 00:06:23,080
+change the way you see the
+
+204
+00:06:23,080 --> 00:06:24,460
+financial world? Thanks for joining
+
+205
+00:06:24,460 --> 00:06:24,820
+me.
+
