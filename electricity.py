@@ -632,12 +632,13 @@ class DecorativeImage:
 
         self.app.redraw_canvas()
 
-    def set_layer(self, layer):
-        if layer == 'front':
-            self.app.top_images.add(self)
-        elif layer == 'back':
-            if self in self.app.top_images:
-                self.app.top_images.remove(self)
+    def set_layer(self, layer_pos):
+        active_layer = self.app.get_active_layer()
+        if layer_pos == 'front':
+            active_layer.top_images.add(self)
+        elif layer_pos == 'back':
+            if self in active_layer.top_images:
+                active_layer.top_images.remove(self)
         self.app.redraw_canvas()
 
 # --- 【新增】速率控制圖表 (線性內插版本) ---
@@ -1008,51 +1009,33 @@ class Simulator:
         return self.simulation_data
 
 
-# --- 主應用程式 GUI (V11.0 - 影片匯出) ---
-class App(tk.Tk):
-    def __init__(self):
-        super().__init__()
-        self.title("進階放電模擬系統 V11.0 (即時顯示控制)")
-        self.geometry("1200x800")
+# --- 【新增】圖層資料結構 ---
+class Layer:
+    """一個包含獨立模擬場景所有狀態的資料結構。"""
+    _next_id = 1
 
-        self.shapes, self.images = [], []
-        self.selected_item = None
-        self.drag_data = {}
+    def __init__(self, name=None):
+        if name is None:
+            self.name = f"圖層 {Layer._next_id}"
+            Layer._next_id += 1
+        else:
+            self.name = name
+            # 從載入的名稱中解析數字，以避免ID衝突
+            try:
+                num = int(name.split()[-1])
+                if num >= Layer._next_id:
+                    Layer._next_id = num + 1
+            except (ValueError, IndexError):
+                pass
+
+        self.is_visible = tk.BooleanVar(value=True)
+
+        # 物件
+        self.shapes = []
+        self.images = []
         self.top_images = set()
 
-        self.add_shape_mode = None
-        self.is_creating_rod = False
-        self.is_creating_arbitrary_shape = False
-        self.current_polygon_points = []
-        self.temp_drawing_artifacts = []
-        self.rubber_band_line_id, self.closing_line_id = None, None
-        
-        self.last_simulation_data = None
-        self.animation_job = None
-        self.animation_frame_index = 0
-        self.arc_renderer = None
-        self.total_frames = 0
-        self.speed_control_graph = None
-
-        # --- 新增: 用於UI控制的變數 ---
-        self.show_conductors = tk.BooleanVar(value=True)
-        self.show_images = tk.BooleanVar(value=True)
-        self.background_color_str = tk.StringVar(value=BACKGROUND_COLOR)
-        self.is_bg_transparent = tk.BooleanVar(value=False) # 【新】匯出透明背景選項
-        self.keep_image_frames = tk.BooleanVar(value=False) # 【新】影片匯出後保留圖片
-
-        # --- 【新增】匯出框相關變數 ---
-        self.export_box = {'x': 50, 'y': 50, 'w': 400, 'h': 300}
-        self.show_export_box = tk.BooleanVar(value=False)
-        self.export_box_vars = {
-            'x': tk.StringVar(value=str(self.export_box['x'])),
-            'y': tk.StringVar(value=str(self.export_box['y'])),
-            'w': tk.StringVar(value=str(self.export_box['w'])),
-            'h': tk.StringVar(value=str(self.export_box['h'])),
-        }
-        self.show_export_box.trace_add("write", lambda *args: self.redraw_canvas())
-
-
+        # 模擬參數
         self.sim_params = {
             'fork_chance': 0.015, 'path_interruption_chance': 0.005, 'step_length': 5,
             'arc_threshold_v_pixel': 150.0, 'probe_count': 15, 'probe_angle': 120,
@@ -1060,9 +1043,279 @@ class App(tk.Tk):
             'arc_max_thickness': 2.0, 'arc_glow_strength': 0.4, 'arc_max_life': 200,
             'glow_falloff_1': 0.7, 'glow_falloff_2': 0.3, 'glow_falloff_3': 0.1, 'glow_falloff_4': 0.0,
         }
+
+        # 動畫與結果
+        self.last_simulation_data = None
+        self.speed_graph_points = [] # 速率控制曲線的點
+
+        # 顯示設定 (這些未來可能會變成全域設定)
+        self.show_conductors = tk.BooleanVar(value=True)
+        self.show_images = tk.BooleanVar(value=True)
+        self.background_color_str = tk.StringVar(value=BACKGROUND_COLOR)
+        self.is_bg_transparent = tk.BooleanVar(value=False)
+
+        # 匯出框設定 (這些也可能變全域)
+        self.export_box = {'x': 50, 'y': 50, 'w': 400, 'h': 300}
+        self.show_export_box = tk.BooleanVar(value=False)
+
+    def to_dict(self):
+        """將圖層狀態序列化為字典以便儲存。"""
+        # 儲存 tk.BooleanVar 和 tk.StringVar 的值，而不是物件本身
+        return {
+            'name': self.name,
+            'is_visible': self.is_visible.get(),
+            'shapes': [self._shape_to_dict(s) for s in self.shapes],
+            'images': [self._image_to_dict(i) for i in self.images],
+            'sim_params': self.sim_params,
+            'last_simulation_data': self.last_simulation_data,
+            'speed_graph_points': self.speed_graph_points,
+            'show_conductors': self.show_conductors.get(),
+            'show_images': self.show_images.get(),
+            'background_color': self.background_color_str.get(),
+            'is_bg_transparent': self.is_bg_transparent.get(),
+            'export_box': self.export_box,
+            'show_export_box': self.show_export_box.get()
+        }
+
+    def _shape_to_dict(self, shape):
+        """將 Shape 物件序列化。"""
+        shape_dict = {
+            'shape_type': shape.shape_type,
+            'voltage': shape.voltage,
+        }
+        if shape.shape_type == "Needle":
+            shape_dict.update({'x': shape.x, 'y': shape.y, 'radius': shape.radius})
+        elif shape.shape_type == "Rod":
+            shape_dict.update({'x1': shape.x1, 'y1': shape.y1, 'x2': shape.x2, 'y2': shape.y2, 'thickness': shape.thickness})
+        elif shape.shape_type in ["Plate", "ArbitraryShape", "Arbitrary"]: # Arbitrary for backward compatibility
+             shape_dict['points'] = shape.points
+        return shape_dict
+
+    def _image_to_dict(self, img_obj):
+        """將 DecorativeImage 物件序列化。"""
+        # 圖片本身會被單獨儲存，這裡只儲存其屬性
+        img_filename = f"images/image_{id(img_obj)}.png" # 使用唯一ID命名
+        return {
+            'path': img_filename,
+            'x': img_obj.x, 'y': img_obj.y,
+            'scale': img_obj.scale, 'angle': img_obj.angle,
+            'is_top': img_obj in self.top_images
+        }
+
+    @classmethod
+    def from_dict(cls, data, app_instance, image_map):
+        """從字典和圖片對應表中重建圖層。"""
+        layer = cls(name=data['name'])
+        layer.is_visible.set(data.get('is_visible', True))
+
+        # Shapes
+        for shape_dict in data.get('shapes', []):
+            shape_type = shape_dict.get('shape_type')
+            voltage = shape_dict.get('voltage', 0)
+            shape = None
+            if shape_type == "Needle":
+                shape = Needle(app_instance, shape_dict['x'], shape_dict['y'], voltage, shape_dict['radius'])
+            elif shape_type == "Rod":
+                shape = Rod(app_instance, shape_dict['x1'], shape_dict['y1'], shape_dict['x2'], shape_dict['y2'], voltage, shape_dict['thickness'])
+            elif shape_type == "Plate":
+                # Plate 的 x,y 是中心點，需要從 points 推算或在儲存時加入
+                shape = Plate(app_instance, 0, 0, voltage)
+                shape.points = shape_dict['points']
+            elif shape_type in ["ArbitraryShape", "Arbitrary"]:
+                shape = ArbitraryShape(app_instance, shape_dict['points'], voltage)
+            if shape:
+                layer.shapes.append(shape)
+
+        # Images
+        for img_dict in data.get('images', []):
+            pil_image = image_map.get(img_dict['path'])
+            if pil_image:
+                img_obj = DecorativeImage(app_instance.canvas, img_dict['x'], img_dict['y'], pil_image, app_instance)
+                img_obj.scale = img_dict.get('scale', 1.0)
+                img_obj.angle = img_dict.get('angle', 0.0)
+                layer.images.append(img_obj)
+                if img_dict.get('is_top', False):
+                    layer.top_images.add(img_obj)
+
+        # Parameters and data
+        layer.sim_params.update(data.get('sim_params', {}))
+        layer.last_simulation_data = data.get('last_simulation_data')
+        layer.speed_graph_points = data.get('speed_graph_points', [])
+
+        # Display settings
+        layer.show_conductors.set(data.get('show_conductors', True))
+        layer.show_images.set(data.get('show_images', True))
+        layer.background_color_str.set(data.get('background_color', BACKGROUND_COLOR))
+        layer.is_bg_transparent.set(data.get('is_bg_transparent', False))
+
+        # Export settings
+        layer.export_box = data.get('export_box', {'x': 50, 'y': 50, 'w': 400, 'h': 300})
+        layer.show_export_box.set(data.get('show_export_box', False))
+
+        return layer
+
+# --- 主應用程式 GUI (V12.0 - 圖層系統) ---
+class App(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("進階放電模擬系統 V12.0 - 圖層系統")
+        self.geometry("1200x800")
+
+        # --- 圖層系統核心 ---
+        self.layers = [Layer()]
+        self.active_layer_index = 0
+
+        # --- UI / 互動狀態 (非圖層資料) ---
+        self.selected_item = None
+        self.drag_data = {}
+        self.add_shape_mode = None
+        self.is_creating_rod = False
+        self.is_creating_arbitrary_shape = False
+        self.current_polygon_points = []
+        self.temp_drawing_artifacts = []
+        self.rubber_band_line_id, self.closing_line_id = None, None
+        
+        # --- 動畫/渲染狀態 (非圖層資料) ---
+        self.animation_job = None
+        self.animation_frame_index = 0
+        self.animation_frame_map = [] # 播放時的幀對應表
+
+        # --- 全域設定 ---
+        self.keep_image_frames = tk.BooleanVar(value=False) # 影片匯出後保留圖片
+
+        # --- UI控制元件的參照 ---
+        # 為了讓UI控制元件可以被 update_ui_from_active_layer 方法更新，
+        # 我們需要將它們儲存為 self 的屬性。
+        self.ui_controls = {}
+        self.param_vars = {}
+        self.export_box_vars = {}
+
         self.create_widgets()
-        # 初始更新一次顯示狀態
-        self.update_display()
+        self.update_ui_from_active_layer()
+
+    def get_active_layer(self):
+        """取得當前作用中圖層的實例。"""
+        if not self.layers or self.active_layer_index >= len(self.layers):
+            self.layers = [Layer()]
+            self.active_layer_index = 0
+        return self.layers[self.active_layer_index]
+
+    # --- 圖層管理核心方法 ---
+    def _populate_layer_list(self):
+        """清除並根據 self.layers 重新填充圖層列表UI。"""
+        for widget in self.layer_list_frame.winfo_children():
+            widget.destroy()
+
+        for i, layer in enumerate(self.layers):
+            layer_entry_frame = tk.Frame(self.layer_list_frame, bg=CONTROL_PANEL_BG)
+            if i == self.active_layer_index:
+                layer_entry_frame.config(bg="#cce5ff") # Highlight color for active layer
+
+            layer_entry_frame.pack(fill=tk.X, pady=1)
+
+            # 可見性核取方塊
+            vis_check = tk.Checkbutton(layer_entry_frame, variable=layer.is_visible, bg=layer_entry_frame.cget('bg'), command=self.redraw_canvas)
+            vis_check.pack(side=tk.LEFT)
+
+            # 圖層名稱標籤
+            label = tk.Label(layer_entry_frame, text=layer.name, anchor="w", bg=layer_entry_frame.cget('bg'))
+            label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+            # 綁定點擊事件以選擇圖層
+            # 使用 lambda 捕獲迴圈變數 i
+            select_func = lambda event, index=i: self.select_layer(index)
+            layer_entry_frame.bind("<Button-1>", select_func)
+            vis_check.bind("<Button-1>", select_func)
+            label.bind("<Button-1>", select_func)
+
+    def select_layer(self, index):
+        """選擇一個圖層作為作用中圖層。"""
+        if self.active_layer_index == index:
+            return
+        self.active_layer_index = index
+        self._populate_layer_list() # 重繪列表以更新高亮
+        self.update_ui_from_active_layer()
+
+    def add_layer(self):
+        """新增一個圖層。"""
+        new_layer = Layer()
+        self.layers.append(new_layer)
+        self.select_layer(len(self.layers) - 1)
+
+    def delete_layer(self):
+        """刪除當前選擇的圖層。"""
+        if len(self.layers) <= 1:
+            messagebox.showwarning("操作無效", "必須至少保留一個圖層。")
+            return
+
+        if messagebox.askyesno("確認刪除", f"確定要刪除圖層 '{self.get_active_layer().name}' 嗎？此操作無法復原。"):
+            self.layers.pop(self.active_layer_index)
+            if self.active_layer_index >= len(self.layers):
+                self.active_layer_index = len(self.layers) - 1
+            self._populate_layer_list()
+            self.update_ui_from_active_layer()
+
+    def rename_layer(self):
+        """重新命名作用中圖層。"""
+        active_layer = self.get_active_layer()
+        new_name = simpledialog.askstring("重新命名", "輸入新的圖層名稱:", initialvalue=active_layer.name)
+        if new_name:
+            active_layer.name = new_name
+            self._populate_layer_list()
+
+    def move_layer(self, direction):
+        """上移或下移作用中圖層。"""
+        if not (0 <= self.active_layer_index < len(self.layers)): return
+
+        new_index = self.active_layer_index + direction
+        if not (0 <= new_index < len(self.layers)): return
+
+        self.layers.insert(new_index, self.layers.pop(self.active_layer_index))
+        self.select_layer(new_index)
+        # Redraw is handled by select_layer
+
+    def move_layer_up(self):
+        self.move_layer(-1)
+
+    def move_layer_down(self):
+        self.move_layer(1)
+
+    def update_ui_from_active_layer(self):
+        """根據當前作用中圖層的狀態，更新所有相關的UI控制元件。"""
+        active_layer = self.get_active_layer()
+
+        # 更新顯示設定的 Checkbutton
+        self.ui_controls['show_conductors_chk'].config(variable=active_layer.show_conductors)
+        self.ui_controls['show_images_chk'].config(variable=active_layer.show_images)
+        self.ui_controls['is_bg_transparent_chk'].config(variable=active.is_bg_transparent)
+
+        # 更新背景顏色按鈕和預覽
+        self.ui_controls['bg_color_button'].config(command=lambda: self._choose_main_bg_color())
+        self.ui_controls['bg_preview'].config(bg=active_layer.background_color_str.get())
+
+        # 更新匯出框 Checkbutton 和 Entries
+        self.ui_controls['show_export_box_chk'].config(variable=active_layer.show_export_box)
+        for key, var in self.export_box_vars.items():
+            var.set(str(int(active_layer.export_box[key])))
+
+        # 更新模擬參數的滑塊
+        for key, value in active_layer.sim_params.items():
+            if key in self.param_vars:
+                self.param_vars[key].set(value)
+
+        # 更新電弧顏色預覽
+        self.ui_controls['arc_color_preview'].config(bg=active_layer.sim_params['arc_color'])
+
+        # 更新速率控制圖
+        total_frames = len(active_layer.last_simulation_data) if active_layer.last_simulation_data else 0
+        self.speed_control_graph.reset(total_frames)
+        self.speed_control_graph.set_points(active_layer.speed_graph_points)
+
+        # 觸發一次透明背景按鈕狀態的更新
+        self._on_toggle_transparent_bg()
+
+        # 最後重繪畫布
+        self.redraw_canvas()
 
     def create_widgets(self):
         main_frame = tk.Frame(self)
@@ -1095,10 +1348,31 @@ class App(tk.Tk):
         self.bind_all("<Button-4>", on_mouse_wheel)
         self.bind_all("<Button-5>", on_mouse_wheel)
 
-        self.canvas = tk.Canvas(main_frame, bg=self.background_color_str.get(), highlightthickness=0)
+        self.canvas = tk.Canvas(main_frame, bg=BACKGROUND_COLOR, highlightthickness=0)
         self.canvas.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-        add_frame = tk.LabelFrame(scrollable_frame, text="新增物體", padx=10, pady=10, bg=CONTROL_PANEL_BG)
+        # --- 【新增】圖層管理UI ---
+        layer_frame = tk.LabelFrame(scrollable_frame, text="圖層管理", padx=10, pady=10, bg=CONTROL_PANEL_BG)
+        layer_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        self.layer_list_frame = tk.Frame(layer_frame, bg=CONTROL_PANEL_BG)
+        self.layer_list_frame.pack(fill=tk.X, pady=5)
+
+        layer_buttons_frame = tk.Frame(layer_frame, bg=CONTROL_PANEL_BG)
+        layer_buttons_frame.pack(fill=tk.X, pady=5)
+
+        button_config = {'expand': True, 'fill': tk.X, 'padx': 2}
+        tk.Button(layer_buttons_frame, text="新增", command=self.add_layer).pack(side=tk.LEFT, **button_config)
+        tk.Button(layer_buttons_frame, text="刪除", command=self.delete_layer).pack(side=tk.LEFT, **button_config)
+        tk.Button(layer_buttons_frame, text="命名", command=self.rename_layer).pack(side=tk.LEFT, **button_config)
+        tk.Button(layer_buttons_frame, text="上移", command=self.move_layer_up).pack(side=tk.LEFT, **button_config)
+        tk.Button(layer_buttons_frame, text="下移", command=self.move_layer_down).pack(side=tk.LEFT, **button_config)
+
+        self._populate_layer_list() # 初始填充
+
+        ttk.Separator(scrollable_frame, orient='horizontal').pack(fill='x', pady=10)
+
+        add_frame = tk.LabelFrame(scrollable_frame, text="新增物體 (作用中圖層)", padx=10, pady=10, bg=CONTROL_PANEL_BG)
         add_frame.pack(fill=tk.X, padx=10, pady=10)
         tk.Button(add_frame, text="針頭", command=lambda: self.set_add_mode("Needle")).pack(fill=tk.X)
         tk.Button(add_frame, text="電棒", command=lambda: self.set_add_mode("Rod")).pack(fill=tk.X)
@@ -1107,69 +1381,68 @@ class App(tk.Tk):
         ttk.Separator(add_frame, orient='horizontal').pack(fill='x', pady=5)
         tk.Button(add_frame, text="新增圖片", command=self.add_image).pack(fill=tk.X)
 
-        # --- 【新】顯示設定 ---
-        display_frame = tk.LabelFrame(scrollable_frame, text="顯示設定", padx=10, pady=10, bg=CONTROL_PANEL_BG)
+        display_frame = tk.LabelFrame(scrollable_frame, text="圖層顯示設定", padx=10, pady=10, bg=CONTROL_PANEL_BG)
         display_frame.pack(fill=tk.X, padx=10, pady=10)
-        tk.Checkbutton(display_frame, text="顯示導體", variable=self.show_conductors, command=self.update_display, bg=CONTROL_PANEL_BG).pack(anchor="w")
-        tk.Checkbutton(display_frame, text="顯示圖片", variable=self.show_images, command=self.update_display, bg=CONTROL_PANEL_BG).pack(anchor="w")
-        tk.Checkbutton(display_frame, text="匯出為透明背景", variable=self.is_bg_transparent, command=self._on_toggle_transparent_bg, bg=CONTROL_PANEL_BG).pack(anchor="w")
+
+        self.ui_controls['show_conductors_chk'] = tk.Checkbutton(display_frame, text="顯示導體", command=self.redraw_canvas, bg=CONTROL_PANEL_BG)
+        self.ui_controls['show_conductors_chk'].pack(anchor="w")
+        self.ui_controls['show_images_chk'] = tk.Checkbutton(display_frame, text="顯示圖片", command=self.redraw_canvas, bg=CONTROL_PANEL_BG)
+        self.ui_controls['show_images_chk'].pack(anchor="w")
+        self.ui_controls['is_bg_transparent_chk'] = tk.Checkbutton(display_frame, text="匯出為透明背景", command=self._on_toggle_transparent_bg, bg=CONTROL_PANEL_BG)
+        self.ui_controls['is_bg_transparent_chk'].pack(anchor="w")
 
         bg_frame = tk.Frame(display_frame, bg=CONTROL_PANEL_BG)
         bg_frame.pack(fill='x', pady=(5,0))
-        self.bg_color_button = tk.Button(bg_frame, text="背景顏色", command=self._choose_main_bg_color)
-        self.bg_color_button.pack(side=tk.LEFT)
-        self.bg_preview = tk.Frame(bg_frame, width=24, height=24, bg=self.background_color_str.get(), relief=tk.SUNKEN, borderwidth=1)
-        self.bg_preview.pack(side=tk.LEFT, padx=5)
+        self.ui_controls['bg_color_button'] = tk.Button(bg_frame, text="背景顏色")
+        self.ui_controls['bg_color_button'].pack(side=tk.LEFT)
+        self.ui_controls['bg_preview'] = tk.Frame(bg_frame, width=24, height=24, relief=tk.SUNKEN, borderwidth=1)
+        self.ui_controls['bg_preview'].pack(side=tk.LEFT, padx=5)
 
-        # --- 【新增】匯出區域設定 ---
-        export_frame = tk.LabelFrame(scrollable_frame, text="匯出區域", padx=10, pady=10, bg=CONTROL_PANEL_BG)
+        export_frame = tk.LabelFrame(scrollable_frame, text="圖層匯出區域", padx=10, pady=10, bg=CONTROL_PANEL_BG)
         export_frame.pack(fill=tk.X, padx=10, pady=10)
 
-        tk.Checkbutton(export_frame, text="顯示/啟用匯出框", variable=self.show_export_box, bg=CONTROL_PANEL_BG).pack(anchor="w")
+        self.ui_controls['show_export_box_chk'] = tk.Checkbutton(export_frame, text="顯示/啟用匯出框", command=self.redraw_canvas, bg=CONTROL_PANEL_BG)
+        self.ui_controls['show_export_box_chk'].pack(anchor="w")
 
         entry_frame = tk.Frame(export_frame, bg=CONTROL_PANEL_BG)
         entry_frame.pack(fill=tk.X, pady=5)
-
         labels = ["X:", "Y:", "寬:", "高:"]
         keys = ['x', 'y', 'w', 'h']
         for i, (label, key) in enumerate(zip(labels, keys)):
             tk.Label(entry_frame, text=label, bg=CONTROL_PANEL_BG).grid(row=i//2, column=(i%2)*2, sticky="w", padx=(0, 2))
-            tk.Entry(entry_frame, textvariable=self.export_box_vars[key], width=6).grid(row=i//2, column=(i%2)*2 + 1, sticky="ew", pady=2)
-
+            self.export_box_vars[key] = tk.StringVar()
+            entry = tk.Entry(entry_frame, textvariable=self.export_box_vars[key], width=6)
+            entry.grid(row=i//2, column=(i%2)*2 + 1, sticky="ew", pady=2)
         entry_frame.columnconfigure(1, weight=1)
         entry_frame.columnconfigure(3, weight=1)
-
         tk.Button(export_frame, text="從輸入更新匯出框", command=self._update_export_box_from_entries).pack(fill=tk.X, pady=(5, 0))
         
-        param_frame = tk.LabelFrame(scrollable_frame, text="模擬參數", padx=10, pady=10, bg=CONTROL_PANEL_BG)
+        param_frame = tk.LabelFrame(scrollable_frame, text="圖層模擬參數", padx=10, pady=10, bg=CONTROL_PANEL_BG)
         param_frame.pack(fill=tk.X, padx=10, pady=10)
+
         def add_bar(label, key, frm, from_, to_, resolution, fmt, row):
             tk.Label(frm, text=label, bg=CONTROL_PANEL_BG).grid(row=row, column=0, sticky="w")
-            # 【修改】從 self.sim_params 初始化，確保值被保留
-            var = tk.DoubleVar(value=self.sim_params[key])
-            scale = tk.Scale(frm, variable=var, from_=from_, to=to_, resolution=resolution, orient=tk.HORIZONTAL, length=100, showvalue=0, bg=CONTROL_PANEL_BG)
-            scale.grid(row=row, column=1)
-            val_label = tk.Label(frm, text=fmt.format(self.sim_params[key]), bg=CONTROL_PANEL_BG, width=6, anchor='w')
-            val_label.grid(row=row, column=2)
+            var = tk.DoubleVar() # 變數本身不設定初始值
+            self.param_vars[key] = var
+
             def on_change(val):
-                self.sim_params[key] = float(val)
-                # 【修改】格式化輸出以避免不必要的 .0
+                active_layer = self.get_active_layer()
+                active_layer.sim_params[key] = float(val)
                 if resolution >= 1:
                     val_label.config(text=f"{int(float(val))}")
                 else:
                     val_label.config(text=f"{float(val):.3f}".rstrip('0').rstrip('.'))
-
                 if 'arc' in key or 'glow' in key:
-                    if hasattr(self, '_preview_job'):
-                        self.after_cancel(self._preview_job)
+                    if hasattr(self, '_preview_job'): self.after_cancel(self._preview_job)
                     self._preview_job = self.after(50, self.preview_simulation)
             
-            scale.config(command=on_change)
-            # 【修改】將 scale 和 label 附加到 var 上，以便可以從外部更新
-            var.trace_add("write", lambda *args: on_change(var.get()))
-            setattr(var, 'scale_widget', scale)
-            setattr(var, 'label_widget', val_label)
-            setattr(self, f"var_{key}", var) # 將變數儲存到 self
+            scale = tk.Scale(frm, variable=var, from_=from_, to=to_, resolution=resolution, orient=tk.HORIZONTAL, length=100, showvalue=0, bg=CONTROL_PANEL_BG, command=on_change)
+            scale.grid(row=row, column=1)
+            val_label = tk.Label(frm, text="", bg=CONTROL_PANEL_BG, width=6, anchor='w') # 初始為空
+            val_label.grid(row=row, column=2)
+            # 將UI元件儲存起來以便之後更新
+            self.ui_controls[f'scale_{key}'] = scale
+            self.ui_controls[f'label_{key}'] = val_label
 
         add_bar("觸發閾(V/px)", 'arc_threshold_v_pixel', param_frame, 1, 500, 1, "{:.0f}", 0)
         add_bar("分岔機率", 'fork_chance', param_frame, 0, 0.05, 0.001, "{:.3f}", 1)
@@ -1180,12 +1453,12 @@ class App(tk.Tk):
         add_bar("電場指數", 'field_exponent', param_frame, 1.0, 5.0, 0.1, "{:.1f}", 6)
         add_bar("最終跳躍(px)", 'final_jump_distance', param_frame, 0, 100, 1, "{:.0f}", 7)
 
-        appearance_frame = tk.LabelFrame(scrollable_frame, text="電弧外觀 (可即時預覽)", padx=10, pady=10, bg=CONTROL_PANEL_BG)
+        appearance_frame = tk.LabelFrame(scrollable_frame, text="圖層電弧外觀 (可即時預覽)", padx=10, pady=10, bg=CONTROL_PANEL_BG)
         appearance_frame.pack(fill=tk.X, padx=10, pady=10)
         appearance_frame.columnconfigure(1, weight=1)
         tk.Button(appearance_frame, text="電弧顏色", command=self._choose_arc_color).grid(row=0, column=0, columnspan=2, sticky="ew", pady=2)
-        self.arc_color_preview = tk.Frame(appearance_frame, width=24, height=24, bg=self.sim_params['arc_color'], relief=tk.SUNKEN, borderwidth=1)
-        self.arc_color_preview.grid(row=0, column=2, padx=(5,0), pady=2)
+        self.ui_controls['arc_color_preview'] = tk.Frame(appearance_frame, width=24, height=24, relief=tk.SUNKEN, borderwidth=1)
+        self.ui_controls['arc_color_preview'].grid(row=0, column=2, padx=(5,0), pady=2)
         add_bar("電弧粗細", 'arc_max_thickness', appearance_frame, 1, 20, 0.5, "{:.1f}", 1)
         add_bar("光暈強度", 'arc_glow_strength', appearance_frame, 0.0, 5.0, 0.1, "{:.1f}", 2)
         ttk.Separator(appearance_frame).grid(row=3, columnspan=3, sticky='ew', pady=5)
@@ -1201,18 +1474,17 @@ class App(tk.Tk):
         tk.Button(sim_frame, text="匯出動畫", command=self.dispatch_export_animation).pack(fill=tk.X, pady=3)
         tk.Checkbutton(sim_frame, text="保留圖片檔案", variable=self.keep_image_frames, bg=CONTROL_PANEL_BG).pack(anchor="w", padx=5)
         ttk.Separator(sim_frame, orient='horizontal').pack(fill='x', pady=5)
-        # 【新增】儲存與載入按鈕
         io_frame = tk.Frame(sim_frame, bg=CONTROL_PANEL_BG)
         io_frame.pack(fill=tk.X, pady=2)
         tk.Button(io_frame, text="儲存場景", command=self.save_scene).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 2))
         tk.Button(io_frame, text="載入場景", command=self.load_scene).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(2, 0))
         ttk.Separator(sim_frame, orient='horizontal').pack(fill='x', pady=5)
-        tk.Button(sim_frame, text="清除電弧", command=self.clear_simulation).pack(fill=tk.X, pady=3)
-        tk.Button(sim_frame, text="清除所有", command=self.clear_all).pack(fill=tk.X, pady=3)
+        tk.Button(sim_frame, text="清除圖層電弧", command=self.clear_simulation).pack(fill=tk.X, pady=3)
+        tk.Button(sim_frame, text="清除圖層內容", command=self.clear_active_layer).pack(fill=tk.X, pady=3)
 
-        speed_control_frame = ttk.LabelFrame(scrollable_frame, text="速率曲線控制")
+        speed_control_frame = ttk.LabelFrame(scrollable_frame, text="圖層速率曲線")
         speed_control_frame.pack(fill=tk.X, padx=10, pady=10)
-        self.speed_control_graph = SpeedControlGraph(speed_control_frame, on_change_callback=self.preview_simulation, height=80)
+        self.speed_control_graph = SpeedControlGraph(speed_control_frame, on_change_callback=self.on_speed_graph_change, height=80)
         self.speed_control_graph.pack(fill=tk.X, padx=5, pady=5)
 
         tk.Button(scrollable_frame, text="刪除選取", command=self.delete_selected).pack(side=tk.TOP, fill=tk.X, padx=10, pady=10)
@@ -1222,100 +1494,107 @@ class App(tk.Tk):
         self.canvas.bind("<Motion>", self.on_canvas_motion); self.canvas.bind("<Button-3>", self.on_canvas_right_click)
         self.bind("<Escape>", self.cancel_creation_mode)
 
-    # --- 【新】方法: 更新畫布顯示 (Pillow渲染引擎) ---
-    def _render_scene_to_pillow(self, arc_data_for_frame=None, scale=1.0, for_export=False):
-        """Renders the current scene to a Pillow image, optionally scaled."""
-        if arc_data_for_frame is None:
-            arc_data_for_frame = []
+    def on_speed_graph_change(self):
+        """速率圖變更時的回呼，將點儲存到作用中圖層。"""
+        active_layer = self.get_active_layer()
+        active_layer.speed_graph_points = self.speed_control_graph.get_points()
+        self.preview_simulation()
 
+    # --- 【新】方法: 更新畫布顯示 (Pillow渲染引擎) ---
+    def _render_scene_to_pillow(self, arc_data_for_frame=None, scale=1.0, for_export=False, export_layers=None):
+        """
+        Renders the scene to a Pillow image.
+        - In normal mode, it renders all visible layers. Arc preview is only for the active layer.
+        - In export mode, it renders the layers provided in `export_layers`.
+        """
         w, h = self.canvas.winfo_width(), self.canvas.winfo_height()
         if w < 1 or h < 1: return None
-
         w_scaled, h_scaled = int(w * scale), int(h * scale)
 
-        # 1. Create scene image and draw context
-        if for_export and self.is_bg_transparent.get():
-            bg_color = (0, 0, 0, 0) # RGBA transparent
+        layers_to_render = export_layers if for_export else [l for l in self.layers if l.is_visible.get()]
+
+        first_visible_layer = next((layer for layer in layers_to_render), None)
+        if not first_visible_layer:
+            return Image.new('RGBA', (w_scaled, h_scaled), BACKGROUND_COLOR)
+
+        if for_export and first_visible_layer.is_bg_transparent.get():
+            bg_color = (0, 0, 0, 0)
         else:
-            bg_color = self.background_color_str.get()
+            bg_color = first_visible_layer.background_color_str.get()
 
-        try:
-            scene_image = Image.new('RGBA', (w_scaled, h_scaled), bg_color)
-        except ValueError:
-            # Fallback for invalid color string
-            scene_image = Image.new('RGBA', (w_scaled, h_scaled), BACKGROUND_COLOR)
+        try: final_image = Image.new('RGBA', (w_scaled, h_scaled), bg_color)
+        except ValueError: final_image = Image.new('RGBA', (w_scaled, h_scaled), BACKGROUND_COLOR)
 
-        scene_draw = ImageDraw.Draw(scene_image)
+        for layer in layers_to_render:
+            is_base_layer = (layer == first_visible_layer)
 
-        # 2. Z-ordered drawing of objects
-        bottom_images = [img for img in self.images if img not in self.top_images]
+            # 決定在哪個畫布上繪製
+            if is_base_layer and not (for_export and layer.is_bg_transparent.get()):
+                layer_canvas = final_image
+            else:
+                layer_canvas = Image.new('RGBA', (w_scaled, h_scaled), (0,0,0,0))
 
-        # The individual draw methods will need to be updated to handle the scale argument
-        if self.show_images.get():
-            for image in bottom_images:
-                image.draw_to_pillow(scene_image, scale)
+            layer_draw = ImageDraw.Draw(layer_canvas)
 
-        if self.show_conductors.get():
-            for shape in self.shapes:
-                shape.draw_to_pillow(scene_draw, scale)
+            # 繪製靜態物件
+            bottom_images = [img for img in layer.images if img not in layer.top_images]
+            if layer.show_images.get():
+                for image in bottom_images: image.draw_to_pillow(layer_canvas, scale)
+            if layer.show_conductors.get():
+                for shape in layer.shapes: shape.draw_to_pillow(layer_draw, scale)
+            if layer.show_images.get():
+                for image in layer.top_images: image.draw_to_pillow(layer_canvas, scale)
 
-        if self.show_images.get():
-            for image in self.top_images:
-                image.draw_to_pillow(scene_image, scale)
+            # 繪製電弧 (預覽模式下只繪製作用中圖層的電弧)
+            active_layer = self.get_active_layer()
+            current_arc_data = None
+            if for_export:
+                current_arc_data = arc_data_for_frame.get(layer) if isinstance(arc_data_for_frame, dict) else None
+            elif layer == active_layer:
+                current_arc_data = arc_data_for_frame
 
-        # 3. Render arcs
-        if arc_data_for_frame:
-            glow_layer = Image.new('RGBA', (w_scaled, h_scaled), (0, 0, 0, 0))
-            glow_draw = ImageDraw.Draw(glow_layer)
-            appearance_params = self._get_current_appearance_params()
-            arc_renderer = ArcRenderer(appearance_params)
-            arc_renderer.render_frame_data(arc_data_for_frame, glow_draw, scale)
-            scene_image = Image.alpha_composite(scene_image, glow_layer)
-            scene_draw = ImageDraw.Draw(scene_image)
+            if current_arc_data:
+                glow_layer = Image.new('RGBA', (w_scaled, h_scaled), (0, 0, 0, 0))
+                glow_draw = ImageDraw.Draw(glow_layer)
+                # 電弧外觀總是取自其所屬圖層的參數
+                appearance_params = self._get_layer_appearance_params(layer)
+                arc_renderer = ArcRenderer(appearance_params)
+                arc_renderer.render_frame_data(current_arc_data, glow_draw, scale)
+                layer_canvas = Image.alpha_composite(layer_canvas, glow_layer)
 
-        # 4. Draw export box (only for on-screen display)
-        if self.show_export_box.get() and scale == 1.0:
-            box = self.export_box
-            x1, y1 = box['x'], box['y']
-            x2, y2 = x1 + box['w'], y1 + box['h']
+            if not is_base_layer or (for_export and layer.is_bg_transparent.get()):
+                final_image = Image.alpha_composite(final_image, layer_canvas)
 
-            # To draw with transparency, we create an overlay
-            overlay = Image.new('RGBA', scene_image.size, (0,0,0,0))
-            draw_overlay = ImageDraw.Draw(overlay)
+        # --- 在所有圖層之上繪製UI元素 (僅限非匯出模式) ---
+        if not for_export:
+            final_draw = ImageDraw.Draw(final_image)
+            active_layer = self.get_active_layer()
 
-            fill_color = (255, 255, 0, 30) # Very transparent yellow
-            outline_color = (255, 255, 0, 200) # Solid yellow
+            if active_layer.show_export_box.get() and scale == 1.0:
+                box = active_layer.export_box
+                x1, y1, x2, y2 = box['x'], box['y'], box['x'] + box['w'], box['y'] + box['h']
+                overlay = Image.new('RGBA', final_image.size, (0,0,0,0))
+                draw_overlay = ImageDraw.Draw(overlay)
+                draw_overlay.rectangle([x1, y1, x2, y2], fill=(255, 255, 0, 30), outline=(255, 255, 0, 200), width=1)
+                r = HANDLE_RADIUS
+                handle_x, handle_y = x1 + box['w'], y1 + box['h']
+                draw_overlay.rectangle([handle_x - r, handle_y - r, handle_x + r, handle_y + r], fill=HANDLE_COLOR, outline='white')
+                final_image = Image.alpha_composite(final_image, overlay)
+                final_draw = ImageDraw.Draw(final_image)
 
-            draw_overlay.rectangle([x1, y1, x2, y2], fill=fill_color, outline=outline_color, width=1)
+            if self.selected_item:
+                is_conductor = self.selected_item in active_layer.shapes and active_layer.show_conductors.get()
+                is_image = self.selected_item in active_layer.images and active_layer.show_images.get()
+                if is_conductor or is_image:
+                     self.selected_item.draw_selection_to_pillow(final_draw, scale)
 
-            # Draw resize handle
-            handle_x = x1 + box['w']
-            handle_y = y1 + box['h']
-            r = HANDLE_RADIUS
-            draw_overlay.rectangle([handle_x - r, handle_y - r, handle_x + r, handle_y + r],
-                                 fill=HANDLE_COLOR, outline='white')
-
-            # Composite the overlay onto the scene
-            scene_image = Image.alpha_composite(scene_image, overlay)
-            # We need a new draw context for the composited image
-            scene_draw = ImageDraw.Draw(scene_image)
-
-        # 5. Draw selection outline (only for on-screen display, not for export)
-        if self.selected_item and scale == 1.0:
-            is_conductor = self.selected_item in self.shapes and self.show_conductors.get()
-            is_image = self.selected_item in self.images and self.show_images.get()
-            if is_conductor or is_image:
-                 self.selected_item.draw_selection_to_pillow(scene_draw, scale)
-
-        return scene_image
+        return final_image
 
     def redraw_canvas(self, arc_data_for_frame=None):
         """Redraws the entire canvas using the Pillow off-screen rendering engine."""
-        # On-screen canvas is always rendered at 1x scale
         scene_image = self._render_scene_to_pillow(arc_data_for_frame, scale=1.0)
         if scene_image is None: return
 
-        # Display the final rendered image on the canvas
         self.tk_render_image = ImageTk.PhotoImage(scene_image)
         if not hasattr(self, 'canvas_image_id') or not self.canvas.winfo_exists() or not self.canvas.find_withtag(self.canvas_image_id):
             self.canvas.delete("all")
@@ -1323,87 +1602,73 @@ class App(tk.Tk):
         else:
             self.canvas.itemconfig(self.canvas_image_id, image=self.tk_render_image)
 
-    def update_display(self):
-        # This method now just triggers a full redraw.
-        self.bg_preview.config(bg=self.background_color_str.get())
-        self.redraw_canvas()
-
-    # --- 【新】方法: 選擇主畫布背景顏色 ---
     def _choose_main_bg_color(self):
-        color_code = colorchooser.askcolor(title="選擇背景顏色", initialcolor=self.background_color_str.get())
+        active_layer = self.get_active_layer()
+        color_code = colorchooser.askcolor(title="選擇背景顏色", initialcolor=active_layer.background_color_str.get())
         if color_code and color_code[1]:
-            self.background_color_str.set(color_code[1])
-            self.update_display()
-            # If a simulation exists, re-preview it with the new background
-            if self.last_simulation_data:
-                self.preview_simulation()
+            active_layer.background_color_str.set(color_code[1])
+            self.ui_controls['bg_preview'].config(bg=color_code[1])
+            self.canvas.config(bg=color_code[1])
+            if active_layer.last_simulation_data: self.preview_simulation()
 
     def _on_toggle_transparent_bg(self):
-        """當「匯出為透明背景」核取方塊被點擊時呼叫。"""
-        is_transparent = self.is_bg_transparent.get()
-        if is_transparent:
-            self.bg_color_button.config(state=tk.DISABLED)
-            self.bg_preview.config(bg="#808080") # 使用灰色表示透明/無效狀態
-        else:
-            self.bg_color_button.config(state=tk.NORMAL)
-            self.bg_preview.config(bg=self.background_color_str.get())
+        active_layer = self.get_active_layer()
+        is_transparent = active_layer.is_bg_transparent.get()
+        state = tk.DISABLED if is_transparent else tk.NORMAL
+        self.ui_controls['bg_color_button'].config(state=state)
+        bg = "#808080" if is_transparent else active_layer.background_color_str.get()
+        self.ui_controls['bg_preview'].config(bg=bg)
 
     def _choose_arc_color(self):
-        color_code = colorchooser.askcolor(title="選擇電弧顏色", initialcolor=self.sim_params['arc_color'])
+        active_layer = self.get_active_layer()
+        color_code = colorchooser.askcolor(title="選擇電弧顏色", initialcolor=active_layer.sim_params['arc_color'])
         if color_code and color_code[1]:
-            self.sim_params['arc_color'] = color_code[1]
-            self.arc_color_preview.config(bg=color_code[1])
-            # Re-run preview to show new arc color
+            active_layer.sim_params['arc_color'] = color_code[1]
+            self.ui_controls['arc_color_preview'].config(bg=color_code[1])
             self.preview_simulation()
 
     def _update_export_box_from_entries(self):
+        active_layer = self.get_active_layer()
         try:
             x = int(self.export_box_vars['x'].get())
             y = int(self.export_box_vars['y'].get())
             w = int(self.export_box_vars['w'].get())
             h = int(self.export_box_vars['h'].get())
-
             if w <= 0 or h <= 0:
-                messagebox.showwarning("輸入無效", "寬度和高度必須是正數。")
-                return
-
-            self.export_box = {'x': x, 'y': y, 'w': w, 'h': h}
+                messagebox.showwarning("輸入無效", "寬度和高度必須是正數。"); return
+            active_layer.export_box = {'x': x, 'y': y, 'w': w, 'h': h}
             self.redraw_canvas()
         except ValueError:
             messagebox.showerror("輸入錯誤", "請確保所有匯出區域的欄位都是有效的整數。")
 
     def _update_export_box_entries(self):
-        """Updates the UI Entry widgets from the self.export_box dictionary."""
+        active_layer = self.get_active_layer()
         for key, var in self.export_box_vars.items():
-            var.set(str(int(self.export_box[key])))
+            var.set(str(int(active_layer.export_box[key])))
 
     def _get_export_box_handle_at(self, x, y):
-        """Checks if a click is on a resize handle of the export box."""
-        if not self.show_export_box.get():
-            return None
-        box = self.export_box
+        active_layer = self.get_active_layer()
+        if not active_layer.show_export_box.get(): return None
+        box = active_layer.export_box
         handle_size = HANDLE_RADIUS * 2
-
-        # Bottom-right handle
-        br_x = box['x'] + box['w']
-        br_y = box['y'] + box['h']
+        br_x, br_y = box['x'] + box['w'], box['y'] + box['h']
         if (br_x - handle_size/2 <= x <= br_x + handle_size/2) and \
            (br_y - handle_size/2 <= y <= br_y + handle_size/2):
             return 'br'
-
         return None
 
     def _is_in_export_box(self, x, y):
-        """Checks if a click is inside the export box body."""
-        if not self.show_export_box.get() or self._get_export_box_handle_at(x,y):
+        active_layer = self.get_active_layer()
+        if not active_layer.show_export_box.get() or self._get_export_box_handle_at(x,y):
             return False
-        box = self.export_box
+        box = active_layer.export_box
         return (box['x'] < x < box['x'] + box['w']) and \
                (box['y'] < y < box['y'] + box['h'])
 
     def on_canvas_right_click(self, event):
+        active_layer = self.get_active_layer()
         if self.is_creating_arbitrary_shape: self.cancel_creation_mode(event); return
-        item_found = next((item for item in reversed(self.images) if item.contains(event.x, event.y)), None)
+        item_found = next((item for item in reversed(active_layer.images) if item.contains(event.x, event.y)), None)
         if item_found:
             self.select_item(item_found)
             menu = tk.Menu(self, tearoff=0)
@@ -1440,23 +1705,20 @@ class App(tk.Tk):
             pil_image = Image.open(filepath)
             x, y = self.canvas.winfo_width() / 2, self.canvas.winfo_height() / 2
             image_obj = DecorativeImage(self.canvas, x, y, pil_image, self)
-            self.images.append(image_obj)
+            self.get_active_layer().images.append(image_obj)
             self.select_item(image_obj)
-            self.update_display() # 確保新圖片符合顯示設定
+            self.redraw_canvas()
         except Exception as e: messagebox.showerror("圖片載入失敗", f"無法載入圖片檔案：\n{e}")
 
-    def raise_top_images(self):
-        for img in self.top_images: img.set_layer('front')
-
     def on_canvas_press(self, event):
-        # --- 【新增】匯出框互動邏輯 ---
-        if self.show_export_box.get():
+        active_layer = self.get_active_layer()
+        if active_layer.show_export_box.get():
             handle_type = self._get_export_box_handle_at(event.x, event.y)
             if handle_type:
                 self.drag_data = {'type': 'export_box_resize', 'handle': handle_type, 'start_x': event.x, 'start_y': event.y}
                 return
             if self._is_in_export_box(event.x, event.y):
-                self.drag_data = {'type': 'export_box_move', 'start_x': event.x, 'start_y': event.y, 'orig_box': self.export_box.copy()}
+                self.drag_data = {'type': 'export_box_move', 'start_x': event.x, 'start_y': event.y, 'orig_box': active_layer.export_box.copy()}
                 return
 
         if self.is_creating_arbitrary_shape:
@@ -1473,12 +1735,9 @@ class App(tk.Tk):
             if self.is_creating_rod: self.drag_data = {'x1': event.x, 'y1': event.y, 'line_id': None}
             return
         
-        # 【修改】點選前先確認物件是否可見
         all_items = []
-        if self.show_images.get():
-            all_items.extend(self.images)
-        if self.show_conductors.get():
-            all_items.extend(self.shapes)
+        if active_layer.show_images.get(): all_items.extend(active_layer.images)
+        if active_layer.show_conductors.get(): all_items.extend(active_layer.shapes)
 
         if self.selected_item:
             handle_index = self.selected_item.get_handle_at(event.x, event.y)
@@ -1501,37 +1760,25 @@ class App(tk.Tk):
 
     def on_canvas_drag(self, event):
         drag_type = self.drag_data.get('type')
+        active_layer = self.get_active_layer()
 
-        # --- 【新增】匯出框拖曳/縮放邏輯 ---
         if drag_type == 'export_box_move':
-            dx = event.x - self.drag_data['start_x']
-            dy = event.y - self.drag_data['start_y']
+            dx, dy = event.x - self.drag_data['start_x'], event.y - self.drag_data['start_y']
             orig_box = self.drag_data['orig_box']
-            self.export_box['x'] = orig_box['x'] + dx
-            self.export_box['y'] = orig_box['y'] + dy
+            active_layer.export_box['x'] = orig_box['x'] + dx
+            active_layer.export_box['y'] = orig_box['y'] + dy
             self._update_export_box_entries()
             self.redraw_canvas()
             return
         elif drag_type == 'export_box_resize':
-            dx = event.x - self.drag_data['start_x']
-            dy = event.y - self.drag_data['start_y']
-
-            # For a bottom-right handle
-            self.export_box['w'] += dx
-            self.export_box['h'] += dy
-
-            # Add constraints
-            if self.export_box['w'] < 20: self.export_box['w'] = 20
-            if self.export_box['h'] < 20: self.export_box['h'] = 20
-
-            self.drag_data['start_x'] = event.x
-            self.drag_data['start_y'] = event.y
-
+            dx, dy = event.x - self.drag_data['start_x'], event.y - self.drag_data['start_y']
+            active_layer.export_box['w'] = max(20, active_layer.export_box['w'] + dx)
+            active_layer.export_box['h'] = max(20, active_layer.export_box['h'] + dy)
+            self.drag_data['start_x'], self.drag_data['start_y'] = event.x, event.y
             self._update_export_box_entries()
             self.redraw_canvas()
             return
 
-        # This temporary drawing for rod creation still needs the canvas.
         if self.is_creating_rod and 'x1' in self.drag_data:
             if self.drag_data.get('line_id'): self.canvas.delete(self.drag_data['line_id'])
             self.drag_data['line_id'] = self.canvas.create_line(self.drag_data['x1'], self.drag_data['y1'], event.x, event.y, fill=SELECTED_OUTLINE_COLOR, width=3, dash=(4,4))
@@ -1541,48 +1788,41 @@ class App(tk.Tk):
             item = self.drag_data['item']
             if self.drag_data['type'] == 'body':
                 dx, dy = event.x - self.drag_data['x'], event.y - self.drag_data['y']
-                item.move(dx, dy) # This now triggers a redraw internally
+                item.move(dx, dy)
                 self.drag_data['x'], self.drag_data['y'] = event.x, event.y
             elif self.drag_data['type'] == 'handle': 
-                item.move_handle(self.drag_data['index'], event.x, event.y) # This also triggers a redraw
-                # The live preview of the arc is now implicit, as every change causes a redraw
-                if self.last_simulation_data:
-                    if hasattr(self, '_preview_job'):
-                        self.after_cancel(self._preview_job)
+                item.move_handle(self.drag_data['index'], event.x, event.y)
+                if active_layer.last_simulation_data:
+                    if hasattr(self, '_preview_job'): self.after_cancel(self._preview_job)
                     self._preview_job = self.after(50, self.preview_simulation)
 
     def on_canvas_release(self, event):
-        # --- 【新增】匯出框互動邏輯 ---
-        drag_type = self.drag_data.get('type')
-        if drag_type in ['export_box_move', 'export_box_resize']:
-            self.drag_data.clear()
-            return
+        if self.drag_data.get('type') in ['export_box_move', 'export_box_resize']:
+            self.drag_data.clear(); return
 
         if self.is_creating_arbitrary_shape: return
         self.canvas.config(cursor="")
         if self.add_shape_mode:
             shape = None
-            # Shape constructors now take the app instance 'self'
             if self.add_shape_mode == "Needle": shape = Needle(self, event.x, event.y)
             elif self.add_shape_mode == "Plate": shape = Plate(self, event.x, event.y)
             elif self.is_creating_rod:
                 if self.drag_data.get('line_id'): self.canvas.delete(self.drag_data['line_id'])
                 x1, y1 = self.drag_data['x1'], self.drag_data['y1']
                 if math.hypot(event.x - x1, event.y - y1) > 10: shape = Rod(self, x1, y1, event.x, event.y)
-
             if shape: 
-                self.shapes.append(shape)
+                self.get_active_layer().shapes.append(shape)
                 self.select_item(shape)
             self.add_shape_mode, self.is_creating_rod = None, False
         self.drag_data.clear()
-        self.redraw_canvas() # Redraw after action finishes
+        self.redraw_canvas()
 
     def on_canvas_double_click(self, event):
+        active_layer = self.get_active_layer()
         if self.is_creating_arbitrary_shape: self.finalize_arbitrary_shape(); return
 
-        # The logic to find the item is still valid.
-        if self.show_conductors.get():
-            item_found = next((s for s in reversed(self.shapes) if s.contains(event.x, event.y)), None)
+        if active_layer.show_conductors.get():
+            item_found = next((s for s in reversed(active_layer.shapes) if s.contains(event.x, event.y)), None)
             if item_found and hasattr(item_found, 'voltage'):
                 self.select_item(item_found)
                 ParameterDialog(self, f"設定 {item_found.shape_type} 參數", item_found)
@@ -1590,48 +1830,46 @@ class App(tk.Tk):
     def finalize_arbitrary_shape(self):
         if not self.is_creating_arbitrary_shape or len(self.current_polygon_points) < 3:
             messagebox.showwarning("創建錯誤", "一個有效的封閉導體至少需要3個頂點。"); self.cancel_creation_mode(); return
-
-        # Pass 'self' to the constructor
         shape = ArbitraryShape(self, self.current_polygon_points.copy())
-        self.shapes.append(shape)
+        self.get_active_layer().shapes.append(shape)
         self.cancel_creation_mode()
         self.select_item(shape)
 
     def select_item(self, item):
-        # Selection is now just a state change followed by a redraw.
-        # No more direct canvas manipulation.
         self.selected_item = item
         self.redraw_canvas()
 
     def delete_selected(self):
         if not self.selected_item: return
-
+        active_layer = self.get_active_layer()
         item = self.selected_item
-        if item in self.shapes: self.shapes.remove(item)
-        elif item in self.images:
-            self.images.remove(item)
-            if item in self.top_images: self.top_images.remove(item)
-
-        # Deselect and redraw the canvas to make it disappear.
+        if item in active_layer.shapes: active_layer.shapes.remove(item)
+        elif item in active_layer.images:
+            active_layer.images.remove(item)
+            if item in active_layer.top_images: active_layer.top_images.remove(item)
         self.select_item(None)
 
     def _get_current_appearance_params(self):
-        params = {k: v for k, v in self.sim_params.items() if 'arc' in k or 'glow' in k}
+        return self._get_layer_appearance_params(self.get_active_layer())
+
+    def _get_layer_appearance_params(self, layer):
+        """從指定圖層獲取電弧外觀參數。"""
+        params = {k: v for k, v in layer.sim_params.items() if 'arc' in k or 'glow' in k}
         params['glow_falloff_points'] = [
-            (0.0, 1.0), (0.25, self.sim_params['glow_falloff_1']),
-            (0.5, self.sim_params['glow_falloff_2']), (0.75, self.sim_params['glow_falloff_3']),
-            (1.0, self.sim_params['glow_falloff_4'])]
+            (0.0, 1.0), (0.25, layer.sim_params['glow_falloff_1']),
+            (0.5, layer.sim_params['glow_falloff_2']), (0.75, layer.sim_params['glow_falloff_3']),
+            (1.0, layer.sim_params['glow_falloff_4'])]
         return params
 
     def start_new_simulation(self):
-        # 【修改】執行模擬時，所有UI上的設定值 (sim_params, 顯示與否, 背景色) 都會自然保留
-        # 因為它們是 self 的屬性，這個方法不會重置它們
         self.clear_simulation()
-        if len(self.shapes) < 2: messagebox.showwarning("模擬錯誤", "需要至少兩個物體才能進行模擬。"); return
+        active_layer = self.get_active_layer()
+        if len(active_layer.shapes) < 2:
+            messagebox.showwarning("模擬錯誤", "需要至少兩個物體才能進行模擬。"); return
         
         arc_jobs = []
-        threshold = self.sim_params['arc_threshold_v_pixel']
-        for shape_a, shape_b in itertools.combinations(self.shapes, 2):
+        threshold = active_layer.sim_params['arc_threshold_v_pixel']
+        for shape_a, shape_b in itertools.combinations(active_layer.shapes, 2):
             delta_v = abs(shape_a.voltage - shape_b.voltage)
             center_a, center_b = shape_a.get_center(), shape_b.get_center()
             distance = math.hypot(center_a[0] - center_b[0], center_a[1] - center_b[1])
@@ -1640,734 +1878,369 @@ class App(tk.Tk):
                 arc_jobs.append({'source': source, 'target': target})
         
         if arc_jobs:
-            simulator = Simulator(self.shapes, self.sim_params)
+            simulator = Simulator(active_layer.shapes, active_layer.sim_params)
             canvas_size = (self.canvas.winfo_width(), self.canvas.winfo_height())
-            self.last_simulation_data = simulator.run_simulation(arc_jobs, canvas_size)
-
-            if self.last_simulation_data:
-                self.total_frames = len(self.last_simulation_data)
-                self.speed_control_graph.reset(self.total_frames)
+            active_layer.last_simulation_data = simulator.run_simulation(arc_jobs, canvas_size)
+            self.update_ui_from_active_layer() # 更新UI，特別是速率圖
+            if active_layer.last_simulation_data:
                 self.preview_simulation()
-            else:
-                self.total_frames = 0
-                self.speed_control_graph.reset(0)
         else:
             messagebox.showinfo("模擬資訊", "在目前的佈局和電壓設定下，沒有物體之間的電位梯度超過觸發閾值。")
-            self.total_frames = 0
-            if self.speed_control_graph:
-                self.speed_control_graph.reset(0)
+            active_layer.last_simulation_data = None
+            self.update_ui_from_active_layer()
 
     def preview_simulation(self):
-        if not self.last_simulation_data:
-            self.clear_simulation()
-            return
+        active_layer = self.get_active_layer()
+        if not active_layer.last_simulation_data:
+            self.clear_simulation(); return
 
-        # Cancel any previous animation
-        if self.animation_job:
-            self.after_cancel(self.animation_job)
-            self.animation_job = None
+        if self.animation_job: self.after_cancel(self.animation_job)
+        self.animation_job = None
 
-        points = self.speed_control_graph.get_points()
-        self.animation_frame_map = self._build_frame_map(points, self.total_frames)
+        total_frames = len(active_layer.last_simulation_data)
+        self.animation_frame_map = self._build_frame_map(active_layer.speed_graph_points, total_frames)
         if not self.animation_frame_map:
-            self.redraw_canvas() # Redraw scene without arcs
-            return
+            self.redraw_canvas(); return
 
         self.animation_frame_index = 0
         self.play_simulation_animation()
 
     def play_simulation_animation(self):
-        if self.animation_job:
-            self.after_cancel(self.animation_job)
+        if self.animation_job: self.after_cancel(self.animation_job)
         self.animation_job = None
+        active_layer = self.get_active_layer()
 
-        if self.animation_frame_index >= len(self.animation_frame_map):
-            return # Animation finished
-
+        if self.animation_frame_index >= len(self.animation_frame_map): return
         original_frame_index = self.animation_frame_map[self.animation_frame_index]
 
-        # Get all arc segments up to the current frame to simulate growth
         all_segments_to_render = []
         for i in range(original_frame_index + 1):
-            if i < len(self.last_simulation_data):
-                all_segments_to_render.extend(self.last_simulation_data[i])
+            if i < len(active_layer.last_simulation_data):
+                all_segments_to_render.extend(active_layer.last_simulation_data[i])
 
         self.redraw_canvas(all_segments_to_render)
-
         self.animation_frame_index += 1
         self.animation_job = self.after(15, self.play_simulation_animation)
 
     def clear_simulation(self):
-        if self.animation_job:
-            self.after_cancel(self.animation_job)
-            self.animation_job = None
-
-        # Redrawing the canvas without arc data effectively clears the simulation visuals
-        self.redraw_canvas()
-
-    def clear_all(self):
-        if self.animation_job:
-            self.after_cancel(self.animation_job)
+        if self.animation_job: self.after_cancel(self.animation_job)
         self.animation_job = None
-
-        self.last_simulation_data = None
-        self.select_item(None)
-
-        # The old .deselect() method deleted canvas items, which are no longer used for selection.
-        # We still call it to clear the state, but it won't do much visually.
-        for item in self.shapes + self.images: 
-            item.deselect()
-
-        self.shapes.clear()
-        self.images.clear()
-        self.top_images.clear()
-        
-        # 重置顯示設定
-        self.show_conductors.set(True)
-        self.show_images.set(True)
-        self.background_color_str.set(BACKGROUND_COLOR)
-
-        self.total_frames = 0
-        if self.speed_control_graph:
-            self.speed_control_graph.reset(0)
-
-        # Finally, trigger a redraw of the now-empty canvas
+        active_layer = self.get_active_layer()
+        active_layer.last_simulation_data = None
         self.redraw_canvas()
+
+    def clear_active_layer(self):
+        if self.animation_job: self.after_cancel(self.animation_job)
+        self.animation_job = None
+        active_layer = self.get_active_layer()
+        
+        self.select_item(None)
+        active_layer.shapes.clear()
+        active_layer.images.clear()
+        active_layer.top_images.clear()
+        active_layer.last_simulation_data = None
+        self.update_ui_from_active_layer()
 
     def _create_progress_window(self, title, max_value):
-        """Creates and returns a progress bar window."""
         progress_win = tk.Toplevel(self)
-        progress_win.title(title)
-        progress_win.geometry("300x100")
-        progress_win.resizable(False, False)
-        # Make it modal
-        progress_win.transient(self)
-        progress_win.grab_set()
-
+        progress_win.title(title); progress_win.geometry("300x100")
+        progress_win.resizable(False, False); progress_win.transient(self); progress_win.grab_set()
         tk.Label(progress_win, text="處理中，請稍候...").pack(pady=10)
-
         progress_bar = ttk.Progressbar(progress_win, orient="horizontal", length=280, mode="determinate", maximum=max_value)
         progress_bar.pack(pady=5)
-
         progress_label = tk.Label(progress_win, text=f"0 / {max_value}")
         progress_label.pack()
-
         progress_win.update()
         return progress_win, progress_bar, progress_label
 
     def _create_video_from_frames(self, output_dir, num_frames, video_filename, is_transparent=False):
-        """Runs ffmpeg to create a video from the exported frames."""
-        # video_filename now includes the full path, so we just need the basename for the command
         final_video_name = os.path.basename(video_filename)
-
         if is_transparent:
-            # Command for MOV with transparency using ProRes codec, based on user's detailed parameters
-            ffmpeg_command = [
-                'ffmpeg', '-y',
-                '-framerate', '24',
-                '-start_number', '1',
-                '-i', 'frame_%04d.png',
-                '-vf', 'scale=in_color_matrix=bt709:out_color_matrix=bt709,format=yuva444p10le',
-                '-c:v', 'prores_ks',
-                '-profile:v', '4444',
-                '-pix_fmt', 'yuva444p10le',
-                '-color_range', 'tv',
-                '-colorspace', 'bt709',
-                '-color_primaries', 'bt709',
-                '-color_trc', 'iec61966-2-1',
-                '-frames:v', str(num_frames),
-                final_video_name
-            ]
+            ffmpeg_command = ['ffmpeg','-y','-framerate','24','-start_number','1','-i','frame_%04d.png','-vf','scale=in_color_matrix=bt709:out_color_matrix=bt709,format=yuva444p10le','-c:v','prores_ks','-profile:v','4444','-pix_fmt','yuva444p10le','-color_range','tv','-colorspace','bt709','-color_primaries','bt709','-color_trc','iec61966-2-1','-frames:v',str(num_frames),final_video_name]
         else:
-            # Original command for opaque MP4
-            ffmpeg_command = [
-                'ffmpeg', '-y',
-                '-r', '24',
-                '-start_number', '1',
-                '-i', 'frame_%04d.png',
-                '-pix_fmt', 'yuv420p',
-                '-vf', 'scale=in_color_matrix=bt709:out_color_matrix=bt709',
-                '-frames:v', str(num_frames),
-                '-c:v', 'libx264',
-                '-preset', 'slower',
-                '-color_range', 'tv',
-                '-colorspace', 'bt709',
-                '-color_primaries', 'bt709',
-                '-color_trc', 'iec61966-2-1',
-                '-movflags', 'faststart',
-                final_video_name
-            ]
+            ffmpeg_command = ['ffmpeg','-y','-r','24','-start_number','1','-i','frame_%04d.png','-pix_fmt','yuv420p','-vf','scale=in_color_matrix=bt709:out_color_matrix=bt709','-frames:v',str(num_frames),'-c:v','libx264','-preset','slower','-color_range','tv','-colorspace','bt709','-color_primaries','bt709','-color_trc','iec61966-2-1','-movflags','faststart',final_video_name]
 
-        # Create a simple "Encoding..." window
         encoding_win = tk.Toplevel(self)
-        encoding_win.title("影片編碼中")
-        encoding_win.geometry("350x100")
-        encoding_win.resizable(False, False)
-        encoding_win.transient(self)
-        encoding_win.grab_set()
+        encoding_win.title("影片編碼中"); encoding_win.geometry("350x100")
+        encoding_win.resizable(False, False); encoding_win.transient(self); encoding_win.grab_set()
         tk.Label(encoding_win, text=f"正在使用 FFmpeg 編碼影片...\n這可能需要一些時間，請勿關閉主視窗。").pack(pady=10)
-        # Add a progress bar in indeterminate mode
         progress_bar = ttk.Progressbar(encoding_win, orient="horizontal", length=330, mode="indeterminate")
-        progress_bar.pack(pady=5)
-        progress_bar.start(10) # Start the animation
-        encoding_win.update()
-
+        progress_bar.pack(pady=5); progress_bar.start(10); encoding_win.update()
         try:
-            # Run ffmpeg
-            # Using Popen for non-blocking call might be better for a GUI, but for this task,
-            # we'll stick to the simpler `run` and just show a waiting message.
-            result = subprocess.run(
-                ffmpeg_command,
-                cwd=output_dir,
-                check=True,
-                capture_output=True,
-                text=True,
-                encoding='utf-8', # Explicitly set encoding
-                errors='replace' # Handle potential encoding errors in ffmpeg output
-            )
-            encoding_win.destroy() # Close the encoding window on success
+            result = subprocess.run(ffmpeg_command, cwd=output_dir, check=True, capture_output=True, text=True, encoding='utf-8', errors='replace')
+            encoding_win.destroy()
             messagebox.showinfo("影片建立成功", f"影片 '{final_video_name}' 已成功儲存至:\n{output_dir}")
-
-            # --- 【新增】根據勾選框狀態刪除圖片 ---
             if not self.keep_image_frames.get():
-                # 顯示一個短暫的訊息
                 delete_msg_win = tk.Toplevel(self)
-                delete_msg_win.title("清理中")
-                delete_msg_win.geometry("300x80")
-                delete_msg_win.transient(self)
-                delete_msg_win.grab_set()
+                delete_msg_win.title("清理中"); delete_msg_win.geometry("300x80")
+                delete_msg_win.transient(self); delete_msg_win.grab_set()
                 tk.Label(delete_msg_win, text="正在刪除暫存圖片檔案...").pack(pady=10)
-                self.update_idletasks() # 強制更新UI
-
+                self.update_idletasks()
                 try:
                     for i in range(1, num_frames + 1):
-                        filename = f"frame_{i:04d}.png"
-                        filepath = os.path.join(output_dir, filename)
-                        if os.path.exists(filepath):
-                            os.remove(filepath)
-                    # print(f"已成功刪除 {num_frames} 個圖片檔案。")
-                except Exception as e:
-                    messagebox.showwarning("刪除失敗", f"刪除圖片時發生錯誤：\n{e}")
-                finally:
-                    delete_msg_win.destroy()
-
+                        filepath = os.path.join(output_dir, f"frame_{i:04d}.png")
+                        if os.path.exists(filepath): os.remove(filepath)
+                except Exception as e: messagebox.showwarning("刪除失敗", f"刪除圖片時發生錯誤：\n{e}")
+                finally: delete_msg_win.destroy()
         except FileNotFoundError:
             if encoding_win.winfo_exists(): encoding_win.destroy()
             messagebox.showerror("FFmpeg 錯誤", "找不到 FFmpeg 執行檔。\n請確認 FFmpeg 已安裝並在系統的 PATH 中。")
         except subprocess.CalledProcessError as e:
             if encoding_win.winfo_exists(): encoding_win.destroy()
-            # Create a dedicated window for the detailed error message
             error_win = tk.Toplevel(self)
-            error_win.title("FFmpeg 執行錯誤")
-            error_win.geometry("600x400")
-            error_win.transient(self)
-            error_win.grab_set()
-
-            error_message = f"FFmpeg 執行時發生錯誤 (返回碼 {e.returncode})。\n\n" \
-                            f"指令:\n{' '.join(e.cmd)}\n\n" \
-                            f"FFmpeg 輸出 (Stderr):\n{e.stderr}"
-
-            text_frame = tk.Frame(error_win)
-            text_frame.pack(expand=True, fill="both", padx=5, pady=5)
-
-            text_widget = tk.Text(text_frame, wrap="word", height=15)
-            text_widget.insert("1.0", error_message)
-            text_widget.config(state="disabled")
-
-            scrollbar = tk.Scrollbar(text_frame, command=text_widget.yview)
-            text_widget.config(yscrollcommand=scrollbar.set)
-
-            scrollbar.pack(side="right", fill="y")
-            text_widget.pack(side="left", expand=True, fill="both")
-
+            error_win.title("FFmpeg 執行錯誤"); error_win.geometry("600x400")
+            error_win.transient(self); error_win.grab_set()
+            error_message = f"FFmpeg 執行時發生錯誤 (返回碼 {e.returncode})。\n\n指令:\n{' '.join(e.cmd)}\n\nFFmpeg 輸出 (Stderr):\n{e.stderr}"
+            text_frame = tk.Frame(error_win); text_frame.pack(expand=True, fill="both", padx=5, pady=5)
+            text_widget = tk.Text(text_frame, wrap="word", height=15); text_widget.insert("1.0", error_message); text_widget.config(state="disabled")
+            scrollbar = tk.Scrollbar(text_frame, command=text_widget.yview); text_widget.config(yscrollcommand=scrollbar.set)
+            scrollbar.pack(side="right", fill="y"); text_widget.pack(side="left", expand=True, fill="both")
             tk.Button(error_win, text="關閉", command=error_win.destroy).pack(pady=10)
         except Exception as e:
-            # Catch any other unexpected errors
             if encoding_win.winfo_exists(): encoding_win.destroy()
             messagebox.showerror("未知錯誤", f"處理影片時發生預期外的錯誤:\n{str(e)}")
         finally:
-            # Final check to ensure the encoding window is closed
-            if encoding_win.winfo_exists():
-                encoding_win.destroy()
-
-    def export_image(self, output_dir, video_filepath):
-        """匯出上次模擬的動畫幀序列到一個新資料夾。"""
-        if not self.last_simulation_data:
-            messagebox.showwarning("無資料", "沒有可匯出的模擬資料。請先執行一次模擬。")
-            return
-
-        # --- NEW: Build frame map based on speed curve ---
-        points = self.speed_control_graph.get_points()
-        total_original_frames = len(self.last_simulation_data)
-        frame_map = self._build_frame_map(points, total_original_frames)
-        num_output_frames = len(frame_map)
-
-        if num_output_frames == 0:
-            messagebox.showinfo("資訊", "根據速率曲線，沒有可匯出的幀。")
-            return
-
-        # 1. 自動計算縮放比例以符合 3840x2160 解析度
-        target_width, target_height = 3840, 2160
-        canvas_width = self.canvas.winfo_width()
-        canvas_height = self.canvas.winfo_height()
-
-        if canvas_width == 0 or canvas_height == 0:
-            messagebox.showerror("錯誤", "無法讀取畫布大小。")
-            return
-
-        # 為保持長寬比，取較小的縮放因子
-        scale_w = target_width / canvas_width
-        scale_h = target_height / canvas_height
-        scale = min(scale_w, scale_h)
-
-        if scale <= 0:
-            messagebox.showerror("錯誤", "計算出的縮放比例無效。")
-            return
-
-        # 3. 建立並顯示進度條 (use new frame count)
-        progress_win, progress_bar, progress_label = self._create_progress_window("匯出中...", num_output_frames)
-
-        # --- NEW: Pre-calculate cumulative arc data for all original frames ---
-        all_cumulative_frames = []
-        cumulative_data = []
-        if self.last_simulation_data:
-            for frame_segments in self.last_simulation_data:
-                cumulative_data.extend(frame_segments)
-                all_cumulative_frames.append(list(cumulative_data)) # Make a copy
-
-        # 4. 迴圈匯出每一幀 (using the new frame_map)
-        try:
-            for i, original_frame_index in enumerate(frame_map):
-                # Get the pre-calculated data for the target original frame
-                # Add a check to prevent index out of bounds if frame_map is faulty
-                if original_frame_index >= len(all_cumulative_frames):
-                    print(f"警告: original_frame_index {original_frame_index} 超出範圍，跳過。")
-                    continue
-                arc_data_to_render = all_cumulative_frames[original_frame_index]
-
-                # Render the scene for the current cumulative frame
-                image_to_save = self._render_scene_to_pillow(arc_data_to_render, scale=scale, for_export=True)
-
-                if image_to_save is None:
-                    print(f"警告: 第 {i} 幀 (原始幀 {original_frame_index}) 渲染失敗，跳過。")
-                    continue
-
-                # Define filename and path (using the new sequential index 'i')
-                filename = f"frame_{i+1:04d}.png"
-                filepath = os.path.join(output_dir, filename)
-
-                # Save the image as PNG to preserve transparency
-                image_to_save.save(filepath, 'PNG', dpi=(scale * 72, scale * 72))
-
-                # Update progress bar
-                progress_bar['value'] = i + 1
-                progress_label.config(text=f"{i + 1} / {num_output_frames}")
-                progress_win.update() # Process UI events
-
-            # 5. Destroy the progress window for frames
-            progress_win.destroy()
-
-            # 6. Call ffmpeg to create video (use new frame count)
-            self._create_video_from_frames(output_dir, num_output_frames, video_filepath, self.is_bg_transparent.get())
-
-        except Exception as e:
-            messagebox.showerror("匯出錯誤", f"匯出過程中發生錯誤:\n{e}")
-        finally:
-            # Ensure the progress window is always closed
-            if progress_win.winfo_exists():
-                progress_win.destroy()
-
-    def export_region_as_animation(self, output_dir, video_filepath):
-        """Exports an animation of the area defined by the export box."""
-        if not self.show_export_box.get():
-            messagebox.showwarning("無效操作", "請先勾選 '顯示/啟用匯出框' 並設定您想匯出的區域。")
-            return
-
-        if not self.last_simulation_data:
-            messagebox.showwarning("無資料", "沒有可匯出的模擬資料。請先執行一次模擬以產生畫面。")
-            return
-
-        # --- NEW: Build frame map based on speed curve ---
-        points = self.speed_control_graph.get_points()
-        total_original_frames = len(self.last_simulation_data)
-        frame_map = self._build_frame_map(points, total_original_frames)
-        num_output_frames = len(frame_map)
-
-        if num_output_frames == 0:
-            messagebox.showinfo("資訊", "根據速率曲線，沒有可匯出的幀。")
-            return
-
-        # 1. Get export box dimensions and calculate scale
-        box = self.export_box
-        box_w, box_h = box['w'], box['h']
-        if box_w <= 0 or box_h <= 0:
-            messagebox.showerror("錯誤", "匯出框的寬度和高度必須大於 0。")
-            return
-
-        # Calculate scale to fit the BOX into a target resolution (e.g., 4K)
-        target_width, target_height = 3840, 2160
-        render_scale = min(target_width / box_w, target_height / box_h)
-        if render_scale <= 0:
-            messagebox.showerror("錯誤", "計算出的縮放比例無效。")
-            return
-
-        # 4. Create and show progress bar (use new frame count)
-        progress_win, progress_bar, progress_label = self._create_progress_window("匯出區域動畫中...", num_output_frames)
-
-        # --- NEW: Pre-calculate cumulative arc data ---
-        all_cumulative_frames = []
-        cumulative_data = []
-        if self.last_simulation_data:
-            for frame_segments in self.last_simulation_data:
-                cumulative_data.extend(frame_segments)
-                all_cumulative_frames.append(list(cumulative_data))
-
-        try:
-            # --- NEW: Loop using frame_map ---
-            for i, original_frame_index in enumerate(frame_map):
-                if original_frame_index >= len(all_cumulative_frames):
-                    print(f"警告: original_frame_index {original_frame_index} 超出範圍，跳過。")
-                    continue
-
-                arc_data_to_render = all_cumulative_frames[original_frame_index]
-
-                # Render the entire scene at high resolution for the current frame
-                full_image = self._render_scene_to_pillow(arc_data_to_render, scale=render_scale, for_export=True)
-                if full_image is None:
-                    print(f"警告: 第 {i} 幀 (原始幀 {original_frame_index}) 渲染失敗，跳過。")
-                    continue
-
-                # Define the crop area in scaled coordinates
-                crop_x1 = int(box['x'] * render_scale)
-                crop_y1 = int(box['y'] * render_scale)
-                crop_x2 = int((box['x'] + box['w']) * render_scale)
-                crop_y2 = int((box['y'] + box['h']) * render_scale)
-
-                # Crop the image
-                cropped_image = full_image.crop((crop_x1, crop_y1, crop_x2, crop_y2))
-
-                # Define filename and save
-                filename = f"frame_{i+1:04d}.png"
-                filepath = os.path.join(output_dir, filename)
-                cropped_image.save(filepath, 'PNG', dpi=(300, 300))
-
-                # Update progress bar
-                progress_bar['value'] = i + 1
-                progress_label.config(text=f"{i + 1} / {num_output_frames}")
-                progress_win.update()
-
-            # Destroy the progress window for frames
-            progress_win.destroy()
-
-            # Call ffmpeg to create video (use new frame count)
-            self._create_video_from_frames(output_dir, num_output_frames, video_filepath, self.is_bg_transparent.get())
-
-        except Exception as e:
-            messagebox.showerror("匯出錯誤", f"匯出過程中發生錯誤:\n{e}")
-        finally:
-            # Ensure the progress window is always closed
-            if progress_win.winfo_exists():
-                progress_win.destroy()
+            if encoding_win.winfo_exists(): encoding_win.destroy()
 
     def dispatch_export_animation(self):
-        """
-        Handles the entire export process, including asking for a filename,
-        creating a directory, auto-saving the scene, and calling the
-        appropriate rendering method.
-        """
-        if not self.last_simulation_data:
-            messagebox.showwarning("無資料", "沒有可匯出的模擬資料。請先執行一次模擬。")
+        """處理整個複合動畫匯出流程。"""
+        exportable_layers = [layer for layer in self.layers if layer.is_visible.get() and layer.last_simulation_data]
+        if not exportable_layers:
+            messagebox.showwarning("無資料", "沒有任何可見圖層包含可匯出的模擬資料以供匯出。")
             return
 
-        # 1. Ask user for the desired video file path
-        is_transparent = self.is_bg_transparent.get()
+        # 以第一個可見圖層的設定來決定匯出格式
+        first_layer = next((layer for layer in self.layers if layer.is_visible.get()), self.get_active_layer())
+        is_transparent = first_layer.is_bg_transparent.get()
         default_ext = ".mov" if is_transparent else ".mp4"
         file_types = [("QuickTime Movie", "*.mov"), ("MP4 Video", "*.mp4")] if is_transparent else [("MP4 Video", "*.mp4"), ("QuickTime Movie", "*.mov")]
 
-        video_filepath = filedialog.asksaveasfilename(
-            title="選擇影片儲存路徑與檔名",
-            defaultextension=default_ext,
-            filetypes=file_types
-        )
+        video_filepath = filedialog.asksaveasfilename(title="選擇影片儲存路徑與檔名", defaultextension=default_ext, filetypes=file_types)
+        if not video_filepath: return
 
-        if not video_filepath:
-            return # User cancelled
-
-        # 2. Parse the path to create the output directory and filenames
         try:
             parent_dir = os.path.dirname(video_filepath)
             full_filename = os.path.basename(video_filepath)
             base_filename, _ = os.path.splitext(full_filename)
-
-            # The main output directory will have the same name as the video
             output_dir = os.path.join(parent_dir, base_filename)
             os.makedirs(output_dir, exist_ok=True)
-
-            # The final video will be placed inside this new directory
             final_video_path = os.path.join(output_dir, full_filename)
-
-            # The auto-saved scene file will also be in this directory
             scene_zip_path = os.path.join(output_dir, base_filename + ".zip")
-
-        except OSError as e:
-            messagebox.showerror("建立資料夾失敗", f"無法建立資料夾:\n{output_dir}\n錯誤: {e}")
-            return
         except Exception as e:
-            messagebox.showerror("路徑錯誤", f"處理檔案路徑時發生錯誤:\n{e}")
-            return
+            messagebox.showerror("路徑錯誤", f"處理檔案路徑時發生錯誤:\n{e}"); return
 
-        # 3. Auto-save the scene to the new directory
         self.save_scene(filepath=scene_zip_path)
+        self._export_composite_animation(exportable_layers, output_dir, final_video_path)
 
-        # 4. Dispatch to the correct rendering method
-        if self.show_export_box.get():
-            self.export_region_as_animation(output_dir, final_video_path)
+    def _export_composite_animation(self, export_layers, output_dir, video_filepath):
+        """產生並儲存複合動畫。"""
+        # 1. 計算每個圖層的時間線
+        layer_timelines = {}
+        max_output_frames = 0
+        for layer in export_layers:
+            total_original = len(layer.last_simulation_data)
+            frame_map = self._build_frame_map(layer.speed_graph_points, total_original)
+            layer_timelines[layer] = frame_map
+            if len(frame_map) > max_output_frames:
+                max_output_frames = len(frame_map)
+
+        if max_output_frames == 0:
+            messagebox.showinfo("資訊", "根據速率曲線，沒有可匯出的幀。"); return
+
+        # 2. 預先計算所有圖層的累積電弧數據
+        cumulative_arc_data = {}
+        for layer in export_layers:
+            layer_cumulative = []
+            cumulative_data = []
+            for frame_segments in layer.last_simulation_data:
+                cumulative_data.extend(frame_segments)
+                layer_cumulative.append(list(cumulative_data))
+            cumulative_arc_data[layer] = layer_cumulative
+
+        # 3. 決定渲染比例和是否裁切
+        active_layer = self.get_active_layer()
+        use_export_box = active_layer.show_export_box.get()
+        box = active_layer.export_box
+        target_width, target_height = 3840, 2160
+
+        if use_export_box:
+            if box['w'] <= 0 or box['h'] <= 0:
+                messagebox.showerror("錯誤", "匯出框的寬度和高度必須大於 0。"); return
+            render_scale = min(target_width / box['w'], target_height / box['h'])
         else:
-            self.export_image(output_dir, final_video_path)
+            canvas_width, canvas_height = self.canvas.winfo_width(), self.canvas.winfo_height()
+            if canvas_width == 0 or canvas_height == 0:
+                messagebox.showerror("錯誤", "無法讀取畫布大小。"); return
+            render_scale = min(target_width / canvas_width, target_height / canvas_height)
+
+        if render_scale <= 0:
+            messagebox.showerror("錯誤", "計算出的縮放比例無效。"); return
+
+        # 4. 主渲染迴圈
+        progress_win, progress_bar, progress_label = self._create_progress_window("匯出複合動畫中...", max_output_frames)
+        try:
+            for i in range(max_output_frames):
+                arc_data_for_render = {}
+                for layer in export_layers:
+                    timeline = layer_timelines[layer]
+                    # 如果該圖層動畫較短，則停在最後一幀
+                    frame_map_idx = min(i, len(timeline) - 1)
+                    if frame_map_idx < 0: continue
+
+                    original_frame_idx = timeline[frame_map_idx]
+                    arc_data_for_render[layer] = cumulative_arc_data[layer][original_frame_idx]
+
+                # 渲染完整尺寸的複合圖片
+                image_to_save = self._render_scene_to_pillow(
+                    arc_data_for_frame=arc_data_for_render,
+                    scale=render_scale,
+                    for_export=True,
+                    export_layers=export_layers
+                )
+                if image_to_save is None: continue
+
+                # 如果需要，進行裁切
+                if use_export_box:
+                    crop_x1 = int(box['x'] * render_scale)
+                    crop_y1 = int(box['y'] * render_scale)
+                    crop_x2 = int((box['x'] + box['w']) * render_scale)
+                    crop_y2 = int((box['y'] + box['h']) * render_scale)
+                    image_to_save = image_to_save.crop((crop_x1, crop_y1, crop_x2, crop_y2))
+
+                # 儲存最終幀
+                filepath = os.path.join(output_dir, f"frame_{i+1:04d}.png")
+                image_to_save.save(filepath, 'PNG', dpi=(300, 300))
+
+                progress_bar['value'] = i + 1
+                progress_label.config(text=f"{i + 1} / {max_output_frames}")
+                progress_win.update()
+
+            progress_win.destroy()
+            is_transparent = next((l.is_bg_transparent.get() for l in self.layers if l.is_visible.get()), False)
+            self._create_video_from_frames(output_dir, max_output_frames, video_filepath, is_transparent)
+        except Exception as e:
+            messagebox.showerror("匯出錯誤", f"匯出過程中發生錯誤:\n{e}")
+        finally:
+            if progress_win.winfo_exists(): progress_win.destroy()
 
     def _build_frame_map(self, points, total_original_frames):
-        if not points or total_original_frames == 0: return []
+        if not points or total_original_frames <= 1: return list(range(total_original_frames))
         points.sort(key=lambda p: p[0])
-        def get_speed_at_frame(frame_num):
-            time_percent = frame_num / total_original_frames
-            if time_percent <= points[0][0]: return points[0][1]
-            if time_percent >= points[-1][0]: return points[-1][1]
+        def get_speed_at_percent(p):
+            if p <= points[0][0]: return points[0][1]
+            if p >= points[-1][0]: return points[-1][1]
             for i in range(len(points) - 1):
-                if points[i][0] <= time_percent <= points[i+1][0]:
+                if points[i][0] <= p <= points[i+1][0]:
                     p1, p2 = points[i], points[i+1]
                     break
             else: return 1.0
             time_range = p2[0] - p1[0]
             if time_range == 0: return p1[1]
-            local_percent = (time_percent - p1[0]) / time_range
-            speed_range = p2[1] - p1[1]
-            return p1[1] + local_percent * speed_range
+            local_percent = (p - p1[0]) / time_range
+            return p1[1] + local_percent * (p2[1] - p1[1])
+
         frame_map, time_in_original_frames = [], 0.0
         while time_in_original_frames < total_original_frames:
             frame_map.append(int(round(time_in_original_frames)))
-            speed = get_speed_at_frame(time_in_original_frames)
-            time_in_original_frames += max(0.1, speed)
-        final_map, seen = [], set()
-        for frame in frame_map:
-            if frame < total_original_frames and frame not in seen:
-                final_map.append(frame)
-                seen.add(frame)
-        if total_original_frames > 0 and total_original_frames - 1 not in seen:
+            current_percent = time_in_original_frames / (total_original_frames -1)
+            speed = get_speed_at_percent(current_percent)
+            time_in_original_frames += max(0.1, speed) # 確保動畫前進
+
+        final_map = []
+        if frame_map:
+            final_map.append(frame_map[0])
+            for i in range(1, len(frame_map)):
+                if frame_map[i] > final_map[-1]:
+                    final_map.append(frame_map[i])
+        if total_original_frames > 0 and (not final_map or final_map[-1] < total_original_frames - 1):
             final_map.append(total_original_frames - 1)
-        return final_map
+        return [f for f in final_map if f < total_original_frames]
 
     def save_scene(self, filepath=None):
-        """
-        Saves the current scene to a .zip file.
-        If filepath is provided, it saves directly to that path.
-        Otherwise, it opens a dialog to ask the user for a path.
-        """
+        """將 *所有* 圖層儲存到 .zip 檔案。"""
         if filepath is None:
-            filepath = filedialog.asksaveasfilename(
-                title="儲存場景檔案",
-                defaultextension=".zip",
-                filetypes=[("放電模擬場景", "*.zip"), ("所有檔案", "*.*")]
-            )
+            filepath = filedialog.asksaveasfilename(title="儲存場景檔案", defaultextension=".zip", filetypes=[("放電模擬場景", "*.zip")])
+        if not filepath: return
 
-        if not filepath:
-            return
-
-        scene_data = {}
-
-        # 1. Shapes
-        scene_data['shapes'] = []
-        for shape in self.shapes:
-            shape_dict = {
-                'shape_type': shape.shape_type,
-                'voltage': shape.voltage,
-            }
-            if shape.shape_type == "Needle":
-                shape_dict.update({'x': shape.x, 'y': shape.y, 'radius': shape.radius})
-            elif shape.shape_type == "Rod":
-                shape_dict.update({'x1': shape.x1, 'y1': shape.y1, 'x2': shape.x2, 'y2': shape.y2, 'thickness': shape.thickness})
-            elif shape.shape_type in ["Plate", "ArbitraryShape"]: # Corrected from "Arbitrary"
-                shape_dict['points'] = shape.points
-            scene_data['shapes'].append(shape_dict)
-
-        # 2. Images
-        scene_data['images'] = []
-        image_files = {}
-        for i, img_obj in enumerate(self.images):
-            img_filename = f"images/image_{i}.png"
-            img_dict = {
-                'path': img_filename,
-                'x': img_obj.x,
-                'y': img_obj.y,
-                'scale': img_obj.scale,
-                'angle': img_obj.angle,
-                'is_top': img_obj in self.top_images
-            }
-            scene_data['images'].append(img_dict)
-            image_files[img_filename] = img_obj.pil_image_original
-
-        # 3. Simulation Parameters
-        scene_data['sim_params'] = self.sim_params
-
-        # 4. Display Settings
-        scene_data['display_settings'] = {
-            'show_conductors': self.show_conductors.get(),
-            'show_images': self.show_images.get(),
-            'background_color': self.background_color_str.get(),
-            'is_bg_transparent': self.is_bg_transparent.get(),
-        }
-
-        # 5. Export Box
-        scene_data['export_box'] = {
-            'box': self.export_box,
-            'show': self.show_export_box.get()
-        }
-
-        # 6. Speed Control Graph
-        if self.speed_control_graph:
-            scene_data['speed_graph_points'] = self.speed_control_graph.get_points()
-        else:
-            scene_data['speed_graph_points'] = []
-
-        # 7. Last Simulation Data
-        scene_data['last_simulation_data'] = self.last_simulation_data
-
-        # Now, write everything to a zip file
         try:
+            image_files = {}
+            # 將所有圖層轉換為可序列化的字典
+            scene_data = {'layers': []}
+            for layer in self.layers:
+                layer_dict = layer.to_dict()
+                # 收集圖片以便儲存
+                for i, img_obj in enumerate(layer.images):
+                    img_filename = f"images/image_{id(img_obj)}.png"
+                    image_files[img_filename] = img_obj.pil_image_original
+                    # 更新字典中的路徑
+                    layer_dict['images'][i]['path'] = img_filename
+                scene_data['layers'].append(layer_dict)
+
+            # 全域設定
+            scene_data['global_settings'] = {'keep_image_frames': self.keep_image_frames.get()}
+
             with zipfile.ZipFile(filepath, 'w', zipfile.ZIP_DEFLATED) as zf:
-                # Write scene.json
-                # Using a custom encoder to handle numpy types if they appear
                 class NpEncoder(json.JSONEncoder):
                     def default(self, obj):
-                        if isinstance(obj, np.integer):
-                            return int(obj)
-                        if isinstance(obj, np.floating):
-                            return float(obj)
-                        if isinstance(obj, np.ndarray):
-                            return obj.tolist()
+                        if isinstance(obj, np.integer): return int(obj)
+                        if isinstance(obj, np.floating): return float(obj)
+                        if isinstance(obj, np.ndarray): return obj.tolist()
                         return super(NpEncoder, self).default(obj)
+                zf.writestr('scene.json', json.dumps(scene_data, indent=2, cls=NpEncoder))
 
-                json_str = json.dumps(scene_data, indent=2, cls=NpEncoder)
-                zf.writestr('scene.json', json_str)
-
-                # Write image files
                 for img_path, pil_img in image_files.items():
-                    # Use an in-memory buffer to save the image without creating a temp file on disk
-                    img_buffer = io.BytesIO()
-                    pil_img.save(img_buffer, format="PNG")
-                    img_buffer.seek(0)
-                    zf.writestr(img_path, img_buffer.read())
-
-            # messagebox.showinfo("儲存成功", f"場景已成功儲存至:\n{filepath}")
-
+                    with io.BytesIO() as buffer:
+                        pil_img.save(buffer, format="PNG")
+                        zf.writestr(img_path, buffer.getvalue())
         except Exception as e:
             messagebox.showerror("儲存失敗", f"儲存場景時發生錯誤:\n{e}")
 
     def load_scene(self):
-        filepath = filedialog.askopenfilename(
-            title="載入場景檔案",
-            filetypes=[("放電模擬場景", "*.zip"), ("所有檔案", "*.*")]
-        )
-        if not filepath:
-            return
-
+        """從 .zip 檔案載入所有圖層。"""
+        filepath = filedialog.askopenfilename(title="載入場景檔案", filetypes=[("放電模擬場景", "*.zip")])
+        if not filepath: return
         try:
             with zipfile.ZipFile(filepath, 'r') as zf:
                 if 'scene.json' not in zf.namelist():
-                    messagebox.showerror("載入失敗", "無效的場景檔案：找不到 scene.json。")
-                    return
+                    messagebox.showerror("載入失敗", "無效的場景檔案：找不到 scene.json。"); return
 
-                self.clear_all()
+                # 先清除所有現有狀態
+                self.clear_all_layers()
 
-                with zf.open('scene.json') as f:
-                    scene_data = json.load(f)
+                with zf.open('scene.json') as f: scene_data = json.load(f)
 
-                # 1. Restore Images
-                if 'images' in scene_data:
-                    for img_dict in scene_data['images']:
-                        with zf.open(img_dict['path']) as img_file:
+                # 載入圖片到記憶體
+                image_map = {}
+                for name in zf.namelist():
+                    if name.startswith('images/'):
+                        with zf.open(name) as img_file:
                             img_data = io.BytesIO(img_file.read())
-                            pil_image = Image.open(img_data)
-                            pil_image.load()
+                            pil_image = Image.open(img_data); pil_image.load()
+                            image_map[name] = pil_image
 
-                            img_obj = DecorativeImage(self.canvas, img_dict['x'], img_dict['y'], pil_image, self)
-                            img_obj.scale = img_dict.get('scale', 1.0)
-                            img_obj.angle = img_dict.get('angle', 0.0)
-                            self.images.append(img_obj)
-                            if img_dict.get('is_top', False):
-                                self.top_images.add(img_obj)
+                # 重建圖層
+                self.layers = [Layer.from_dict(ld, self, image_map) for ld in scene_data.get('layers', [])]
+                if not self.layers: self.layers = [Layer()] # 確保至少有一個圖層
+                self.active_layer_index = 0
 
-                # 2. Restore Shapes
-                if 'shapes' in scene_data:
-                    for shape_dict in scene_data['shapes']:
-                        shape_type = shape_dict['shape_type']
-                        voltage = shape_dict.get('voltage', 0)
-                        shape = None
-                        if shape_type == "Needle":
-                            shape = Needle(self, shape_dict['x'], shape_dict['y'], voltage, shape_dict['radius'])
-                        elif shape_type == "Rod":
-                            shape = Rod(self, shape_dict['x1'], shape_dict['y1'], shape_dict['x2'], shape_dict['y2'], voltage, shape_dict['thickness'])
-                        elif shape_type == "Plate":
-                            shape = Plate(self, 0, 0, voltage)
-                            shape.points = shape_dict['points']
-                        elif shape_type == "ArbitraryShape":
-                            shape = ArbitraryShape(self, shape_dict['points'], voltage)
+                # 載入全域設定
+                global_settings = scene_data.get('global_settings', {})
+                self.keep_image_frames.set(global_settings.get('keep_image_frames', False))
 
-                        if shape:
-                            self.shapes.append(shape)
-
-                # 3. Restore Simulation Parameters
-                if 'sim_params' in scene_data:
-                    self.sim_params.update(scene_data['sim_params'])
-                    for key, value in self.sim_params.items():
-                        var_name = f"var_{key}"
-                        if hasattr(self, var_name):
-                            getattr(self, var_name).set(value)
-                    if 'arc_color' in self.sim_params:
-                        self.arc_color_preview.config(bg=self.sim_params['arc_color'])
-
-                # 4. Restore Display Settings
-                if 'display_settings' in scene_data:
-                    settings = scene_data['display_settings']
-                    self.show_conductors.set(settings.get('show_conductors', True))
-                    self.show_images.set(settings.get('show_images', True))
-                    self.background_color_str.set(settings.get('background_color', BACKGROUND_COLOR))
-                    self.is_bg_transparent.set(settings.get('is_bg_transparent', False))
-                    self._on_toggle_transparent_bg()
-
-                # 5. Restore Export Box
-                if 'export_box' in scene_data:
-                    self.export_box = scene_data['export_box'].get('box', {'x': 50, 'y': 50, 'w': 400, 'h': 300})
-                    self.show_export_box.set(scene_data['export_box'].get('show', False))
-                    self._update_export_box_entries()
-
-                # Restore simulation data *before* speed graph to set total_frames
-                self.last_simulation_data = scene_data.get('last_simulation_data', None)
-                if self.last_simulation_data:
-                    self.total_frames = len(self.last_simulation_data)
-                else:
-                    self.total_frames = 0
-
-                # 6. Restore Speed Control Graph (now that total_frames is known)
-                if self.speed_control_graph:
-                    self.speed_control_graph.reset(self.total_frames)
-                    if 'speed_graph_points' in scene_data:
-                        self.speed_control_graph.set_points(scene_data['speed_graph_points'])
-
-                # 7. Final Redraw and Preview
-                if self.last_simulation_data:
-                    self.preview_simulation()
-                else:
-                    self.redraw_canvas()
-
-        except FileNotFoundError:
-            messagebox.showerror("載入失敗", f"檔案不存在: {filepath}")
-        except zipfile.BadZipFile:
-            messagebox.showerror("載入失敗", "檔案不是一個有效的 ZIP 壓縮檔。")
-        except json.JSONDecodeError:
-            messagebox.showerror("載入失敗", "場景檔案中的 scene.json 格式錯誤或已損壞。")
+                # 更新UI以反映第一個圖層的狀態
+                self.update_ui_from_active_layer()
         except Exception as e:
             messagebox.showerror("載入失敗", f"載入場景時發生未預期的錯誤:\n{e}")
-            self.clear_all()
+            self.clear_all_layers()
+
+    def clear_all_layers(self):
+        """清除所有圖層並重設為單一乾淨圖層。"""
+        if self.animation_job: self.after_cancel(self.animation_job)
+        self.animation_job = None
+        self.select_item(None)
+        self.layers = [Layer()]
+        self.active_layer_index = 0
+        self.update_ui_from_active_layer()
 
 
 if __name__ == "__main__":
