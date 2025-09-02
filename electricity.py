@@ -1287,7 +1287,7 @@ class App(tk.Tk):
         # 更新顯示設定的 Checkbutton
         self.ui_controls['show_conductors_chk'].config(variable=active_layer.show_conductors)
         self.ui_controls['show_images_chk'].config(variable=active_layer.show_images)
-        self.ui_controls['is_bg_transparent_chk'].config(variable=active.is_bg_transparent)
+        self.ui_controls['is_bg_transparent_chk'].config(variable=active_layer.is_bg_transparent)
 
         # 更新背景顏色按鈕和預覽
         self.ui_controls['bg_color_button'].config(command=lambda: self._choose_main_bg_color())
