@@ -1879,6 +1879,7 @@ class App(tk.Tk):
         
         if arc_jobs:
             simulator = Simulator(active_layer.shapes, active_layer.sim_params)
+            self.update_idletasks() # Ensure canvas dimensions are updated
             canvas_size = (self.canvas.winfo_width(), self.canvas.winfo_height())
             active_layer.last_simulation_data = simulator.run_simulation(arc_jobs, canvas_size)
             self.update_ui_from_active_layer() # 更新UI，特別是速率圖
