@@ -1,0 +1,4 @@
+This is a simple text file.
+It is used for testing the markitdown conversion.
+- List item 1
+- List item 2
