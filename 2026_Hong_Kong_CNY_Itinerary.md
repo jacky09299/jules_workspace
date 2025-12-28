@@ -88,7 +88,7 @@
     *   **內容**：初三是「赤口」，傳統上大家都會去轉風車改運。
     *   *備註*：若人潮排到廟外，建議在門口拍照感受氣氛即可，不用強求入內。
 *   **17:30｜晚餐：陳根記 (Chan Kun Kee)**
-    *   **地點**：沙田石門京瑞廣場2期 [Google Map](https://www.google.com/maps/search/Chan+Kun+Kee+Shek+Mun)
+    *   **地點**：沙田石門京瑞廣場2期 (Kings Wing Plaza 2, Shek Mun) [Google Map](https://www.google.com/maps/search/Chan+Kun+Kee+Shek+Mun)
     *   **交通**：從車公廟搭計程車 (約 15 分鐘)。
     *   **為何選這裡**：這是香港最傳奇的「大排檔」，數年前搬入室內，保留了**Wasabi 手撕雞**、**孜然一字骨**等名菜，但環境變得**乾淨、有冷氣、坐得舒服**，非常適合帶長輩體驗「道地」但「不髒亂」的晚餐。
 *   **20:00｜回程**
@@ -133,7 +133,7 @@
 *   **09:30｜出發前往市區**
     *   **交通**：飯店穿梭巴士 → 港鐵 **東涌站** → **香港站** (約 35 分鐘)。
 *   **10:30｜早午茶：蓮香居 (Lin Heung Kui)**
-    *   **地點**：上環德輔道西 [Google Map](https://www.google.com/maps/search/Lin+Heung+Kui)
+    *   **地點**：上環德輔道西 40-50 號 [Google Map](https://www.google.com/maps/search/Lin+Heung+Kui)
     *   **交通**：出香港站後，直接轉 **計程車** 直達門口 (約 $40 HKD)，省去走路。
     *   **體驗**：香港少數僅存的 **手推車點心**。體驗「找位子、看點心車、蓋印章」的傳統流程。
     *   **必點**：豬潤燒賣、馬拉糕、蓮蓉包。
@@ -162,7 +162,7 @@
 *   **12:30｜前往西九文化區**
     *   **交通**：港鐵 **東涌站** → **九龍站**。
 *   **13:00｜午餐：FAM 囍公館**
-    *   **地點**：西九文化區藝術公園 [Google Map](https://www.google.com/maps/search/FAM+West+Kowloon)
+    *   **地點**：西九文化區藝術公園 (Art Park) [Google Map](https://www.google.com/maps/search/FAM+West+Kowloon)
     *   **特色**：面對維港草地，提供精緻且色彩繽紛的手工點心，環境非常舒適悠閒。
 *   **14:30｜M+ 博物館 (或香港故宮)**
     *   **地點**：[M+ Museum](https://www.google.com/maps/search/M+Museum)
@@ -173,7 +173,7 @@
     *   **交通**：從西九龍搭計程車至 **尖沙咀天星碼頭**。
     *   **體驗**：搭乘天星小輪前往中環/灣仔，再搭回來，或者單程體驗。這是被《國家地理雜誌》列為「人生必遊 50 個景點」之一的體驗，船費便宜但景色無價。
 *   **18:30｜惜別晚餐：避風塘興記 (Hing Kee)**
-    *   **地點**：尖沙咀/佐敦 [Google Map](https://www.google.com/maps/search/Hing+Kee+Typhoon+Shelter)
+    *   **地點**：尖沙咀彌敦道 180 號寶華商業大廈 1 樓 (佐敦站/尖沙咀站之間) [Google Map](https://www.google.com/maps/search/Hing+Kee+Typhoon+Shelter+Jordan)
     *   **特色**：這家是避風塘炒蟹的始祖級名店。
     *   **必點**：**古法避風塘炒蟹** (金蒜極香)、**燒鴨河粉** (湯頭濃郁)。這是最道地的香港味道，為旅程畫下完美句點。
 *   **20:30｜回程**
