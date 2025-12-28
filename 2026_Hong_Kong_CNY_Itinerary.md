@@ -41,7 +41,7 @@
 ## 🧨 Day 1：2026/02/18 (週三，年初二)｜抵達與維港煙花
 **今日目標：優雅地欣賞香港最擁擠的盛事**
 
-![Hong Kong SkyCity Marriott Hotel](https://upload.wikimedia.org/wikipedia/commons/0/0c/Hong_Kong_SkyCity_Marriott_Hotel.jpg)
+![Hong Kong SkyCity Marriott Hotel](https://upload.wikimedia.org/wikipedia/commons/thumb/0/0c/Hong_Kong_SkyCity_Marriott_Hotel.jpg/800px-Hong_Kong_SkyCity_Marriott_Hotel.jpg)
 *香港天際萬豪酒店 (外觀)*
 
 *   **13:00｜抵達香港天際萬豪酒店**
@@ -55,7 +55,7 @@
         3.  *全程約需 60-70 分鐘*。
         *   *備註*：初二下午尖沙咀會實施封路，計程車難以進入核心區，地鐵是最可靠的選擇。
 
-![K11 Musea](https://upload.wikimedia.org/wikipedia/commons/1/1c/K11_Mall_Exterior.jpg)
+![K11 Musea](https://upload.wikimedia.org/wikipedia/commons/thumb/1/1c/K11_Mall_Exterior.jpg/800px-K11_Mall_Exterior.jpg)
 *K11 Musea 藝術商場*
 
 *   **17:30｜K11 Musea & 星光大道漫步**
@@ -67,7 +67,7 @@
         *   **The Lobby Lounge (香港麗晶酒店)**：貼近海面，整面落地窗。
     *   **重點**：請務必預訂「窗邊位置」或「煙花套餐」。這筆預算是為了買「不用人擠人」的尊榮體驗。
 
-![Victoria Harbour Night View](https://upload.wikimedia.org/wikipedia/commons/0/06/Hong_Kong_Banner.jpg)
+![Victoria Harbour Night View](https://upload.wikimedia.org/wikipedia/commons/thumb/0/06/Hong_Kong_Banner.jpg/800px-Hong_Kong_Banner.jpg)
 *維多利亞港夜景*
 
 *   **20:00｜維多利亞港煙花匯演**
@@ -88,7 +88,7 @@
     *   *時間*：約 40-45 分鐘。
     *   *車資*：約 $300-$350 HKD (四人分攤非常划算，且爸媽不用轉車)。
 
-![Sha Tin Racecourse](https://upload.wikimedia.org/wikipedia/commons/8/84/Sha_Tin_Racecourse_Overview_2009.jpg)
+![Sha Tin Racecourse](https://upload.wikimedia.org/wikipedia/commons/thumb/8/84/Sha_Tin_Racecourse_Overview_2009.jpg/800px-Sha_Tin_Racecourse_Overview_2009.jpg)
 *沙田馬場全景*
 
 *   **12:30｜沙田馬場 (農曆新年賽馬日)**
@@ -98,7 +98,7 @@
         2.  **體驗**：進入會員席區域，視野清楚且有座位。感受現場幾萬人吶喊的震撼。
         3.  **投注**：教爸媽買一張 $20 的「獨贏」或「位置」，體驗氣氛即可。
 
-![Che Kung Temple](https://upload.wikimedia.org/wikipedia/commons/c/c5/Che_Kung_Temple_in_Sha_Tin_%281497534586%29.jpg)
+![Che Kung Temple](https://upload.wikimedia.org/wikipedia/commons/thumb/9/9d/Che_Kung_Temple_in_Sha_Tin_%281497534586%29.jpg/800px-Che_Kung_Temple_in_Sha_Tin_%281497534586%29.jpg)
 *沙田車公廟*
 
 *   **15:30｜車公廟 (視情況而定)**
@@ -111,7 +111,7 @@
     *   **交通**：從車公廟搭計程車 (約 15 分鐘)。
     *   **為何選這裡**：這是香港最傳奇的「大排檔」，數年前搬入室內，保留了**Wasabi 手撕雞**、**孜然一字骨**等名菜，但環境變得**乾淨、有冷氣、坐得舒服**，非常適合帶長輩體驗「道地」但「不髒亂」的晚餐。
 
-![Dai Pai Dong](https://upload.wikimedia.org/wikipedia/commons/d/d3/Dai_pai_dong_Central.jpg)
+![Dai Pai Dong](https://upload.wikimedia.org/wikipedia/commons/thumb/d/d3/Dai_pai_dong_Central.jpg/800px-Dai_pai_dong_Central.jpg)
 *香港傳統大排檔氛圍 (示意圖)*
 
 *   **20:00｜回程**
@@ -127,7 +127,7 @@
     *   *時間*：約 30-40 分鐘。
     *   *重要*：千萬不要搭 11 號巴士，山路極度蜿蜒，長輩容易暈車。
 
-![Tai O Stilt Houses](https://upload.wikimedia.org/wikipedia/commons/c/c6/Tai_O_stilt_houses.jpg)
+![Tai O Stilt Houses](https://upload.wikimedia.org/wikipedia/commons/thumb/c/c6/Tai_O_stilt_houses.jpg/800px-Tai_O_stilt_houses.jpg)
 *大澳漁村棚屋*
 
 *   **11:00｜東方威尼斯：大澳漁村**
@@ -135,7 +135,7 @@
         1.  **小艇遊**：一抵達先去橋頭搭小艇 (每人約 $30)，穿梭水上棚屋，並出海尋找中華白海豚。
         2.  **逛街市**：買碳烤魷魚乾、大澳蝦醬。
 
-![Tai O Heritage Hotel](https://upload.wikimedia.org/wikipedia/commons/9/90/Tai_O_Heritage_Hotel%2C_Main_Building_%28Hong_Kong%29.jpg)
+![Tai O Heritage Hotel](https://upload.wikimedia.org/wikipedia/commons/thumb/9/90/Tai_O_Heritage_Hotel%2C_Main_Building_%28Hong_Kong%29.jpg/800px-Tai_O_Heritage_Hotel%2C_Main_Building_%28Hong_Kong%29.jpg)
 *大澳文物酒店 (舊大澳警署)*
 
 *   **12:30｜午餐：大澳文物酒店 (Tai O Lookout)**
@@ -145,7 +145,7 @@
 *   **14:30｜前往昂坪大佛**
     *   **交通**：搭乘 **21號巴士** (路程較短) 或 **藍色計程車** 上山至 **昂坪市集**。
 
-![Tian Tan Buddha](https://upload.wikimedia.org/wikipedia/commons/1/13/Tian_Tan_Buddha_by_Beria.jpg)
+![Tian Tan Buddha](https://upload.wikimedia.org/wikipedia/commons/thumb/1/13/Tian_Tan_Buddha_by_Beria.jpg/800px-Tian_Tan_Buddha_by_Beria.jpg)
 *天壇大佛*
 
 *   **15:00｜天壇大佛 & 心經簡林**
@@ -153,7 +153,7 @@
         *   **大佛**：在廣場參拜即可，若爸媽膝蓋不好，不建議爬 268 階樓梯上去。
         *   **心經簡林**：若體力允許，步行 15 分鐘至後方的木柱群，環境清幽靈氣逼人。
 
-![Ngong Ping 360](https://upload.wikimedia.org/wikipedia/commons/4/49/NP360_Standard_Cabin.jpg)
+![Ngong Ping 360](https://upload.wikimedia.org/wikipedia/commons/thumb/4/49/NP360_Standard_Cabin.jpg/800px-NP360_Standard_Cabin.jpg)
 *昂坪 360 纜車*
 
 *   **16:30｜昂坪 360 纜車 (下山)**
@@ -177,14 +177,14 @@
     *   **體驗**：香港少數僅存的 **手推車點心**。體驗「找位子、看點心車、蓋印章」的傳統流程。
     *   **必點**：豬潤燒賣、馬拉糕、蓮蓉包。
 
-![Man Mo Temple](https://upload.wikimedia.org/wikipedia/commons/1/19/Man_Mo_Temple_in_Hong_Kong_%286847509486%29.jpg)
+![Man Mo Temple](https://upload.wikimedia.org/wikipedia/commons/thumb/1/19/Man_Mo_Temple_in_Hong_Kong_%286847509486%29.jpg/800px-Man_Mo_Temple_in_Hong_Kong_%286847509486%29.jpg)
 *上環文武廟內部*
 
 *   **12:30｜海味街 & 文武廟**
     *   **步行**：沿著德輔道西 (海味街) 散步，空氣中瀰漫著鹹魚與乾貨的氣味，這是最真實的香港年味。
     *   **移動**：搭計程車上山至 **荷李活道文武廟** (避開上坡樓梯)。
 
-![Tai Kwun](https://upload.wikimedia.org/wikipedia/commons/d/dd/Tai_Kwun_JC_Contemporary_201806.jpg)
+![Tai Kwun](https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Tai_Kwun_JC_Contemporary_201806.jpg/800px-Tai_Kwun_JC_Contemporary_201806.jpg)
 *大館 (Tai Kwun)*
 
 *   **14:00｜PMQ & 大館 (Tai Kwun)**
@@ -194,7 +194,7 @@
 *   **16:30｜下午茶/休息**
     *   在大館內的 **Madame Fù** 吃點甜點，休息一下腳力。
 
-![Peking Duck](https://upload.wikimedia.org/wikipedia/commons/f/fa/Peking_Duck.jpg)
+![Peking Duck](https://upload.wikimedia.org/wikipedia/commons/thumb/f/fa/Peking_Duck.jpg/800px-Peking_Duck.jpg)
 *經典烤鴨 (示意圖)*
 
 *   **18:30｜晚餐：經典粵菜巔峰**
@@ -216,7 +216,7 @@
     *   **地點**：西九文化區藝術公園 (Art Park) [Google Map](https://www.google.com/maps/search/FAM+West+Kowloon)
     *   **特色**：面對維港草地，提供精緻且色彩繽紛的手工點心，環境非常舒適悠閒。
 
-![M+ Museum](https://upload.wikimedia.org/wikipedia/commons/1/1e/WKCD_M%2B%2C_2021.11.jpg)
+![M+ Museum](https://upload.wikimedia.org/wikipedia/commons/thumb/1/1e/WKCD_M%2B%2C_2021.11.jpg/800px-WKCD_M%2B%2C_2021.11.jpg)
 *M+ 博物館外觀*
 
 *   **14:30｜M+ 博物館 (或香港故宮)**
@@ -225,14 +225,14 @@
         *   **M+**：亞洲首間全球性當代視覺文化博物館。空間極其寬敞，逛起來完全不累，且有很多休息長椅。
         *   **重點**：別忘了去 M+ 的露台花園，那是拍維港對岸中環天際線最好的角度之一。
 
-![Star Ferry Pier](https://upload.wikimedia.org/wikipedia/commons/b/b1/Star_Ferry_Pier%2C_Central.JPG)
+![Star Ferry Pier](https://upload.wikimedia.org/wikipedia/commons/thumb/b/b1/Star_Ferry_Pier%2C_Central.JPG/800px-Star_Ferry_Pier%2C_Central.JPG)
 *中環天星碼頭 (示意圖)*
 
 *   **17:00｜天星小輪 (Star Ferry)**
     *   **交通**：從西九龍搭計程車至 **尖沙咀天星碼頭**。
     *   **體驗**：搭乘天星小輪前往中環/灣仔，再搭回來，或者單程體驗。這是被《國家地理雜誌》列為「人生必遊 50 個景點」之一的體驗，船費便宜但景色無價。
 
-![Chilli Crab](https://upload.wikimedia.org/wikipedia/commons/c/c6/Chilli_crab-02.jpg)
+![Chilli Crab](https://upload.wikimedia.org/wikipedia/commons/thumb/c/c6/Chilli_crab-02.jpg/800px-Chilli_crab-02.jpg)
 *避風塘/辣椒炒蟹 (示意圖)*
 
 *   **18:30｜惜別晚餐：避風塘興記 (Hing Kee)**
