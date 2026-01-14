@@ -1,0 +1,125 @@
+{
+  "nodes": [
+    {
+      "id": "node1",
+      "type": "InputImageNode",
+      "title": "輸入圖片 (Input Image)",
+      "x": 50,
+      "y": 50,
+      "parameters": {
+        "file_path": "example_map.png"
+      },
+      "inputs": [],
+      "outputs": ["out1"]
+    },
+    {
+      "id": "node2",
+      "type": "ImageToGridNode",
+      "title": "圖片轉方格 (Img->Grid)",
+      "x": 300,
+      "y": 50,
+      "parameters": {
+        "threshold": 128,
+        "resize_width": 50,
+        "resize_height": 50
+      },
+      "inputs": ["in_img"],
+      "outputs": ["out_grid"]
+    },
+    {
+      "id": "node3",
+      "type": "AStarNode",
+      "title": "A* 路徑搜尋 (A-Star)",
+      "x": 550,
+      "y": 50,
+      "parameters": {
+        "start_x": 0,
+        "start_y": 0,
+        "end_x": 49,
+        "end_y": 49,
+        "allow_diagonal": false
+      },
+      "inputs": ["in_grid", "in_start", "in_end"],
+      "outputs": ["out_path"]
+    },
+    {
+      "id": "node4",
+      "type": "PathOverlayNode",
+      "title": "路徑疊圖 (Overlay)",
+      "x": 550,
+      "y": 300,
+      "parameters": {
+        "color": "red",
+        "width": 2,
+        "scale_x": 1.0,
+        "scale_y": 1.0
+      },
+      "inputs": ["in_img", "in_path"],
+      "outputs": ["out_img"]
+    },
+    {
+      "id": "node5",
+      "type": "SaveNode",
+      "title": "儲存路徑 (Save Path)",
+      "x": 800,
+      "y": 50,
+      "parameters": {
+        "output_path": "path_result.txt",
+        "format": "TXT"
+      },
+      "inputs": ["in_data"],
+      "outputs": []
+    },
+    {
+      "id": "node6",
+      "type": "SaveNode",
+      "title": "儲存結果圖 (Save Img)",
+      "x": 800,
+      "y": 300,
+      "parameters": {
+        "output_path": "result_map.png",
+        "format": "PNG"
+      },
+      "inputs": ["in_data"],
+      "outputs": []
+    }
+  ],
+  "connections": [
+    {
+      "source_node_id": "node1",
+      "source_port_name": "Image",
+      "target_node_id": "node2",
+      "target_port_name": "Image"
+    },
+    {
+      "source_node_id": "node1",
+      "source_port_name": "Image",
+      "target_node_id": "node4",
+      "target_port_name": "Image"
+    },
+    {
+      "source_node_id": "node2",
+      "source_port_name": "Grid",
+      "target_node_id": "node3",
+      "target_port_name": "Grid"
+    },
+    {
+      "source_node_id": "node3",
+      "source_port_name": "Path",
+      "target_node_id": "node4",
+      "target_port_name": "Path"
+    },
+    {
+      "source_node_id": "node3",
+      "source_port_name": "Path",
+      "target_node_id": "node5",
+      "target_port_name": "Data"
+    },
+    {
+      "source_node_id": "node4",
+      "source_port_name": "Image",
+      "target_node_id": "node6",
+      "target_port_name": "Data"
+    }
+  ]
+}
