@@ -1,6 +1,7 @@
 import tkinter as tk
 from src.core.node_base import Node, Port
 from src.core.datatypes import DataType
+from src.nodes.groups import LoopGroupNode
 
 class NodeWidget:
     """
@@ -18,6 +19,11 @@ class NodeWidget:
         self.item_height = 20
         self.height = self.calculate_height()
 
+        # Handle Group Node Sizing
+        if isinstance(self.node, LoopGroupNode):
+            self.width = self.node.width
+            self.height = self.node.height
+
         self.main_id = None
         self.header_id = None
         self.title_id = None
@@ -26,6 +32,8 @@ class NodeWidget:
         self.draw()
 
     def calculate_height(self):
+        if isinstance(self.node, LoopGroupNode):
+            return self.node.height
         max_ports = max(len(self.node.inputs), len(self.node.outputs))
         return self.header_height + (max_ports * self.item_height) + 10
 
@@ -34,20 +42,39 @@ class NodeWidget:
         self.canvas.delete(self.node.id)
         self.port_ids.clear()
 
+        is_group = isinstance(self.node, LoopGroupNode)
+
         # Recalculate height (in case inputs changed)
         self.height = self.calculate_height()
 
-        # Body
-        self.main_id = self.canvas.create_rectangle(
-            self.x, self.y, self.x + self.width, self.y + self.height,
-            fill="#3c3c3c", outline="#111111", width=2, tags=("node", self.node.id)
-        )
+        # Draw Group vs Standard Node
+        if is_group:
+            # Draw dashed background container
+            self.main_id = self.canvas.create_rectangle(
+                self.x, self.y, self.x + self.width, self.y + self.height,
+                fill="", outline="#555555", width=2, dash=(5, 5), tags=("node", self.node.id)
+            )
+            # Send to back so children are visible
+            self.canvas.tag_lower(self.main_id)
 
-        # Header
-        self.header_id = self.canvas.create_rectangle(
-            self.x, self.y, self.x + self.width, self.y + self.header_height,
-            fill="#555555", outline="#111111", width=1, tags=("node", self.node.id)
-        )
+            # Header logic mostly same but maybe transparent?
+            # Standard header for ports
+            self.header_id = self.canvas.create_rectangle(
+                self.x, self.y, self.x + self.width, self.y + self.header_height,
+                fill="#444444", outline="#111111", width=1, tags=("node", self.node.id)
+            )
+        else:
+            # Standard Body
+            self.main_id = self.canvas.create_rectangle(
+                self.x, self.y, self.x + self.width, self.y + self.height,
+                fill="#3c3c3c", outline="#111111", width=2, tags=("node", self.node.id)
+            )
+
+            # Header
+            self.header_id = self.canvas.create_rectangle(
+                self.x, self.y, self.x + self.width, self.y + self.header_height,
+                fill="#555555", outline="#111111", width=1, tags=("node", self.node.id)
+            )
 
         # Title
         self.title_id = self.canvas.create_text(

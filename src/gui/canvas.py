@@ -28,34 +28,23 @@ class NodeCanvas(tk.Canvas):
         from src.nodes.outputs import DataViewerNode
         from src.nodes.algorithms import ImageToGridNode, AStarNode, PathOverlayNode
         from src.nodes.execution import SaveNode, CustomScriptNode
-        from src.nodes.loops import LoopStartNode, LoopEndNode
+        from src.nodes.groups import LoopGroupNode
+        from src.nodes.proxies import LoopInputProxyNode, LoopOutputProxyNode
         from src.nodes.utils import StringFormatNode, MergeFilesNode
         from src.core.node_base import Node
         from src.core.datatypes import DataType
 
         node = None
-        if class_name == "InputImageNode":
-            node = InputImageNode()
-        elif class_name == "DataViewerNode":
-            node = DataViewerNode()
-        elif class_name == "ImageToGridNode":
-            node = ImageToGridNode()
-        elif class_name == "AStarNode":
-            node = AStarNode()
-        elif class_name == "PathOverlayNode":
-            node = PathOverlayNode()
-        elif class_name == "SaveNode":
-            node = SaveNode()
-        elif class_name == "CustomScriptNode":
-            node = CustomScriptNode()
-        elif class_name == "LoopStartNode":
-            node = LoopStartNode()
-        elif class_name == "LoopEndNode":
-            node = LoopEndNode()
-        elif class_name == "StringFormatNode":
-            node = StringFormatNode()
-        elif class_name == "MergeFilesNode":
-            node = MergeFilesNode()
+        if class_name == "InputImageNode": node = InputImageNode()
+        elif class_name == "DataViewerNode": node = DataViewerNode()
+        elif class_name == "ImageToGridNode": node = ImageToGridNode()
+        elif class_name == "AStarNode": node = AStarNode()
+        elif class_name == "PathOverlayNode": node = PathOverlayNode()
+        elif class_name == "SaveNode": node = SaveNode()
+        elif class_name == "CustomScriptNode": node = CustomScriptNode()
+        elif class_name == "LoopGroupNode": node = LoopGroupNode()
+        elif class_name == "StringFormatNode": node = StringFormatNode()
+        elif class_name == "MergeFilesNode": node = MergeFilesNode()
         else:
             # Fallback mock for not-yet-implemented nodes
             node = Node(title=class_name)
@@ -65,6 +54,37 @@ class NodeCanvas(tk.Canvas):
         # Create Widget
         widget = NodeWidget(self, node, 50, 50)
         self.nodes.append(widget)
+
+        # Special initialization for LoopGroupNode
+        if isinstance(node, LoopGroupNode):
+            # Create internal proxy nodes
+            input_proxy = LoopInputProxyNode()
+            output_proxy = LoopOutputProxyNode()
+
+            # Position them inside the group (relative to group pos 50,50)
+            # Group default size is 400x300
+            # Input proxy on left, Output proxy on right
+
+            # Since we just added widget at 50,50
+            # Proxies at 70, 100 (relative to canvas 0,0) -> 20, 50 rel to group?
+            # Wait, NodeWidget takes absolute coordinates.
+            # Group is at 50,50.
+
+            input_widget = NodeWidget(self, input_proxy, 70, 100)
+            output_widget = NodeWidget(self, output_proxy, 300, 100)
+
+            self.nodes.append(input_widget)
+            self.nodes.append(output_widget)
+
+            # Link to Group
+            node.add_child(input_proxy)
+            node.add_child(output_proxy)
+            node.internal_input_node_id = input_proxy.id
+            node.internal_output_node_id = output_proxy.id
+
+            # Visual Grouping (Parenting) is handled by GroupWidget Logic (TODO)
+            # For now, we just place them.
+            # Ideally, dragging the group should drag these.
 
     def on_click(self, event):
         self.focus_set()
@@ -116,11 +136,30 @@ class NodeCanvas(tk.Canvas):
 
             # Find the widget and move it
             node_id = self.drag_data["item"]
+
+            # Identify if it is a Group Node
+            # If so, we need to move children too.
+            # But wait, GroupNode logic isn't fully in NodeWidget yet.
+            # We can check the node type here.
+
+            moving_widget = None
             for nw in self.nodes:
                 if nw.node.id == node_id:
-                    nw.move(dx, dy)
-                    self.redraw_connections(nw) # Update lines attached to this node
+                    moving_widget = nw
                     break
+
+            if moving_widget:
+                # Move the node
+                moving_widget.move(dx, dy)
+                self.redraw_connections(moving_widget)
+
+                # If it's a Group, move children
+                if hasattr(moving_widget.node, "children_ids"):
+                    for child_id in moving_widget.node.children_ids:
+                        for nw in self.nodes:
+                            if nw.node.id == child_id:
+                                nw.move(dx, dy)
+                                self.redraw_connections(nw)
 
             self.drag_data["x"] = event.x
             self.drag_data["y"] = event.y
@@ -143,6 +182,37 @@ class NodeCanvas(tk.Canvas):
 
             if end_port_id and end_port_id != self.drag_data["start_port_id"]:
                 self.create_connection(self.drag_data["start_port_id"], end_port_id)
+
+        elif self.drag_data["type"] == "move":
+             # Check for Parenting (Drag Node INTO Group)
+             node_id = self.drag_data["item"]
+             # We need to find if this node was dropped inside a GroupNode
+             # Find widget
+             moving_widget = None
+             for nw in self.nodes:
+                 if nw.node.id == node_id:
+                     moving_widget = nw
+                     break
+
+             if moving_widget:
+                 # Check collision with other nodes (Groups)
+                 # Center of moving node
+                 cx = moving_widget.x + moving_widget.width/2
+                 cy = moving_widget.y + moving_widget.height/2
+
+                 for potential_group in self.nodes:
+                     if potential_group == moving_widget: continue
+                     if hasattr(potential_group.node, "children_ids"): # Is Group
+                         if potential_group.contains(cx, cy):
+                             # Parent it!
+                             potential_group.node.add_child(moving_widget.node)
+                             print(f"Parented {moving_widget.node.title} to {potential_group.node.title}")
+                             # Remove from old group?
+                             # For now, assume single parent.
+                             # We should check if it was in another group.
+                             for other in self.nodes:
+                                 if hasattr(other.node, "children_ids") and other != potential_group:
+                                     other.node.remove_child(moving_widget.node.id)
 
         self.drag_data["type"] = None
         self.drag_data["item"] = None
@@ -177,6 +247,11 @@ class NodeCanvas(tk.Canvas):
                 break
 
         if not nw_to_remove: return
+
+        # Check if undeletable
+        if nw_to_remove.node.parameters.get("_no_delete"):
+            print("Cannot delete this node (System Node)")
+            return
 
         # 2. Remove Connections attached to this node
         # We need to copy the list because we'll be modifying it

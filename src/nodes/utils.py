@@ -8,7 +8,7 @@ class StringFormatNode(Node):
         self.add_input("Base String", DataType.TEXT)
         self.add_output("Result", DataType.TEXT)
         self.parameters = {
-            "format": "{}_processed", # Python format string. {} is input.
+            "format": "{}", # Changed default to pure pass-through
             "append": "",
             "prepend": ""
         }

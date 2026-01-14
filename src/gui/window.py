@@ -59,8 +59,7 @@ class MainWindow(tk.Tk):
         # List of available nodes
         node_types = [
             ("輸入: 圖片 (Input Image)", "InputImageNode"),
-            ("循環: 開始 (Loop Start)", "LoopStartNode"),
-            ("循環: 結束 (Loop End)", "LoopEndNode"),
+            ("循環: 群組框 (Loop Box)", "LoopGroupNode"),
             ("處理: 文字 (String Fmt)", "StringFormatNode"),
             ("轉換: 圖片轉二值 (Img->Grid)", "ImageToGridNode"),
             ("演算法: A* (A-Star)", "AStarNode"),

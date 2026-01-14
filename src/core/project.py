@@ -6,7 +6,8 @@ from src.nodes.inputs import InputImageNode
 from src.nodes.outputs import DataViewerNode
 from src.nodes.algorithms import ImageToGridNode, AStarNode, PathOverlayNode
 from src.nodes.execution import SaveNode, CustomScriptNode
-from src.nodes.loops import LoopStartNode, LoopEndNode
+from src.nodes.groups import LoopGroupNode
+from src.nodes.proxies import LoopInputProxyNode, LoopOutputProxyNode
 from src.nodes.utils import StringFormatNode, MergeFilesNode
 
 class ProjectManager:
@@ -82,31 +83,22 @@ class ProjectManager:
             node.title = n_data["title"]
             node.parameters = n_data.get("parameters", {})
 
-            # Restore Exposed Parameters
-            # The 'param_inputs' field maps param_name -> input_index
-            # We must recreate these ports before mapping ports!
-            param_inputs = n_data.get("param_inputs", {})
-            # We must recreate them in the correct order or verify they match?
-            # 'param_inputs' doesn't guarantee order if dict, but indices matter.
-            # Node.expose_parameter appends.
-            # So if we iterate param_inputs sorted by index, we can recreate.
+            # Restore Group specific fields
+            if hasattr(node, "children_ids") and "children_ids" in n_data:
+                node.children_ids = n_data["children_ids"]
+                node.width = n_data.get("width", 400)
+                node.height = n_data.get("height", 300)
 
-            # Sort by index
+            if hasattr(node, "internal_input_node_id"):
+                node.internal_input_node_id = n_data.get("internal_input_node_id")
+                node.internal_output_node_id = n_data.get("internal_output_node_id")
+
+            # Restore Exposed Parameters
+            param_inputs = n_data.get("param_inputs", {})
             sorted_params = sorted(param_inputs.items(), key=lambda item: item[1])
             for param_name, idx in sorted_params:
-                # We simply call expose_parameter.
-                # Note: node.expose_parameter() appends and stores the index.
-                # If we assume indices are contiguous at the end of input list.
-                # However, deserialized data might have gaps if inputs were removed?
-                # But our current system only appends.
-
-                # Check if already exposed (some nodes might do it in init?)
                 if param_name not in node.param_inputs:
-                     # expose it
                      node.expose_parameter(param_name)
-                     # Verify index?
-                     if node.param_inputs[param_name] != idx:
-                         print(f"Warning: Restored param '{param_name}' index mismatch. Expected {idx}, got {node.param_inputs[param_name]}")
 
             x = n_data.get("ui_x", 0)
             y = n_data.get("ui_y", 0)
@@ -163,8 +155,9 @@ class ProjectManager:
         if class_name == "PathOverlayNode": return PathOverlayNode()
         if class_name == "SaveNode": return SaveNode()
         if class_name == "CustomScriptNode": return CustomScriptNode()
-        if class_name == "LoopStartNode": return LoopStartNode()
-        if class_name == "LoopEndNode": return LoopEndNode()
+        if class_name == "LoopGroupNode": return LoopGroupNode()
+        if class_name == "LoopInputProxyNode": return LoopInputProxyNode()
+        if class_name == "LoopOutputProxyNode": return LoopOutputProxyNode()
         if class_name == "StringFormatNode": return StringFormatNode()
         if class_name == "MergeFilesNode": return MergeFilesNode()
         return None
