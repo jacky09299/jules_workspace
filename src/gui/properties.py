@@ -124,27 +124,8 @@ class PropertyPanel(tk.Frame):
         # Refresh UI
         self.show_properties(self.current_node_widget)
         # Refresh Node Widget on Canvas (to show new ports)
-        # We need a callback to the main window or direct access
-        # For MVP, we assume NodeWidget can redraw itself if we trigger it,
-        # but NodeWidget is managed by Canvas.
-        # Ideally, we should trigger a redraw event.
-        if hasattr(self.current_node_widget, "redraw_needed"):
-            self.current_node_widget.redraw_needed()
-        else:
-            # Fallback: Just print, user might need to re-select or move node?
-            # Actually, `NodeWidget` in `src/gui/node_widget.py` draws in `__init__`.
-            # It doesn't have a redraw method.
-            # We should add one or recreate the widget.
-            # Let's rely on the Canvas re-creating it or update it.
-            pass
-
-        # Hack: Access canvas from widget and trigger redraw
-        try:
-             # This is tricky without reference to the Graph controller.
-             # But we can try to find the parent.
-             pass
-        except:
-            pass
+        if hasattr(self.current_node_widget, "update_visuals"):
+            self.current_node_widget.update_visuals()
 
     def clear(self):
         for widget in self.content_frame.winfo_children():

@@ -28,6 +28,8 @@ class NodeCanvas(tk.Canvas):
         from src.nodes.outputs import DataViewerNode
         from src.nodes.algorithms import ImageToGridNode, AStarNode, PathOverlayNode
         from src.nodes.execution import SaveNode, CustomScriptNode
+        from src.nodes.loops import LoopStartNode, LoopEndNode
+        from src.nodes.utils import StringFormatNode, MergeFilesNode
         from src.core.node_base import Node
         from src.core.datatypes import DataType
 
@@ -46,6 +48,14 @@ class NodeCanvas(tk.Canvas):
             node = SaveNode()
         elif class_name == "CustomScriptNode":
             node = CustomScriptNode()
+        elif class_name == "LoopStartNode":
+            node = LoopStartNode()
+        elif class_name == "LoopEndNode":
+            node = LoopEndNode()
+        elif class_name == "StringFormatNode":
+            node = StringFormatNode()
+        elif class_name == "MergeFilesNode":
+            node = MergeFilesNode()
         else:
             # Fallback mock for not-yet-implemented nodes
             node = Node(title=class_name)

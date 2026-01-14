@@ -57,13 +57,16 @@ class MainWindow(tk.Tk):
         label.pack(pady=10)
 
         # List of available nodes
-        # In a real app, this would be dynamic. For now, hardcode buttons.
         node_types = [
             ("輸入: 圖片 (Input Image)", "InputImageNode"),
+            ("循環: 開始 (Loop Start)", "LoopStartNode"),
+            ("循環: 結束 (Loop End)", "LoopEndNode"),
+            ("處理: 文字 (String Fmt)", "StringFormatNode"),
             ("轉換: 圖片轉二值 (Img->Grid)", "ImageToGridNode"),
             ("演算法: A* (A-Star)", "AStarNode"),
             ("轉換: 路徑疊圖 (Path Overlay)", "PathOverlayNode"),
             ("執行: 儲存 (Save)", "SaveNode"),
+            ("執行: 合併 (Merge)", "MergeFilesNode"),
             ("檢視: 資料 (Viewer)", "DataViewerNode"),
             ("自訂: Python 腳本 (Script)", "CustomScriptNode")
         ]
