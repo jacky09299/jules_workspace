@@ -22,13 +22,8 @@ pip install -r requirements.txt
 在專案根目錄下執行：
 
 ```bash
-# Linux / macOS
-export PYTHONPATH=$PYTHONPATH:.
-python src/main.py
-
-# Windows (PowerShell)
-$env:PYTHONPATH="."
-python src/main.py
+# Linux / macOS / Windows
+python main.py
 ```
 
 ## 快速上手

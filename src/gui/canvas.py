@@ -20,6 +20,8 @@ class NodeCanvas(tk.Canvas):
         self.bind("<B1-Motion>", self.on_drag)
         self.bind("<ButtonRelease-1>", self.on_release)
         self.bind("<Button-3>", self.on_right_click) # Context menu or properties
+        self.bind("<Delete>", self.on_delete_key)
+        self.focus_set()
 
     def add_node_by_name(self, class_name):
         from src.nodes.inputs import InputImageNode
@@ -55,6 +57,7 @@ class NodeCanvas(tk.Canvas):
         self.nodes.append(widget)
 
     def on_click(self, event):
+        self.focus_set()
         # Check if clicked on a port
         # find_overlapping is better
         items = self.find_overlapping(event.x-2, event.y-2, event.x+2, event.y+2)
@@ -135,7 +138,68 @@ class NodeCanvas(tk.Canvas):
         self.drag_data["item"] = None
 
     def on_right_click(self, event):
-        pass
+        # Identify if we clicked on a node
+        items = self.find_overlapping(event.x-2, event.y-2, event.x+2, event.y+2)
+        node_tag = None
+        for item in items:
+            tags = self.gettags(item)
+            if "node" in tags:
+                node_tag = tags[1]
+                break
+
+        if node_tag:
+            menu = tk.Menu(self, tearoff=0)
+            menu.add_command(label="刪除 (Delete)", command=lambda: self.delete_node_by_id(node_tag))
+            menu.post(event.x_root, event.y_root)
+
+    def on_delete_key(self, event):
+        # Delete currently selected node (active in property panel)
+        current_node = self.main_window.property_panel.current_node
+        if current_node:
+            self.delete_node_by_id(current_node.id)
+
+    def delete_node_by_id(self, node_id):
+        # 1. Find NodeWidget
+        nw_to_remove = None
+        for nw in self.nodes:
+            if nw.node.id == node_id:
+                nw_to_remove = nw
+                break
+
+        if not nw_to_remove: return
+
+        # 2. Remove Connections attached to this node
+        # We need to copy the list because we'll be modifying it
+        conns_to_remove = []
+        for conn in self.connections:
+            p1 = conn["p1"]
+            p2 = conn["p2"]
+            if p1.node.id == node_id or p2.node.id == node_id:
+                conns_to_remove.append(conn)
+
+        for conn in conns_to_remove:
+            # Visual Remove
+            self.delete(conn["line_id"])
+            self.connections.remove(conn)
+            # Logical Disconnect
+            conn["p1"].disconnect(conn["p2"])
+
+        # 3. Remove Node Visuals
+        # All items with tag node_id are parts of the node
+        self.delete(node_id) # Using the tag to delete all components (rect, text, ports)
+        # However, ports have their own unique IDs as tags too, but also share the node_id tag
+        # Wait, in NodeWidget.draw(), I used tags=("node", self.node.id)
+        # And for ports: tags=("port", port.id, self.node.id)
+        # So deleting by tag self.node.id should clear everything.
+
+        # 4. Remove from list
+        self.nodes.remove(nw_to_remove)
+
+        # 5. Clear Property Panel if it was selected
+        if self.main_window.property_panel.current_node == nw_to_remove.node:
+             self.main_window.property_panel.clear()
+
+        print(f"Deleted node {node_id}")
 
     def create_connection(self, port_id_1, port_id_2):
         # Logic to connect two ports

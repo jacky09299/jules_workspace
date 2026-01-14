@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, filedialog
 
 class PropertyPanel(tk.Frame):
     def __init__(self, master):
@@ -36,11 +36,38 @@ class PropertyPanel(tk.Frame):
 
             tk.Label(frame, text=key, bg="#e0e0e0").pack(side=tk.LEFT)
 
-            # Simple entry for everything for now
-            # We can improve this with type checking later (e.g., Checkbox for bool)
+            # Determine if this needs a file picker
+            # Convention: keys ending with "_path" get a file picker
+            is_file_path = key.endswith("_path")
+
             var = tk.StringVar(value=str(value))
-            entry = tk.Entry(frame, textvariable=var)
-            entry.pack(side=tk.RIGHT, expand=True, fill=tk.X)
+
+            if is_file_path:
+                entry = tk.Entry(frame, textvariable=var)
+                entry.pack(side=tk.LEFT, expand=True, fill=tk.X)
+
+                def pick_file(v=var, k=key):
+                    # Check if saving or opening based on key name or node type?
+                    # Heuristic: "output_path" is usually save, "file_path" is open
+                    if "output" in k:
+                        # Save
+                        # Determine extension from context? Hard to know here.
+                        # Just generic save for now or context aware?
+                        # SaveNode uses "format" param but we don't have easy access to other params here linearly.
+                        path = filedialog.asksaveasfilename()
+                    else:
+                        # Open
+                        path = filedialog.askopenfilename()
+
+                    if path:
+                        v.set(path)
+                        update_param(k, v)
+
+                btn = tk.Button(frame, text="...", command=pick_file, width=3)
+                btn.pack(side=tk.RIGHT)
+            else:
+                entry = tk.Entry(frame, textvariable=var)
+                entry.pack(side=tk.RIGHT, expand=True, fill=tk.X)
 
             # Callback to update node parameter
             def update_param(name=key, v=var):
