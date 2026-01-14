@@ -30,6 +30,13 @@ class NodeWidget:
         return self.header_height + (max_ports * self.item_height) + 10
 
     def draw(self):
+        # Clear existing
+        self.canvas.delete(self.node.id)
+        self.port_ids.clear()
+
+        # Recalculate height (in case inputs changed)
+        self.height = self.calculate_height()
+
         # Body
         self.main_id = self.canvas.create_rectangle(
             self.x, self.y, self.x + self.width, self.y + self.height,
@@ -102,15 +109,14 @@ class NodeWidget:
         self.canvas.move(self.node.id, dx, dy) # Move all items with tag=node.id
 
         # Update port coordinates
-        # We need to recalculate them because canvas.move moves visual items, but we store logical x/y
-        # actually, canvas.move is relative.
-        # Let's just update the logical port positions.
-        # Re-calculating logic is tedious, better to just shift them.
         for port in self.node.inputs + self.node.outputs:
-             # This is a bit hacky, normally we'd query the canvas coords
-             # But we can just track it manually
              port.x += dx
              port.y += dy
+
+    def update_visuals(self):
+        """Called when node structure changes (e.g. added inputs)"""
+        # Redraw everything
+        self.draw()
 
     def contains(self, x, y):
         # Helper to check if click is inside (basic AABB)

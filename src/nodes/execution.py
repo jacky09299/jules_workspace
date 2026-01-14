@@ -15,13 +15,18 @@ class SaveNode(Node):
 
     def execute(self):
         data = self.get_input_value(0)
-        path = self.parameters["output_path"]
-        fmt = self.parameters["format"].upper()
+        # Use get_parameter to support input ports
+        path = self.get_parameter("output_path")
+        fmt = self.get_parameter("format")
+        if fmt:
+            fmt = str(fmt).upper()
+        else:
+             fmt = "TXT"
 
         if data is None:
             print("SaveNode: No data to save.")
-            import tkinter.messagebox
-            tkinter.messagebox.showwarning("Save Warning", "No data to save. Check upstream connections.")
+            # Only show warning in GUI mode, tricky to detect here.
+            # print("SaveNode: No data to save. Check upstream connections.")
             return
 
         try:
@@ -51,8 +56,11 @@ class SaveNode(Node):
         except Exception as e:
             msg = f"Failed to save file: {e}"
             print(msg)
-            import tkinter.messagebox
-            tkinter.messagebox.showerror("Save Error", msg)
+            try:
+                import tkinter.messagebox
+                tkinter.messagebox.showerror("Save Error", msg)
+            except:
+                pass
 
 class CustomScriptNode(Node):
     def __init__(self):

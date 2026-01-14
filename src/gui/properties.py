@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, filedialog
+from src.core.datatypes import DataType
 
 class PropertyPanel(tk.Frame):
     def __init__(self, master):
@@ -13,6 +14,7 @@ class PropertyPanel(tk.Frame):
         self.content_frame.pack(fill=tk.BOTH, expand=True, padx=5)
 
         self.current_node = None
+        self.current_node_widget = None
 
     def show_properties(self, node_widget):
         # Clear previous
@@ -27,73 +29,76 @@ class PropertyPanel(tk.Frame):
         tk.Label(self.content_frame, text=f"Node: {node.title}", bg="#e0e0e0", font=("Arial", 10, "bold")).pack(pady=5)
 
         # Parameters
-        # This is a generic property editor.
-        # Ideally, nodes should define their schema.
-        # For MVP, we iterate over the 'parameters' dict.
-
         for key, value in node.parameters.items():
             if key.startswith("_"):
                 continue
 
-            frame = tk.Frame(self.content_frame, bg="#e0e0e0")
+            frame = tk.Frame(self.content_frame, bg="#e0e0e0", relief=tk.FLAT, borderwidth=1)
             frame.pack(fill=tk.X, pady=2)
 
-            tk.Label(frame, text=key, bg="#e0e0e0").pack(side=tk.LEFT)
+            # Check if exposed
+            is_exposed = key in node.param_inputs
 
-            # Determine if this needs a file picker
-            # Convention: keys ending with "_path" get a file picker
+            # Label (with Right-Click Menu)
+            lbl = tk.Label(frame, text=key + (" (Input)" if is_exposed else ""), bg="#e0e0e0", fg="blue" if is_exposed else "black")
+            lbl.pack(side=tk.LEFT)
+
+            # Context Menu for Expose/Hide
+            menu = tk.Menu(frame, tearoff=0)
+            if is_exposed:
+                menu.add_command(label="Hide Input Port", command=lambda k=key: self.toggle_expose(k, False))
+            else:
+                menu.add_command(label="Expose as Input", command=lambda k=key: self.toggle_expose(k, True))
+
+            def show_menu(event, m=menu):
+                m.post(event.x_root, event.y_root)
+
+            lbl.bind("<Button-3>", show_menu) # Right click
+
+            # If exposed, we disable the input widget or just indicate it's overridden
+            state = "disabled" if is_exposed else "normal"
+
+            # Determine widget type
             is_file_path = key.endswith("_path")
+            is_action = key.endswith("_action")
 
             var = tk.StringVar(value=str(value))
 
-            if is_file_path:
-                entry = tk.Entry(frame, textvariable=var)
-                entry.pack(side=tk.LEFT, expand=True, fill=tk.X)
-
-                def pick_file(v=var, k=key):
-                    # Check if saving or opening based on key name or node type?
-                    # Heuristic: "output_path" is usually save, "file_path" is open
-                    if "output" in k:
-                        # Save
-                        # Determine extension from context? Hard to know here.
-                        # Just generic save for now or context aware?
-                        # SaveNode uses "format" param but we don't have easy access to other params here linearly.
-                        path = filedialog.asksaveasfilename()
-                    else:
-                        # Open
-                        path = filedialog.askopenfilename()
-
-                    if path:
-                        v.set(path)
-                        update_param(k, v)
-
-                btn = tk.Button(frame, text="...", command=pick_file, width=3)
-                btn.pack(side=tk.RIGHT)
-            elif key.endswith("_action"):
-                # Action Button
-                
+            if is_action:
                 method_name = key.replace("_action", "")
-                
                 def trigger_action(n=node, m=method_name):
                     if hasattr(n, m):
                         getattr(n, m)()
-                        # Refresh UI to show updated params
                         if self.current_node_widget:
                              self.show_properties(self.current_node_widget)
                     else:
                         print(f"Node {n.title} has no method {m}")
-
-                btn = tk.Button(frame, text=value, command=trigger_action)
+                btn = tk.Button(frame, text=value, command=trigger_action, state=state)
                 btn.pack(fill=tk.X)
+
+            elif is_file_path:
+                entry = tk.Entry(frame, textvariable=var, state=state)
+                entry.pack(side=tk.LEFT, expand=True, fill=tk.X)
+
+                def pick_file(v=var, k=key):
+                    if "output" in k:
+                        path = filedialog.asksaveasfilename()
+                    else:
+                        path = filedialog.askopenfilename()
+                    if path:
+                        v.set(path)
+                        update_param(k, v)
+
+                btn = tk.Button(frame, text="...", command=pick_file, width=3, state=state)
+                btn.pack(side=tk.RIGHT)
+                
             else:
-                entry = tk.Entry(frame, textvariable=var)
+                entry = tk.Entry(frame, textvariable=var, state=state)
                 entry.pack(side=tk.RIGHT, expand=True, fill=tk.X)
 
             # Callback to update node parameter
             def update_param(name=key, v=var):
-                # Try to convert types if possible
                 val = v.get()
-                # Basic type inference
                 if val.lower() == 'true': val = True
                 elif val.lower() == 'false': val = False
                 elif val.isdigit(): val = int(val)
@@ -102,12 +107,44 @@ class PropertyPanel(tk.Frame):
                         val = float(val)
                     except ValueError:
                         pass
-
                 node.parameters[name] = val
                 print(f"Updated {name} to {val}")
 
-            entry.bind("<FocusOut>", lambda e, n=key, v=var: update_param(n, v))
-            entry.bind("<Return>", lambda e, n=key, v=var: update_param(n, v))
+            if not is_action and state == "normal":
+                entry.bind("<FocusOut>", lambda e, n=key, v=var: update_param(n, v))
+                entry.bind("<Return>", lambda e, n=key, v=var: update_param(n, v))
+
+    def toggle_expose(self, key, expose):
+        node = self.current_node
+        if expose:
+            node.expose_parameter(key)
+        else:
+            node.hide_parameter(key)
+
+        # Refresh UI
+        self.show_properties(self.current_node_widget)
+        # Refresh Node Widget on Canvas (to show new ports)
+        # We need a callback to the main window or direct access
+        # For MVP, we assume NodeWidget can redraw itself if we trigger it,
+        # but NodeWidget is managed by Canvas.
+        # Ideally, we should trigger a redraw event.
+        if hasattr(self.current_node_widget, "redraw_needed"):
+            self.current_node_widget.redraw_needed()
+        else:
+            # Fallback: Just print, user might need to re-select or move node?
+            # Actually, `NodeWidget` in `src/gui/node_widget.py` draws in `__init__`.
+            # It doesn't have a redraw method.
+            # We should add one or recreate the widget.
+            # Let's rely on the Canvas re-creating it or update it.
+            pass
+
+        # Hack: Access canvas from widget and trigger redraw
+        try:
+             # This is tricky without reference to the Graph controller.
+             # But we can try to find the parent.
+             pass
+        except:
+            pass
 
     def clear(self):
         for widget in self.content_frame.winfo_children():

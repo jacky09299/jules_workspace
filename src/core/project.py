@@ -6,6 +6,8 @@ from src.nodes.inputs import InputImageNode
 from src.nodes.outputs import DataViewerNode
 from src.nodes.algorithms import ImageToGridNode, AStarNode, PathOverlayNode
 from src.nodes.execution import SaveNode, CustomScriptNode
+from src.nodes.loops import LoopStartNode, LoopEndNode
+from src.nodes.utils import StringFormatNode, MergeFilesNode
 
 class ProjectManager:
     def __init__(self, node_canvas):
@@ -25,17 +27,6 @@ class ProjectManager:
             data["nodes"].append(node_data)
 
         # Save Connections
-        # Structure: {from_node_id, from_port_name, to_node_id, to_port_name}
-        # My Connection implementation in Canvas uses direct object references.
-        # I need to serialize this.
-
-        # Iterate over all nodes, check their inputs, see what they are connected to.
-        # (Since connections are directed Out -> In usually, but my model is bidirectional logic
-        # but the canvas stores connections)
-
-        # Let's rely on Canvas connection list which I built:
-        # self.connections = [{"line_id", "p1", "p2"}]
-
         for conn in self.canvas.connections:
             p1 = conn["p1"] # Usually output (Source)
             p2 = conn["p2"] # Usually input (Target)
@@ -72,10 +63,6 @@ class ProjectManager:
         self.canvas.nodes = []
         self.canvas.connections = []
 
-        # Map old IDs to new Objects?
-        # Or if we save/load UUIDs, we can reuse them, but new instances create new UUIDs.
-        # We must respect the saved UUIDs to restore connections.
-
         id_to_node_map = {}
         id_to_input_ports = {} 
         id_to_output_ports = {} 
@@ -95,6 +82,32 @@ class ProjectManager:
             node.title = n_data["title"]
             node.parameters = n_data.get("parameters", {})
 
+            # Restore Exposed Parameters
+            # The 'param_inputs' field maps param_name -> input_index
+            # We must recreate these ports before mapping ports!
+            param_inputs = n_data.get("param_inputs", {})
+            # We must recreate them in the correct order or verify they match?
+            # 'param_inputs' doesn't guarantee order if dict, but indices matter.
+            # Node.expose_parameter appends.
+            # So if we iterate param_inputs sorted by index, we can recreate.
+
+            # Sort by index
+            sorted_params = sorted(param_inputs.items(), key=lambda item: item[1])
+            for param_name, idx in sorted_params:
+                # We simply call expose_parameter.
+                # Note: node.expose_parameter() appends and stores the index.
+                # If we assume indices are contiguous at the end of input list.
+                # However, deserialized data might have gaps if inputs were removed?
+                # But our current system only appends.
+
+                # Check if already exposed (some nodes might do it in init?)
+                if param_name not in node.param_inputs:
+                     # expose it
+                     node.expose_parameter(param_name)
+                     # Verify index?
+                     if node.param_inputs[param_name] != idx:
+                         print(f"Warning: Restored param '{param_name}' index mismatch. Expected {idx}, got {node.param_inputs[param_name]}")
+
             x = n_data.get("ui_x", 0)
             y = n_data.get("ui_y", 0)
 
@@ -111,7 +124,6 @@ class ProjectManager:
             for p in node.outputs:
                 id_to_output_ports[(node.id, p.name)] = p
 
-        # 2. Restore Connections
         # 2. Restore Connections
         for c_data in data["connections"]:
             sid = c_data["source_node_id"]
@@ -143,6 +155,7 @@ class ProjectManager:
                  print(f"Skipping invalid connection: {sid}.{spn} ({s_debug}) -> {tid}.{tpn} ({t_debug})")
 
     def create_node_instance(self, class_name):
+        # Registry
         if class_name == "InputImageNode": return InputImageNode()
         if class_name == "DataViewerNode": return DataViewerNode()
         if class_name == "ImageToGridNode": return ImageToGridNode()
@@ -150,4 +163,8 @@ class ProjectManager:
         if class_name == "PathOverlayNode": return PathOverlayNode()
         if class_name == "SaveNode": return SaveNode()
         if class_name == "CustomScriptNode": return CustomScriptNode()
+        if class_name == "LoopStartNode": return LoopStartNode()
+        if class_name == "LoopEndNode": return LoopEndNode()
+        if class_name == "StringFormatNode": return StringFormatNode()
+        if class_name == "MergeFilesNode": return MergeFilesNode()
         return None
