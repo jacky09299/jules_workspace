@@ -20,15 +20,23 @@ class SaveNode(Node):
 
         if data is None:
             print("SaveNode: No data to save.")
+            import tkinter.messagebox
+            tkinter.messagebox.showwarning("Save Warning", "No data to save. Check upstream connections.")
             return
 
         try:
+            abs_path = os.path.abspath(path)
+            print(f"DEBUG SaveNode: Attempting to save data type {type(data)} to {abs_path} with format {fmt}")
+            
             if fmt == "PNG" or fmt == "JPG":
                 if isinstance(data, Image.Image):
                     data.save(path)
                     print(f"Saved image to {path}")
                 else:
-                    print(f"Error: Data is not an image, cannot save as {fmt}")
+                    msg = f"Error: Data is not an image, cannot save as {fmt}"
+                    print(msg)
+                    import tkinter.messagebox
+                    tkinter.messagebox.showerror("Save Error", msg)
 
             elif fmt == "JSON":
                 with open(path, 'w', encoding='utf-8') as f:
@@ -41,7 +49,10 @@ class SaveNode(Node):
                 print(f"Saved Text to {path}")
 
         except Exception as e:
-            print(f"Failed to save file: {e}")
+            msg = f"Failed to save file: {e}"
+            print(msg)
+            import tkinter.messagebox
+            tkinter.messagebox.showerror("Save Error", msg)
 
 class CustomScriptNode(Node):
     def __init__(self):

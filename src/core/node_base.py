@@ -51,20 +51,36 @@ class Node:
     def get_input_value(self, index: int):
         """Helper to get data from connected output of the previous node"""
         if index < 0 or index >= len(self.inputs):
+            print(f"DEBUG [{self.title}] get_input: Index {index} out of range")
             return None
         port = self.inputs[index]
         if not port.connected_ports:
+            print(f"DEBUG [{self.title}] get_input: Port {port.name} (idx {index}) not connected")
             return None
-        # Assuming single connection for inputs for now,
-        # but the structure allows multiple (though logic might need to merge them?)
-        # Standard node editors usually allow 1 wire per Input, multiple per Output.
-        # Let's enforce 1 wire per Input in the GUI logic, but here just take the first.
+        
         other_port = port.connected_ports[0]
-        return other_port.value
+        val = other_port.value
+        # Summarize value for logging
+        try:
+            val_str = str(val)
+        except:
+            val_str = "<Unprintable>"
+            
+        val_str = val_str[:50] + "..." if len(val_str) > 50 else val_str
+        print(f"DEBUG [{self.title}] Input {index} ({port.name}) <- {val_str} (from {other_port.node.title})")
+        return val
 
     def set_output_value(self, index: int, value: Any):
         if index >= 0 and index < len(self.outputs):
             self.outputs[index].value = value
+            # Safe string conversion for arrays
+            try:
+                val_str = str(value)
+            except:
+                val_str = "<Unprintable>"
+            
+            val_str = val_str[:50] + "..." if len(val_str) > 50 else val_str
+            print(f"DEBUG [{self.title}] Output {index} ({self.outputs[index].name}) set to {val_str}")
 
     def execute(self):
         """

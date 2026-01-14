@@ -1,85 +1,145 @@
+import heapq
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter, ImageTk
 from src.core.node_base import Node
 from src.core.datatypes import DataType
-import heapq
+from src.gui.dialogs import PointSelectorDialog
+import tkinter as tk
 
 class ImageToGridNode(Node):
     def __init__(self):
         super().__init__("圖片轉方格 (Img->Grid)")
         self.add_input("Image", DataType.IMAGE)
         self.add_output("Grid", DataType.GRID) # 0=Walkable, 1=Obstacle
+        self.add_output("Start", DataType.ANY) # Start Point
+        self.add_output("End", DataType.ANY)   # End Point
         self.parameters = {
-            "threshold": 128, # Pixel value < threshold = Black (Obstacle)
-            "resize_width": 50, # Downsample to 50x50 grid for A* performance
-            "resize_height": 50
+            "threshold": 200, # Higher threshold = Safer (Dark gray is obstacle)
+            "filter_radius": 3, # New: MinFilter radius to expand obstacles/remove noise
+            "select_points_action": "點選起點/終點 (Select Points)",
+            "start_x": 0, "start_y": 0,
+            "end_x": 0, "end_y": 0
         }
+
+    def select_points(self):
+        # Always attempt to pull latest from upstream
+        # This fixes "Stale Image" when user changes input file but hasn't clicked Run
+        if len(self.inputs) > 0 and self.inputs[0].connected_ports:
+            upstream_node = self.inputs[0].connected_ports[0].node
+            print(f"DEBUG ImageToGrid: Auto-refreshing upstream node {upstream_node.title}")
+            try:
+                upstream_node.execute()
+            except Exception as e:
+                print(f"Error executing upstream node: {e}")
+                # Don't popup error yet, maybe just log? 
+                # Or continue and see if we have cached data?
+        
+        img = self.get_input_value(0)
+        
+        if img is None:
+            print("No image available. Please run graph or connect input.")
+            import tkinter.messagebox
+            tkinter.messagebox.showwarning("No Image", "No image input found.\nPlease connect an Image Input node and load an image.")
+            return
+
+        root = tk._default_root
+        dlg = PointSelectorDialog(root, img)
+        root.wait_window(dlg)
+        
+        if dlg.result:
+            start, end = dlg.result
+            print(f"Dialog Returned: Start={start}, End={end}")
+            
+            # No resizing, so direct mapping
+            gsx, gsy = int(start[0]), int(start[1])
+            gex, gey = int(end[0]), int(end[1])
+            
+            self.parameters["start_x"] = gsx
+            self.parameters["start_y"] = gsy
+            self.parameters["end_x"] = gex
+            self.parameters["end_y"] = gey
+            
+            print(f"Selected Points (Full Res): Start=({gsx},{gsy}), End=({gex},{gey})")
+            print("Parameters updated. Please Click RUN to propagate.")
 
     def execute(self):
         img = self.get_input_value(0)
         if img is None:
             print("ImageToGrid: No input image.")
             self.set_output_value(0, None)
+            self.set_output_value(1, None)
+            self.set_output_value(2, None)
             return
 
-        # 1. Resize
-        w = int(self.parameters["resize_width"])
-        h = int(self.parameters["resize_height"])
-        img_resized = img.resize((w, h))
-
+        # 1. No Resize - Use Full Resolution
         # 2. Grayscale
-        gray = img_resized.convert("L")
+        gray = img.convert("L")
 
-        # 3. Threshold
+        # 3. MinFilter (Erosion) to expand obstacles / count neighbors
+        rad = int(self.parameters.get("filter_radius", 3))
+        if rad > 0:
+            print(f"DEBUG ImageToGrid: Applying MinFilter with radius {rad}")
+            gray = gray.filter(ImageFilter.MinFilter(rad))
+
+        # 4. Threshold
         thresh = int(self.parameters["threshold"])
-        # If pixel < thresh (dark), it is obstacle (1)
-        # If pixel >= thresh (light), it is walkable (0)
         arr = np.array(gray)
         grid = np.zeros_like(arr, dtype=int)
 
         # Mark obstacles
         grid[arr < thresh] = 1
+        
+        w, h = img.size
 
         self.set_output_value(0, grid)
+        
+        # Output Start/End
+        start_pt = (int(self.parameters.get("start_x", 0)), int(self.parameters.get("start_y", 0)))
+        end_pt = (int(self.parameters.get("end_x", 0)), int(self.parameters.get("end_y", 0)))
+        
+        self.set_output_value(1, start_pt)
+        self.set_output_value(2, end_pt)
+        
         print(f"Generated Grid {w}x{h}, Obstacles: {np.sum(grid)}")
+        print(f"Output Start: {start_pt}, End: {end_pt}")
+
 
 class AStarNode(Node):
     def __init__(self):
         super().__init__("A* 路徑搜尋 (A-Star)")
         self.add_input("Grid", DataType.GRID)
-        # Start/End as parameters for now, easier than separate nodes
-        # Although user asked for "Input Interface", parameters are inputs too.
-        # But to support dynamic start/end, we should have ports or fallback to params.
-        # Let's add ports but use params if ports are not connected?
-        # For simplicity in GUI, let's stick to params for now as primary,
-        # or ports that take generic data.
-        self.add_input("Start", DataType.ANY) # Optional tuple
-        self.add_input("End", DataType.ANY)   # Optional tuple
+        self.add_input("Start", DataType.ANY) # Expected tuple (x, y)
+        self.add_input("End", DataType.ANY)   # Expected tuple (x, y)
 
         self.add_output("Path", DataType.PATH)
 
         self.parameters = {
-            "start_x": 0, "start_y": 0,
-            "end_x": 49, "end_y": 49,
             "allow_diagonal": False
         }
 
     def execute(self):
         grid = self.get_input_value(0)
+        start_pt = self.get_input_value(1)
+        end_pt = self.get_input_value(2)
+
         if grid is None:
             print("AStar: No grid input.")
             self.set_output_value(0, None)
             return
+        
+        if start_pt is None or end_pt is None:
+            print("AStar: Missing Start or End input.")
+            self.set_output_value(0, None)
+            return
 
         rows, cols = grid.shape
-
-        # Parse Start/End
-        # Prioritize Input Ports if they have data (Not implemented in UI yet)
-        # So use params
-        sx = int(self.parameters["start_x"])
-        sy = int(self.parameters["start_y"])
-        ex = int(self.parameters["end_x"])
-        ey = int(self.parameters["end_y"])
+        
+        # Inputs are (x, y), grid access is (row, col) = (y, x)
+        sx, sy = start_pt
+        ex, ey = end_pt
+        
+        sx, sy = int(sx), int(sy)
+        ex, ey = int(ex), int(ey)
 
         # Validate bounds
         if not (0 <= sx < cols and 0 <= sy < rows):
@@ -93,11 +153,11 @@ class AStarNode(Node):
         end = (ey, ex)
 
         if grid[start] == 1:
-            print("Start is on obstacle!")
+            print(f"Start {start_pt} is on obstacle!")
             self.set_output_value(0, [])
             return
         if grid[end] == 1:
-            print("End is on obstacle!")
+            print(f"End {end_pt} is on obstacle!")
             self.set_output_value(0, [])
             return
 
@@ -190,6 +250,7 @@ class PathOverlayNode(Node):
         # Create copy to draw on
         out_img = img.copy().convert("RGB") # Ensure RGB for colored lines
         draw = ImageDraw.Draw(out_img)
+        print(f"DEBUG Overlay: Drawing path of length {len(path)} on image size {img.size}")
 
         # If the path was generated on a 50x50 grid but image is 500x500, we need to scale the path coordinates
         # Or simpler: The user manually sets scale in parameters.

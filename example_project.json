@@ -1,125 +1,150 @@
 {
   "nodes": [
     {
-      "id": "node1",
+      "id": "5c4d3644-0127-4de4-87a4-b3d182afbbb7",
       "type": "InputImageNode",
-      "title": "輸入圖片 (Input Image)",
-      "x": 50,
-      "y": 50,
+      "title": "\u8f38\u5165\u5716\u7247 (Input Image)",
+      "x": 0,
+      "y": 0,
       "parameters": {
-        "file_path": "example_map.png"
+        "file_path": "C:/Users/User/Desktop/jules_workspace/example_map.png"
       },
       "inputs": [],
-      "outputs": ["out1"]
+      "outputs": [
+        "6f26814e-093b-4ea2-8d22-673deb2afc25"
+      ],
+      "ui_x": 50,
+      "ui_y": 50
     },
     {
-      "id": "node2",
+      "id": "735f0553-3387-4990-890f-1d7ccb36e100",
       "type": "ImageToGridNode",
-      "title": "圖片轉方格 (Img->Grid)",
-      "x": 300,
-      "y": 50,
+      "title": "\u5716\u7247\u8f49\u65b9\u683c (Img->Grid)",
+      "x": 0,
+      "y": 0,
       "parameters": {
-        "threshold": 128,
-        "resize_width": 50,
-        "resize_height": 50
+        "threshold": 200,
+        "resize_width": 500,
+        "resize_height": 100,
+        "select_points_action": "\u9ede\u9078\u8d77\u9ede/\u7d42\u9ede (Select Points)",
+        "start_x": 6,
+        "start_y": 19,
+        "end_x": 90,
+        "end_y": 48
       },
-      "inputs": ["in_img"],
-      "outputs": ["out_grid"]
+      "inputs": [
+        "f876616d-0b8a-4e27-b660-a3dfa2ac717e"
+      ],
+      "outputs": [
+        "0da8c64a-d84e-42e9-8b98-92274d0a0dc8",
+        "57eb9f83-aa03-4a3b-8179-217ee02e1368",
+        "f29e867d-696d-4d98-92ba-1ea4c1424d07"
+      ],
+      "ui_x": 289,
+      "ui_y": 49
     },
     {
-      "id": "node3",
+      "id": "f0a70183-64a3-414f-b1f0-52792361e318",
       "type": "AStarNode",
-      "title": "A* 路徑搜尋 (A-Star)",
-      "x": 550,
-      "y": 50,
+      "title": "A* \u8def\u5f91\u641c\u5c0b (A-Star)",
+      "x": 0,
+      "y": 0,
       "parameters": {
-        "start_x": 0,
-        "start_y": 0,
-        "end_x": 49,
-        "end_y": 49,
         "allow_diagonal": false
       },
-      "inputs": ["in_grid", "in_start", "in_end"],
-      "outputs": ["out_path"]
+      "inputs": [
+        "b1bb462e-b438-4cda-8f84-31bd481b55e1",
+        "57501176-b241-41c8-9f88-42964e68448b",
+        "4107a765-3f01-4c91-9067-662f52a29092"
+      ],
+      "outputs": [
+        "cb2e56b2-a615-47ee-acbd-3892a9acc891"
+      ],
+      "ui_x": 503,
+      "ui_y": 66
     },
     {
-      "id": "node4",
+      "id": "b4462c5b-9b17-43a4-8f9b-43255a77e8a6",
       "type": "PathOverlayNode",
-      "title": "路徑疊圖 (Overlay)",
-      "x": 550,
-      "y": 300,
+      "title": "\u8def\u5f91\u758a\u5716 (Overlay)",
+      "x": 0,
+      "y": 0,
       "parameters": {
         "color": "red",
         "width": 2,
         "scale_x": 1.0,
         "scale_y": 1.0
       },
-      "inputs": ["in_img", "in_path"],
-      "outputs": ["out_img"]
+      "inputs": [
+        "28ee52e5-5ca5-4097-9eba-156f8e7422a2",
+        "817402d2-1f6a-4148-83c7-ce34974c3d0a"
+      ],
+      "outputs": [
+        "78b2c64e-5694-42d5-836d-99185d874fef"
+      ],
+      "ui_x": 255,
+      "ui_y": 335
     },
     {
-      "id": "node5",
+      "id": "48cdc8db-6393-419a-baaf-23b21d6a6c1c",
       "type": "SaveNode",
-      "title": "儲存路徑 (Save Path)",
-      "x": 800,
-      "y": 50,
+      "title": "\u5132\u5b58\u6a94\u6848 (Save File)",
+      "x": 0,
+      "y": 0,
       "parameters": {
-        "output_path": "path_result.txt",
-        "format": "TXT"
-      },
-      "inputs": ["in_data"],
-      "outputs": []
-    },
-    {
-      "id": "node6",
-      "type": "SaveNode",
-      "title": "儲存結果圖 (Save Img)",
-      "x": 800,
-      "y": 300,
-      "parameters": {
-        "output_path": "result_map.png",
+        "output_path": "C:/Users/User/Desktop/jules_workspace/test.png",
         "format": "PNG"
       },
-      "inputs": ["in_data"],
-      "outputs": []
+      "inputs": [
+        "f5e2a8dd-d431-4d36-85cb-1a5f0784b841"
+      ],
+      "outputs": [],
+      "ui_x": 513,
+      "ui_y": 303
     }
   ],
   "connections": [
     {
-      "source_node_id": "node1",
+      "source_node_id": "5c4d3644-0127-4de4-87a4-b3d182afbbb7",
       "source_port_name": "Image",
-      "target_node_id": "node2",
+      "target_node_id": "735f0553-3387-4990-890f-1d7ccb36e100",
       "target_port_name": "Image"
     },
     {
-      "source_node_id": "node1",
-      "source_port_name": "Image",
-      "target_node_id": "node4",
-      "target_port_name": "Image"
-    },
-    {
-      "source_node_id": "node2",
+      "source_node_id": "735f0553-3387-4990-890f-1d7ccb36e100",
       "source_port_name": "Grid",
-      "target_node_id": "node3",
+      "target_node_id": "f0a70183-64a3-414f-b1f0-52792361e318",
       "target_port_name": "Grid"
     },
     {
-      "source_node_id": "node3",
+      "source_node_id": "735f0553-3387-4990-890f-1d7ccb36e100",
+      "source_port_name": "Start",
+      "target_node_id": "f0a70183-64a3-414f-b1f0-52792361e318",
+      "target_port_name": "Start"
+    },
+    {
+      "source_node_id": "735f0553-3387-4990-890f-1d7ccb36e100",
+      "source_port_name": "End",
+      "target_node_id": "f0a70183-64a3-414f-b1f0-52792361e318",
+      "target_port_name": "End"
+    },
+    {
+      "source_node_id": "f0a70183-64a3-414f-b1f0-52792361e318",
       "source_port_name": "Path",
-      "target_node_id": "node4",
+      "target_node_id": "b4462c5b-9b17-43a4-8f9b-43255a77e8a6",
       "target_port_name": "Path"
     },
     {
-      "source_node_id": "node3",
-      "source_port_name": "Path",
-      "target_node_id": "node5",
+      "source_node_id": "b4462c5b-9b17-43a4-8f9b-43255a77e8a6",
+      "source_port_name": "Image",
+      "target_node_id": "48cdc8db-6393-419a-baaf-23b21d6a6c1c",
       "target_port_name": "Data"
     },
     {
-      "source_node_id": "node4",
+      "source_node_id": "5c4d3644-0127-4de4-87a4-b3d182afbbb7",
       "source_port_name": "Image",
-      "target_node_id": "node6",
-      "target_port_name": "Data"
+      "target_node_id": "b4462c5b-9b17-43a4-8f9b-43255a77e8a6",
+      "target_port_name": "Image"
     }
   ]
 }

@@ -12,6 +12,7 @@ class InputImageNode(Node):
             "file_path": "path/to/image.png"
         }
         self.cached_image = None
+        self.loaded_path = None
 
     def execute(self):
         path = self.parameters.get("file_path")
@@ -20,11 +21,22 @@ class InputImageNode(Node):
             self.set_output_value(0, None)
             return
 
-        try:
-            img = Image.open(path)
-            self.cached_image = img
-            self.set_output_value(0, img)
-            print(f"Loaded image: {path} ({img.size})")
-        except Exception as e:
-            print(f"Failed to load image: {e}")
-            self.set_output_value(0, None)
+        # Reload if path changed or no cache
+        if path != self.loaded_path or self.cached_image is None:
+            try:
+                img = Image.open(path)
+                # Keep reference to avoid GC if needed, though node system might not need it?
+                # Actually, Image.open is lazy. We should probably load it.
+                img.load() 
+                self.cached_image = img
+                self.loaded_path = path
+                self.set_output_value(0, img)
+                print(f"Loaded image: {path} ({img.size})")
+            except Exception as e:
+                print(f"Failed to load image: {e}")
+                self.set_output_value(0, None)
+        else:
+            # Return cached
+            self.set_output_value(0, self.cached_image)
+            print(f"DEBUG InputImage: Using cached image ({self.cached_image.size})")
+

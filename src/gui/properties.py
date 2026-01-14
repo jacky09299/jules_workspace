@@ -19,9 +19,10 @@ class PropertyPanel(tk.Frame):
         for widget in self.content_frame.winfo_children():
             widget.destroy()
 
+        self.current_node_widget = node_widget
         self.current_node = node_widget.node
         node = self.current_node
-
+        
         # Title
         tk.Label(self.content_frame, text=f"Node: {node.title}", bg="#e0e0e0", font=("Arial", 10, "bold")).pack(pady=5)
 
@@ -31,6 +32,9 @@ class PropertyPanel(tk.Frame):
         # For MVP, we iterate over the 'parameters' dict.
 
         for key, value in node.parameters.items():
+            if key.startswith("_"):
+                continue
+
             frame = tk.Frame(self.content_frame, bg="#e0e0e0")
             frame.pack(fill=tk.X, pady=2)
 
@@ -65,6 +69,22 @@ class PropertyPanel(tk.Frame):
 
                 btn = tk.Button(frame, text="...", command=pick_file, width=3)
                 btn.pack(side=tk.RIGHT)
+            elif key.endswith("_action"):
+                # Action Button
+                
+                method_name = key.replace("_action", "")
+                
+                def trigger_action(n=node, m=method_name):
+                    if hasattr(n, m):
+                        getattr(n, m)()
+                        # Refresh UI to show updated params
+                        if self.current_node_widget:
+                             self.show_properties(self.current_node_widget)
+                    else:
+                        print(f"Node {n.title} has no method {m}")
+
+                btn = tk.Button(frame, text=value, command=trigger_action)
+                btn.pack(fill=tk.X)
             else:
                 entry = tk.Entry(frame, textvariable=var)
                 entry.pack(side=tk.RIGHT, expand=True, fill=tk.X)

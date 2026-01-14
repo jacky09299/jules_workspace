@@ -18,14 +18,22 @@ class ExecutionEngine:
         # So we just need to execute in topological order.
 
         sorted_nodes = self.topological_sort()
-        print(f"Execution Order: {[n.title for n in sorted_nodes]}")
+        print(f"DEBUG Engine: Execution Order: {[n.title for n in sorted_nodes]}")
+
+        if not sorted_nodes:
+             print("DEBUG Engine: No nodes to execute!")
 
         for node in sorted_nodes:
-            print(f"Executing {node.title}...")
+            print(f"DEBUG Engine: Executing {node.title}...")
             try:
                 node.execute()
+                print(f"DEBUG Engine: Finished {node.title}")
             except Exception as e:
-                print(f"Error executing {node.title}: {e}")
+                print(f"DEBUG Engine: Error executing {node.title}: {e}")
+                import traceback
+                traceback.print_exc()
+                import tkinter.messagebox
+                tkinter.messagebox.showerror("Execution Error", f"Error in {node.title}:\n{e}")
 
     def topological_sort(self):
         # Build dependency graph
@@ -62,7 +70,8 @@ class ExecutionEngine:
             # i.e., v has u in deps[v]
             for v in self.nodes:
                 if u in deps[v]:
-                    in_degree[v] -= 1
+                    count = deps[v].count(u)
+                    in_degree[v] -= count
                     if in_degree[v] == 0:
                         queue.append(v)
 

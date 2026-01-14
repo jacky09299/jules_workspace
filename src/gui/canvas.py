@@ -225,7 +225,7 @@ class NodeCanvas(tk.Canvas):
 
         # 4. Logical Connection
         p1.connect(p2)
-        print(f"Connected {p1.name} to {p2.name}")
+        print(f"DEBUG Canvas: Connected {p1.node.title}.{p1.name} -> {p2.node.title}.{p2.name}")
 
     def redraw_connections(self, node_widget):
         # Update lines for a moved node

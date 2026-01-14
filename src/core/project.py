@@ -77,7 +77,8 @@ class ProjectManager:
         # We must respect the saved UUIDs to restore connections.
 
         id_to_node_map = {}
-        id_to_port_map = {} # Map (node_id, port_name) -> port object
+        id_to_input_ports = {} 
+        id_to_output_ports = {} 
 
         # 1. Restore Nodes
         for n_data in data["nodes"]:
@@ -106,10 +107,11 @@ class ProjectManager:
 
             # Map ports
             for p in node.inputs:
-                id_to_port_map[(node.id, p.name)] = p
+                id_to_input_ports[(node.id, p.name)] = p
             for p in node.outputs:
-                id_to_port_map[(node.id, p.name)] = p
+                id_to_output_ports[(node.id, p.name)] = p
 
+        # 2. Restore Connections
         # 2. Restore Connections
         for c_data in data["connections"]:
             sid = c_data["source_node_id"]
@@ -117,24 +119,28 @@ class ProjectManager:
             tid = c_data["target_node_id"]
             tpn = c_data["target_port_name"]
 
-            source_port = id_to_port_map.get((sid, spn))
-            target_port = id_to_port_map.get((tid, tpn))
+            # Source is always output, Target is always input (enforced by save_project)
+            source_port = id_to_output_ports.get((sid, spn))
+            target_port = id_to_input_ports.get((tid, tpn))
 
             if source_port and target_port:
-                # Logical connect
-                source_port.connect(target_port)
-
-                # Visual connect
-                # Need absolute positions.
-                # NodeWidget updates port.x/y during draw()
-                # Since we just created widgets, they called draw(), so x/y are set.
-
-                line_id = self.canvas.create_line(source_port.x, source_port.y, target_port.x, target_port.y, fill="white", width=2)
-                self.canvas.connections.append({
-                    "line_id": line_id,
-                    "p1": source_port,
-                    "p2": target_port
-                })
+                try:
+                    source_port.connect(target_port)
+                    # Visual connect using correct coords
+                    line_id = self.canvas.create_line(source_port.x, source_port.y, target_port.x, target_port.y, fill="white", width=2)
+                    self.canvas.connections.append({
+                        "line_id": line_id,
+                        "p1": source_port,
+                        "p2": target_port
+                    })
+                    print(f"Restored connection: {source_port.node.title}.{source_port.name} -> {target_port.node.title}.{target_port.name}")
+                except Exception as e:
+                    print(f"Error connecting loaded ports: {e}")
+            else:
+                 # Debug failure
+                 s_debug = "Found" if source_port else "Missing"
+                 t_debug = "Found" if target_port else "Missing"
+                 print(f"Skipping invalid connection: {sid}.{spn} ({s_debug}) -> {tid}.{tpn} ({t_debug})")
 
     def create_node_instance(self, class_name):
         if class_name == "InputImageNode": return InputImageNode()
