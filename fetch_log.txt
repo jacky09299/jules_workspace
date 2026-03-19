@@ -1,9 +1,0 @@
-Starting at count: 24712, need 5288 more books.
-Fetching subject: philosophy...
-Progress: Added 1000 books so far... total is 25712
-Progress: Added 2000 books so far... total is 26712
-Progress: Added 3000 books so far... total is 27712
-Progress: Added 4000 books so far... total is 28712
-Progress: Added 5000 books so far... total is 29712
-Target of 30000 reached!
-Done fetching books.
